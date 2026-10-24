@@ -5,6 +5,8 @@ import { cifrar, cifrarTexto } from './cofre.js';
 import { conferirSenha, configurarPrimeiroAcesso, empresaPermitida, exigirLogin, exigirPapel, gerarToken, hashSenha, sistemaConfigurado, type Usuario } from './auth.js';
 import { config } from './config.js';
 import { ConfigSmtp, ListaEmails, configPublica, enviarNotaPorEmail, historicoEmails, salvarConfig, testarConfig } from './servicos/email.js';
+import { ativarLicenca, exigirLicenca, statusLicenca } from './licenca.js';
+import { EntradaFaturamento, faturar, listarCobrancas } from './servicos/faturamento.js';
 import { criarBackup, listarBackups } from './servicos/backup.js';
 import { consultarCnpj } from './servicos/consulta-cnpj.js';
 import { strToU8, zipSync } from 'fflate';
@@ -58,7 +60,14 @@ const Tomador = z.object({
   numero: z.string().nullish(),
   complemento: z.string().nullish(),
   bairro: z.string().nullish(),
-}).refine((t) => t.tipo_doc === 'SEM' || (t.documento && documentoValido(t.documento)), { message: 'CPF/CNPJ do tomador inválido', path: ['documento'] });
+  // faturamento do cliente
+  modo_faturamento: z.enum(['NOTA', 'NOTA_BOLETO', 'BOLETO']).default('NOTA'),
+  vencimento_tipo: z.enum(['PRAZO', 'DIA_FIXO']).default('PRAZO'),
+  vencimento_valor: z.number().int().min(0).max(60).default(10),
+  email_cobranca: z.string().nullish().refine((v) => !v || v.split(/[,;\s]+/).filter(Boolean).every((e) => /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(e)), 'E-mail de cobrança inválido'),
+  enviar_email_auto: z.union([z.boolean(), z.literal(0), z.literal(1)]).default(false).transform((v) => (v ? 1 : 0)),
+}).refine((t) => t.modo_faturamento === 'NOTA' || t.vencimento_tipo === 'PRAZO' || (t.vencimento_valor >= 1 && t.vencimento_valor <= 31), { message: 'Dia do vencimento deve ser de 1 a 31', path: ['vencimento_valor'] })
+.refine((t) => t.tipo_doc === 'SEM' || (t.documento && documentoValido(t.documento)), { message: 'CPF/CNPJ do tomador inválido', path: ['documento'] });
 
 const Servico = z.object({
   nome: z.string().min(1),
@@ -225,9 +234,11 @@ export async function rotas(app: FastifyInstance) {
       const id = Number((req.params as any).id);
       checarEmpresa(req, id);
       const d = Tomador.parse(req.body);
-      const r = db.prepare(`INSERT INTO tomadores (empresa_id, tipo_doc, documento, nome, inscricao_municipal, email, fone, cep, cod_municipio, logradouro, numero, complemento, bairro)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(id, d.tipo_doc, d.documento, d.nome, d.inscricao_municipal ?? null, d.email || null, d.fone, d.cep,
-        d.cod_municipio ?? null, d.logradouro ?? null, d.numero ?? null, d.complemento ?? null, d.bairro ?? null);
+      const r = db.prepare(`INSERT INTO tomadores (empresa_id, tipo_doc, documento, nome, inscricao_municipal, email, fone, cep, cod_municipio, logradouro, numero, complemento, bairro,
+        modo_faturamento, vencimento_tipo, vencimento_valor, email_cobranca, enviar_email_auto)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(id, d.tipo_doc, d.documento, d.nome, d.inscricao_municipal ?? null, d.email || null, d.fone, d.cep,
+        d.cod_municipio ?? null, d.logradouro ?? null, d.numero ?? null, d.complemento ?? null, d.bairro ?? null,
+        d.modo_faturamento, d.vencimento_tipo, d.vencimento_valor, d.email_cobranca || null, d.enviar_email_auto);
       return { id: Number(r.lastInsertRowid) };
     });
     api.put('/api/tomadores/:id', async (req) => {
@@ -236,9 +247,11 @@ export async function rotas(app: FastifyInstance) {
       if (!t) throw new ErroNegocio('Tomador não encontrado.', 404);
       checarEmpresa(req, t.empresa_id);
       const d = Tomador.parse(req.body);
-      db.prepare(`UPDATE tomadores SET tipo_doc=?, documento=?, nome=?, inscricao_municipal=?, email=?, fone=?, cep=?, cod_municipio=?, logradouro=?, numero=?, complemento=?, bairro=? WHERE id=?`)
+      db.prepare(`UPDATE tomadores SET tipo_doc=?, documento=?, nome=?, inscricao_municipal=?, email=?, fone=?, cep=?, cod_municipio=?, logradouro=?, numero=?, complemento=?, bairro=?,
+        modo_faturamento=?, vencimento_tipo=?, vencimento_valor=?, email_cobranca=?, enviar_email_auto=? WHERE id=?`)
         .run(d.tipo_doc, d.documento, d.nome, d.inscricao_municipal ?? null, d.email || null, d.fone, d.cep, d.cod_municipio ?? null,
-          d.logradouro ?? null, d.numero ?? null, d.complemento ?? null, d.bairro ?? null, id);
+          d.logradouro ?? null, d.numero ?? null, d.complemento ?? null, d.bairro ?? null,
+          d.modo_faturamento, d.vencimento_tipo, d.vencimento_valor, d.email_cobranca || null, d.enviar_email_auto, id);
       return { ok: true };
     });
 
@@ -351,12 +364,33 @@ export async function rotas(app: FastifyInstance) {
     api.post('/api/notas', async (req) => {
       const entrada = EntradaEmissao.parse(req.body);
       checarEmpresa(req, entrada.empresaId);
+      exigirLicenca();
       return emitir(u(req), entrada);
+    });
+
+    // "Um comando": nota + boleto + e-mail conforme o cadastro do cliente
+    api.post('/api/faturar', async (req) => {
+      const entrada = EntradaFaturamento.parse(req.body);
+      checarEmpresa(req, entrada.empresaId);
+      return faturar(u(req), entrada);
+    });
+
+    api.get('/api/empresas/:id/cobrancas', async (req) => {
+      const id = Number((req.params as any).id);
+      checarEmpresa(req, id);
+      return listarCobrancas(id);
+    });
+
+    api.get('/api/licenca', async () => statusLicenca());
+    api.post('/api/licenca', { preHandler: exigirPapel('admin') }, async (req) => {
+      const d = z.object({ codigo: z.string().min(10) }).parse(req.body);
+      return ativarLicenca(d.codigo);
     });
 
     api.post('/api/notas/:id/reenviar', async (req) => {
       const id = Number((req.params as any).id);
       notaDoUsuario(req, id);
+      exigirLicenca();
       const corpo = req.body && Object.keys(req.body as object).length ? EntradaEmissao.parse(req.body) : undefined;
       if (corpo) checarEmpresa(req, corpo.empresaId);
       return enviar(id, corpo);
@@ -371,6 +405,7 @@ export async function rotas(app: FastifyInstance) {
     api.post('/api/notas/:id/cancelar', { preHandler: exigirPapel('admin', 'operador') }, async (req) => {
       const id = Number((req.params as any).id);
       notaDoUsuario(req, id);
+      exigirLicenca();
       const d = z.object({ cMotivo: z.union([z.literal(1), z.literal(2), z.literal(9)]), xMotivo: z.string() }).parse(req.body);
       return cancelar(u(req), id, d.cMotivo, d.xMotivo);
     });

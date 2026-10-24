@@ -1,7 +1,7 @@
 // Processo principal do aplicativo de desktop (Windows).
 // Sobe o servidor do sistema em 127.0.0.1 (só este computador acessa) e abre a janela.
 import { app, BrowserWindow, Menu, dialog, shell, safeStorage, net, ipcMain } from 'electron';
-import { spawn } from 'node:child_process';
+import { spawn, execFileSync } from 'node:child_process';
 import { buscarNovaVersao, urlPermitida } from './atualizador.mjs';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
@@ -58,12 +58,25 @@ function ehSqlite(arquivo) {
   return buf.toString() === 'SQLite format 3';
 }
 
+// Identificação do computador (Windows: MachineGuid). Só o hash sai daqui.
+function idDaMaquina() {
+  try {
+    if (process.platform === 'win32') {
+      const saida = execFileSync('reg', ['query', 'HKLM\\SOFTWARE\\Microsoft\\Cryptography', '/v', 'MachineGuid'], { encoding: 'utf8', windowsHide: true });
+      const m = /MachineGuid\s+REG_SZ\s+([0-9a-fA-F-]{16,})/.exec(saida);
+      if (m) return m[1].toLowerCase();
+    }
+  } catch { /* usa o código gerado pelo próprio sistema */ }
+  return '';
+}
+
 // ---------------- Servidor local ----------------
 async function iniciarServidor() {
   const segredos = await carregarSegredos();
   aplicarRestauracaoPendente();
   Object.assign(process.env, {
     NFSE_DESKTOP: '1',
+    NFSE_MACHINE_ID: idDaMaquina(),
     HOST: '127.0.0.1',
     MASTER_KEY: segredos.masterKey,
     SESSION_SECRET: segredos.sessionSecret,

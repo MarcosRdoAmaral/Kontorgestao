@@ -244,6 +244,28 @@ test('fluxo completo: cadastro, emissão, rejeição, queda de rede, DANFSe e ca
   const e1 = res.find((x: any) => x.empresa_id === eid);
   assert.equal(e1.autorizadas, 3); assert.equal(e1.canceladas, 1); assert.equal(e1.faturado, 4000);
 
+  // 7b) faturamento "um comando": nota + boleto + e-mail e só boleto
+  const tFat = await call('POST', `/api/empresas/${eid}/tomadores`, { tipo_doc: 'CPF', documento: '529.982.247-25', nome: 'Cliente Mensalista', email: 'mensal@x.com', email_cobranca: 'fin@x.com; outro@x.com', modo_faturamento: 'NOTA_BOLETO', vencimento_tipo: 'PRAZO', vencimento_valor: 7, enviar_email_auto: true, cep: '88301-000', cod_municipio: '4208203', logradouro: 'Rua A', numero: '10', bairro: 'Centro' }, token);
+  assert.equal(tFat.status, 200, JSON.stringify(tFat.json));
+  assert.equal((await call('POST', `/api/empresas/${eid}/tomadores`, { tipo_doc: 'SEM', nome: 'x', modo_faturamento: 'XYZ' }, token)).status, 400);
+  const fat = await call('POST', '/api/faturar', { ...base, tomadorId: tFat.json.id, valor: 1000, retencoes: { irrf: 15 } }, token);
+  assert.equal(fat.status, 200, JSON.stringify(fat.json));
+  assert.equal(fat.json.acao, 'NOTA_BOLETO');
+  assert.equal(fat.json.nota.status, 'AUTORIZADA');
+  assert.equal(fat.json.cobranca.valor, 985);
+  assert.equal(fat.json.cobranca.nota_id, fat.json.nota.id);
+  assert.equal(fat.json.cobranca.status, 'AGUARDANDO_BANCO');
+  assert.equal(fat.json.email.status, 'ERRO'); // nota de teste (ambiente 2) não é enviada
+  const soBoleto = await call('POST', '/api/faturar', { ...base, tomadorId: tFat.json.id, acao: 'BOLETO', valor: 300, vencimento: '2026-12-05', enviarEmail: false }, token);
+  assert.equal(soBoleto.status, 200, JSON.stringify(soBoleto.json));
+  assert.equal(soBoleto.json.nota, undefined);
+  assert.equal(soBoleto.json.cobranca.valor, 300);
+  assert.equal(soBoleto.json.cobranca.vencimento, '2026-12-05');
+  assert.equal((await call('POST', '/api/faturar', { ...base, tomadorId: null, acao: 'BOLETO' }, token)).status, 400, 'boleto exige cliente');
+  const cobs = await call('GET', `/api/empresas/${eid}/cobrancas`, undefined, token);
+  assert.equal(cobs.json.length, 2);
+  assert.equal((await call('GET', `/api/empresas/${eid}/cobrancas`, undefined, tc)).status, 200);
+
   // 8) o certificado está criptografado em repouso
   const { db } = await import('../src/db.js');
   const bruto = (db.prepare('SELECT cert_pfx_enc FROM empresas WHERE id = ?').get(eid) as any).cert_pfx_enc as Buffer;

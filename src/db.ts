@@ -229,6 +229,39 @@ const migracoes: string[] = [
     criado_em TEXT NOT NULL DEFAULT (datetime('now'))
   );
   CREATE INDEX idx_emails_nota ON emails_enviados(nota_id);`,
+  // 5: faturamento por cliente (nota / nota + boleto / só boleto) e cobranças (boleto ainda sem banco)
+  `ALTER TABLE tomadores ADD COLUMN modo_faturamento TEXT NOT NULL DEFAULT 'NOTA' CHECK (modo_faturamento IN ('NOTA','NOTA_BOLETO','BOLETO'));
+  ALTER TABLE tomadores ADD COLUMN vencimento_tipo TEXT NOT NULL DEFAULT 'PRAZO' CHECK (vencimento_tipo IN ('PRAZO','DIA_FIXO'));
+  ALTER TABLE tomadores ADD COLUMN vencimento_valor INTEGER NOT NULL DEFAULT 10;
+  ALTER TABLE tomadores ADD COLUMN email_cobranca TEXT;
+  ALTER TABLE tomadores ADD COLUMN enviar_email_auto INTEGER NOT NULL DEFAULT 0;
+  CREATE TABLE cobrancas (
+    id INTEGER PRIMARY KEY,
+    empresa_id INTEGER NOT NULL REFERENCES empresas(id),
+    tomador_id INTEGER NOT NULL REFERENCES tomadores(id),
+    nota_id INTEGER REFERENCES notas(id),
+    descricao TEXT NOT NULL,
+    valor REAL NOT NULL,
+    vencimento TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'AGUARDANDO_BANCO' CHECK (status IN ('AGUARDANDO_BANCO','EMITIDO','PAGO','CANCELADO')),
+    nosso_numero TEXT,
+    linha_digitavel TEXT,
+    criado_por INTEGER REFERENCES usuarios(id),
+    criado_em TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+  CREATE INDEX idx_cobrancas_empresa ON cobrancas(empresa_id, vencimento);
+  CREATE INDEX idx_cobrancas_nota ON cobrancas(nota_id);`,
+  // 6: controle de licença (código de ativação por computador, teste de 30 dias)
+  `CREATE TABLE licenca (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    codigo TEXT,
+    cliente TEXT,
+    ate TEXT,
+    ativada_em TEXT,
+    inicio_teste TEXT,
+    ultimo_visto TEXT,
+    maquina_alt TEXT
+  );`,
 ];
 
 export function migrar(): void {

@@ -91,3 +91,16 @@ Observação: o instalador não é assinado digitalmente; o Windows SmartScreen 
 
 - Ao cancelar, a caixa "Avisar o tomador por e-mail" envia o PDF (marcado CANCELADA) e os XMLs da nota e do cancelamento.
 - **Enviar por WhatsApp** abre o WhatsApp com a mensagem pronta e o link da nota no portal nacional (o PDF pode ser baixado e anexado à conversa).
+
+## Versão 1.0.13 – Faturamento por cliente e controle de licença
+
+**Cadastro do cliente (tomador)** agora tem a seção *Faturamento e cobrança*: somente nota, nota + boleto ou somente boleto; vencimento por prazo (N dias) ou dia fixo do mês; e-mails extras de cobrança; envio automático por e-mail.
+
+**Um comando:** ao emitir, a ação padrão vem do cadastro do cliente (pode ser trocada na hora). `POST /api/faturar` emite a nota, registra a cobrança e envia o e-mail. O boleto fica *aguardando banco* até a integração bancária ser ligada (tela **Cobranças**).
+
+**Licença:** teste automático de 30 dias; depois, código de ativação por computador (renovação a cada 3 meses). Vencida = só a emissão é bloqueada. Menu **Licença** mostra o código do computador.
+
+### Como ativar o controle de licença (dono do sistema)
+1. Abra `ferramentas/gerador-de-licencas.html` no navegador (offline) e clique em *Gerar chaves*. Guarde a **chave privada**; nunca a compartilhe.
+2. Coloque a **chave pública** em `src/licenca-chave.ts` e publique uma nova versão. Enquanto estiver vazia, o controle fica desligado.
+3. Para cada renovação: o cliente envia o código do computador; você informa nome e validade (padrão 3 meses) e envia o código `KG1.…` gerado.

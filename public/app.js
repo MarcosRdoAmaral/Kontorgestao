@@ -184,18 +184,19 @@ async function iniciar() {
   $('#nome-usuario').textContent = estado.usuario.nome;
   document.querySelectorAll('[data-papel]').forEach((a) => (a.hidden = !a.dataset.papel.split(' ').includes(estado.usuario.papel)));
   await carregarEmpresas();
+  atualizarLicenca();
   rotear();
 }
 
 const rotas = {
   painel: telaPainel, emitir: telaEmitir, notas: telaNotas, nota: telaNota,
-  tomadores: telaTomadores, servicos: telaServicos, empresas: telaEmpresas, usuarios: telaUsuarios, email: telaEmail, backup: telaBackup,
+  cobrancas: telaCobrancas, licenca: telaLicenca, tomadores: telaTomadores, servicos: telaServicos, empresas: telaEmpresas, usuarios: telaUsuarios, email: telaEmail, backup: telaBackup,
 };
 
 function rotear() {
   const [, nome = 'painel', param] = location.hash.split('/');
   document.querySelectorAll('nav a').forEach((a) => a.classList.toggle('ativo', a.getAttribute('href') === `#/${nome}`));
-  const precisaEmpresa = !['painel', 'empresas', 'usuarios', 'nota', 'backup', 'email'].includes(nome);
+  const precisaEmpresa = !['painel', 'empresas', 'usuarios', 'nota', 'backup', 'email', 'licenca'].includes(nome);
   if (precisaEmpresa && !empresa()) {
     conteudo.innerHTML = `<div class="vazio"><p>Cadastre a primeira empresa para começar a emitir.</p>
       ${estado.usuario.papel !== 'cliente' ? '<a href="#/empresas">Cadastrar empresa</a>' : ''}</div>`;
@@ -268,7 +269,17 @@ async function telaEmitir(notaIdCorrecao) {
             </select>
           </label>
         </div>
-        <div class="acoes"><button type="button" id="novo-tomador">Cadastrar novo tomador</button></div>
+        <div class="acoes"><button type="button" id="novo-tomador">Cadastrar novo cliente</button></div>
+      </fieldset>
+
+      <fieldset id="bloco-cobranca" hidden><legend>O que emitir</legend>
+        <div class="grade">
+          <label class="largo">Ação
+            <select name="acao"><option value="NOTA">Somente a nota fiscal</option><option value="NOTA_BOLETO">Nota fiscal + boleto</option><option value="BOLETO">Somente o boleto</option></select>
+            <span class="dica" id="dica-acao"></span></label>
+          <label data-boleto>Vencimento do boleto <input type="date" name="vencimento"></label>
+          <label data-boleto>Valor do boleto (R$) <input name="valorBoleto" data-num inputmode="decimal" placeholder="Valor líquido da nota"><span class="dica">Em branco: valor do serviço menos descontos e retenções.</span></label>
+        </div>
       </fieldset>
 
       <fieldset><legend>Serviço</legend>
@@ -322,12 +333,12 @@ async function telaEmitir(notaIdCorrecao) {
               <label>Estaduais (%) <input name="tEst" data-num inputmode="decimal" value="${p.pTotTrib?.est ?? ''}"></label>
               <label>Municipais (%) <input name="tMun" data-num inputmode="decimal" value="${p.pTotTrib?.mun ?? ''}"></label>
             </div></fieldset>` : ''}
-          ${empresa()?.ambiente === 1 && estado.usuario.papel !== 'cliente' ? '<label class="largo"><span><input type="checkbox" name="enviarEmail"> Enviar por e-mail ao tomador quando a nota for autorizada</span><span class="dica">Usa o e-mail do cadastro do tomador. Configure o servidor em E-mail.</span></label>' : ''}
+          ${empresa()?.ambiente === 1 && estado.usuario.papel !== 'cliente' ? '<label class="largo"><span><input type="checkbox" name="enviarEmail"> Enviar por e-mail ao cliente quando a nota for autorizada</span><span class="dica">Usa o e-mail do cadastro do cliente (e os de cobrança). Configure o servidor em E-mail.</span></label>' : ''}
           <label class="largo">Informações complementares <textarea name="infoComplementar" maxlength="2000">${esc(p.infoComplementar ?? '')}</textarea></label>
         </div>
       </fieldset>
       <p class="erro" id="erro-emitir" role="alert"></p>
-      <div class="acoes"><button class="primario" type="submit">${corrigindo ? 'Reenviar à Sefin' : 'Emitir nota'}</button></div>
+      <div class="acoes"><button class="primario" type="submit" id="btn-emitir">${corrigindo ? 'Reenviar à Sefin' : 'Emitir nota'}</button></div>
     </form>`;
 
   const f = $('#form-emitir');
@@ -344,6 +355,41 @@ async function telaEmitir(notaIdCorrecao) {
     f.cTribNac.value = '';
   };
   $('#novo-tomador').onclick = () => formTomador(null, async (id) => { telaEmitir.prefTomador = id; await telaEmitir(notaIdCorrecao); $('#form-emitir').tomadorId.value = id; });
+
+  // regra do cliente: nota / nota + boleto / só boleto
+  const somaDias = (d, n) => new Date(d.getTime() + n * 86400e3);
+  const vencPadrao = (t) => {
+    const base = new Date(Date.now() - 3 * 3600e3);
+    if (!t || t.vencimento_tipo !== 'DIA_FIXO') return somaDias(base, t?.vencimento_valor ?? 10).toISOString().slice(0, 10);
+    const ult = (a, m) => new Date(Date.UTC(a, m + 1, 0)).getUTCDate();
+    let a = base.getUTCFullYear(), m = base.getUTCMonth(), dia = Math.min(t.vencimento_valor, ult(a, m));
+    if (dia <= base.getUTCDate()) { m += 1; if (m > 11) { m = 0; a += 1; } dia = Math.min(t.vencimento_valor, ult(a, m)); }
+    return new Date(Date.UTC(a, m, dia)).toISOString().slice(0, 10);
+  };
+  const aplicarModo = () => {
+    const t = tomadores.find((x) => x.id === Number(f.tomadorId.value));
+    const bloco = $('#bloco-cobranca');
+    bloco.hidden = !t || !!corrigindo;
+    if (!t || corrigindo) return;
+    const acao = f.acao.value;
+    const boleto = acao !== 'NOTA';
+    bloco.querySelectorAll('[data-boleto]').forEach((x) => (x.hidden = !boleto));
+    $('#dica-acao').textContent = `Padrão do cliente: ${NOME_MODO[t.modo_faturamento] ?? 'Nota'}.`;
+    // só boleto: não há dados fiscais a preencher
+    f.querySelectorAll('fieldset').forEach((fs) => { if (fs.querySelector('[name=tribISSQN]') && !fs.closest('fieldset#bloco-cobranca')) fs.hidden = acao === 'BOLETO'; });
+    $('#btn-emitir').textContent = { NOTA: 'Emitir nota', NOTA_BOLETO: 'Emitir nota e boleto', BOLETO: 'Gerar boleto' }[acao];
+  };
+  f.tomadorId.addEventListener('change', () => {
+    const t = tomadores.find((x) => x.id === Number(f.tomadorId.value));
+    if (t) {
+      f.acao.value = t.modo_faturamento ?? 'NOTA';
+      f.vencimento.value = vencPadrao(t);
+      if (f.enviarEmail) f.enviarEmail.checked = !!t.enviar_email_auto;
+    }
+    aplicarModo();
+  });
+  f.acao.addEventListener('change', aplicarModo);
+  if (f.tomadorId.value) f.tomadorId.dispatchEvent(new Event('change'));
 
   const recalcular = () => {
     const base = (lerForm(f).valor ?? 0) - (lerForm(f).descontoIncondicionado ?? 0);
@@ -375,22 +421,93 @@ async function telaEmitir(notaIdCorrecao) {
     const botao = f.querySelector('[type=submit]');
     botao.disabled = true; botao.textContent = 'Enviando à Sefin…';
     try {
-      const nota = corrigindo ? await api('POST', `/api/notas/${corrigindo.id}/reenviar`, corpo) : await api('POST', '/api/notas', corpo);
-      aviso(nota.status === 'AUTORIZADA' ? `NFS-e nº ${nota.n_nfse} autorizada.` : `A nota ficou ${STATUS[nota.status].toLowerCase()}. Veja o motivo.`);
-      if (nota.status === 'AUTORIZADA' && d.enviarEmail) {
-        // o envio é opcional: se falhar (sem e-mail no tomador, SMTP errado), a nota continua válida
-        try {
-          const completa = await api('GET', `/api/notas/${nota.id}`);
-          if (!completa.tomador_email) throw new Error('o tomador não tem e-mail cadastrado');
-          await api('POST', `/api/notas/${nota.id}/email`, { para: [completa.tomador_email] });
-          aviso(`NFS-e nº ${nota.n_nfse} autorizada e enviada para ${completa.tomador_email}.`);
-        } catch (e2) { aviso(`NFS-e autorizada, mas o e-mail não foi enviado: ${mensagemErro(e2)}`); }
+      if (corrigindo) {
+        const nota = await api('POST', `/api/notas/${corrigindo.id}/reenviar`, corpo);
+        aviso(nota.status === 'AUTORIZADA' ? `NFS-e nº ${nota.n_nfse} autorizada.` : `A nota ficou ${STATUS[nota.status].toLowerCase()}. Veja o motivo.`);
+        location.hash = `#/nota/${nota.id}`;
+        return;
       }
-      location.hash = `#/nota/${nota.id}`;
+      // um comando: nota → boleto → e-mail, conforme o cadastro do cliente
+      const r = await api('POST', '/api/faturar', {
+        ...corpo,
+        acao: corpo.tomadorId ? d.acao : 'NOTA',
+        vencimento: d.vencimento || null,
+        valorBoleto: d.valorBoleto || null,
+        enviarEmail: f.enviarEmail ? !!f.enviarEmail.checked : null,
+      });
+      const partes = [];
+      if (r.nota) partes.push(r.nota.status === 'AUTORIZADA' ? `NFS-e nº ${r.nota.n_nfse} autorizada` : `a nota ficou ${STATUS[r.nota.status].toLowerCase()}`);
+      if (r.cobranca) partes.push(`boleto de ${brl(r.cobranca.valor)} registrado (venc. ${dataBr(r.cobranca.vencimento)})`);
+      if (r.email?.status === 'ENVIADO') partes.push(`e-mail enviado para ${r.email.para}`);
+      if (r.email?.status === 'ERRO') partes.push(`e-mail não enviado: ${r.email.erro}`);
+      aviso(partes.join(' · ').replace(/^./, (c) => c.toUpperCase()) + '.');
+      location.hash = r.nota ? `#/nota/${r.nota.id}` : '#/cobrancas';
     } catch (err) {
       $('#erro-emitir').textContent = mensagemErro(err);
-      botao.disabled = false; botao.textContent = corrigindo ? 'Reenviar à Sefin' : 'Emitir nota';
+      botao.disabled = false; aplicarModo(); if (!botao.textContent || botao.textContent.endsWith('…')) botao.textContent = corrigindo ? 'Reenviar à Sefin' : 'Emitir nota';
+      atualizarLicenca();
     }
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Cobranças (boletos) – a integração bancária entra numa próxima versão
+// ---------------------------------------------------------------------------
+const STATUS_COBRANCA = { AGUARDANDO_BANCO: 'Aguardando banco', EMITIDO: 'Boleto emitido', PAGO: 'Pago', CANCELADO: 'Cancelado' };
+async function telaCobrancas() {
+  const lista = await api('GET', `/api/empresas/${estado.empresaId}/cobrancas`);
+  const total = lista.filter((c) => c.status !== 'CANCELADO' && c.status !== 'PAGO').reduce((a, c) => a + c.valor, 0);
+  conteudo.innerHTML = `
+    <div class="topo"><div><h1>Cobranças</h1><p class="sutil">${lista.length} registros · ${brl(total)} em aberto</p></div></div>
+    <div class="banner teste">A integração com o banco ainda não está ativa. Os boletos ficam registrados como “aguardando banco” e serão gerados quando a integração for configurada.</div>
+    ${lista.length ? `<div class="rolagem"><table class="tabela"><thead><tr><th>Vencimento</th><th>Cliente</th><th>Descrição</th><th>Nota</th><th class="num">Valor</th><th>Situação</th></tr></thead><tbody>
+      ${lista.map((c) => `<tr ${c.nota_id ? `class="clicavel" data-nota="${c.nota_id}"` : ''}><td>${dataBr(c.vencimento)}</td><td>${esc(c.tomador_nome)}</td><td>${esc((c.descricao ?? '').slice(0, 60))}</td>
+        <td>${c.n_nfse ?? '—'}</td><td class="num">${brl(c.valor)}</td><td>${STATUS_COBRANCA[c.status] ?? c.status}</td></tr>`).join('')}
+    </tbody></table></div>` : '<div class="vazio">Nenhuma cobrança registrada. Escolha “Nota + boleto” ou “Somente o boleto” ao emitir.</div>'}`;
+  conteudo.querySelectorAll('tr[data-nota]').forEach((tr) => (tr.onclick = () => (location.hash = `#/nota/${tr.dataset.nota}`)));
+}
+
+// ---------------------------------------------------------------------------
+// Licença
+// ---------------------------------------------------------------------------
+async function atualizarLicenca() {
+  const el = $('#licenca-info');
+  try {
+    const s = await api('GET', '/api/licenca');
+    estado.licenca = s;
+    if (s.estado === 'livre') { el.hidden = true; return s; }
+    el.hidden = false;
+    el.className = 'licenca-info' + (!s.permitido ? ' bloqueada' : s.aviso ? ' aviso' : '');
+    el.textContent = !s.permitido ? 'Licença: emissão bloqueada' : s.estado === 'teste' ? `Teste: ${s.diasRestantes} dia(s)` : `Licença até ${dataBr(s.ate)}`;
+    return s;
+  } catch { return null; }
+}
+
+async function telaLicenca() {
+  const s = await atualizarLicenca() ?? await api('GET', '/api/licenca');
+  const admin = estado.usuario.papel === 'admin';
+  const titulo = { livre: 'Sem controle de licença', teste: 'Período de teste', ativa: 'Licença ativa', vencida: 'Licença vencida', relogio: 'Data do computador incorreta' }[s.estado];
+  conteudo.innerHTML = `
+    <div class="topo"><div><h1>Licença</h1><p class="sutil">${titulo}</p></div></div>
+    <div class="banner ${s.permitido && !s.aviso ? '' : 'teste'}">${esc(s.mensagem)}</div>
+    ${s.cliente ? `<p>Licenciado para <strong>${esc(s.cliente)}</strong>.</p>` : ''}
+    ${s.estado === 'livre' ? '' : `
+    <fieldset><legend>Código deste computador</legend>
+      <p class="dica">Para renovar, envie este código ao suporte. Você receberá um código de ativação válido apenas neste computador.</p>
+      <p><span class="codigo-copia" id="cod-pc">${esc(s.codigoComputador)}</span> <button type="button" id="copiar-cod">Copiar</button></p>
+    </fieldset>
+    <fieldset><legend>Inserir código de ativação</legend>
+      ${admin ? `<form id="form-lic"><label>Código recebido <textarea name="codigo" required placeholder="KG1.…"></textarea></label>
+        <p class="erro" id="erro-lic"></p><div class="acoes"><button class="primario" type="submit">Ativar</button></div></form>` : '<p class="dica">Peça a um administrador para inserir o código.</p>'}
+    </fieldset>
+    <p class="dica">Com a licença vencida, apenas a emissão é bloqueada: consultas, downloads de PDF/XML e backup continuam funcionando.</p>`}`;
+  const copiar = $('#copiar-cod');
+  if (copiar) copiar.onclick = async () => { try { await navigator.clipboard.writeText(s.codigoComputador); aviso('Código copiado.'); } catch { aviso('Selecione o código e copie com Ctrl+C.'); } };
+  const fl = $('#form-lic');
+  if (fl) fl.onsubmit = async (ev) => {
+    ev.preventDefault();
+    try { await api('POST', '/api/licenca', { codigo: fl.codigo.value.trim() }); aviso('Licença ativada.'); telaLicenca(); }
+    catch (e) { $('#erro-lic').textContent = mensagemErro(e); }
   };
 }
 
@@ -607,37 +724,64 @@ function ligarConsultaCnpj(form, modo) {
 // Tomadores
 // ---------------------------------------------------------------------------
 
+const NOME_MODO = { NOTA: 'Nota', NOTA_BOLETO: 'Nota + boleto', BOLETO: 'Só boleto' };
 function formTomador(t, aoSalvar) {
-  t ??= { tipo_doc: 'CNPJ' };
+  t ??= { tipo_doc: 'CNPJ', modo_faturamento: 'NOTA', vencimento_tipo: 'PRAZO', vencimento_valor: 10, enviar_email_auto: 0 };
   abrirDialogo(`
-    <form id="form-tomador"><h2>${t.id ? 'Editar tomador' : 'Novo tomador'}</h2>
-      <div class="grade">
+    <form id="form-tomador"><h2>${t.id ? 'Editar cliente' : 'Novo cliente'}</h2>
+      <fieldset class="sub"><legend>Identificação</legend><div class="grade">
         <label>Tipo <select name="tipo_doc">${['CNPJ', 'CPF', 'SEM'].map((v) => `<option value="${v}" ${t.tipo_doc === v ? 'selected' : ''}>${v === 'SEM' ? 'Sem documento' : v}</option>`).join('')}</select></label>
         <label>CNPJ / CPF <span class="linha-campo"><input name="documento" value="${esc(t.documento ?? '')}"><button type="button" data-buscar-cnpj>Buscar CNPJ</button></span><span class="dica" data-cnpj-info>Digite o CNPJ e clique em Buscar para preencher os dados.</span></label>
         <label class="largo">Nome / Razão social <input name="nome" required value="${esc(t.nome ?? '')}"></label>
-        <label>E-mail <input name="email" type="email" value="${esc(t.email ?? '')}"></label>
-        <label>Telefone <input name="fone" value="${esc(t.fone ?? '')}"></label>
         <label>Inscrição municipal <input name="inscricao_municipal" value="${esc(t.inscricao_municipal ?? '')}"></label>
+      </div></fieldset>
+      <fieldset class="sub"><legend>Contato</legend><div class="grade">
+        <label>E-mail principal <input name="email" type="email" value="${esc(t.email ?? '')}"></label>
+        <label>Telefone / WhatsApp <input name="fone" value="${esc(t.fone ?? '')}"></label>
+      </div></fieldset>
+      <fieldset class="sub"><legend>Endereço</legend><div class="grade">
         <label>CEP <input name="cep" value="${esc(t.cep ?? '')}"><span class="dica" data-municipio></span></label>
         <label>Município (IBGE) <input name="cod_municipio" maxlength="7" value="${esc(t.cod_municipio ?? '')}"></label>
         <label class="largo">Logradouro <input name="logradouro" value="${esc(t.logradouro ?? '')}"></label>
         <label>Número <input name="numero" value="${esc(t.numero ?? '')}"></label>
         <label>Complemento <input name="complemento" value="${esc(t.complemento ?? '')}"></label>
         <label>Bairro <input name="bairro" value="${esc(t.bairro ?? '')}"></label>
-      </div>
-      <p class="dica">Endereço é opcional; se preencher, informe CEP, município, logradouro e bairro.</p>
+      </div><p class="dica">Endereço é opcional; se preencher, informe CEP, município, logradouro e bairro.</p></fieldset>
+      <fieldset class="sub"><legend>Faturamento e cobrança</legend><div class="grade">
+        <label class="largo">O que emitir para este cliente
+          <select name="modo_faturamento">
+            <option value="NOTA" ${t.modo_faturamento === 'NOTA' ? 'selected' : ''}>Somente a nota fiscal</option>
+            <option value="NOTA_BOLETO" ${t.modo_faturamento === 'NOTA_BOLETO' ? 'selected' : ''}>Nota fiscal + boleto</option>
+            <option value="BOLETO" ${t.modo_faturamento === 'BOLETO' ? 'selected' : ''}>Somente o boleto</option>
+          </select></label>
+        <label data-cobranca>Vencimento do boleto
+          <select name="vencimento_tipo"><option value="PRAZO" ${t.vencimento_tipo === 'PRAZO' ? 'selected' : ''}>Dias após a emissão</option><option value="DIA_FIXO" ${t.vencimento_tipo === 'DIA_FIXO' ? 'selected' : ''}>Dia fixo do mês</option></select></label>
+        <label data-cobranca><span data-rotulo-venc>Quantidade de dias</span> <input name="vencimento_valor" data-num type="number" min="0" max="60" value="${t.vencimento_valor ?? 10}"></label>
+        <label class="largo" data-cobranca>E-mails extras para cobrança <input name="email_cobranca" placeholder="financeiro@cliente.com, outro@cliente.com" value="${esc(t.email_cobranca ?? '')}"><span class="dica">Separe por vírgula. Recebem junto com o e-mail principal.</span></label>
+        <label class="largo"><span><input type="checkbox" name="enviar_email_auto" ${t.enviar_email_auto ? 'checked' : ''}> Enviar por e-mail automaticamente ao emitir</span><span class="dica">Só em produção. A nota é enviada logo após ser autorizada.</span></label>
+      </div><p class="dica" data-aviso-banco>O boleto ainda não está ligado a um banco: ele fica registrado como “aguardando banco” até a integração ser ativada.</p></fieldset>
       <p class="erro" id="erro-tomador"></p>
-      <div class="acoes"><button class="primario" type="submit">Salvar tomador</button><button type="button" data-fechar>Fechar</button></div>
+      <div class="acoes"><button class="primario" type="submit">Salvar cliente</button><button type="button" data-fechar>Fechar</button></div>
     </form>`, (d) => {
     const f = $('#form-tomador');
     f.cep.onblur = () => buscarCep(f);
     ligarConsultaCnpj(f, 'tomador');
+    const ajustar = () => {
+      const comBoleto = f.modo_faturamento.value !== 'NOTA';
+      f.querySelectorAll('[data-cobranca]').forEach((x) => (x.hidden = !comBoleto));
+      f.querySelector('[data-aviso-banco]').hidden = !comBoleto;
+      f.querySelector('[data-rotulo-venc]').textContent = f.vencimento_tipo.value === 'PRAZO' ? 'Quantidade de dias' : 'Dia do mês (1 a 31)';
+    };
+    f.modo_faturamento.onchange = f.vencimento_tipo.onchange = ajustar; ajustar();
     f.onsubmit = async (ev) => {
       ev.preventDefault();
       try {
         const corpo = lerForm(f);
+        corpo.enviar_email_auto = f.enviar_email_auto.checked;
+        corpo.vencimento_valor = Number(f.vencimento_valor.value || 0);
+        corpo.email_cobranca = f.email_cobranca.value.trim() || null;
         const r = t.id ? await api('PUT', `/api/tomadores/${t.id}`, corpo) : await api('POST', `/api/empresas/${estado.empresaId}/tomadores`, corpo);
-        d.close(); aviso('Tomador salvo.');
+        d.close(); aviso('Cliente salvo.');
         aoSalvar?.(t.id ?? r.id);
       } catch (e) { $('#erro-tomador').textContent = mensagemErro(e); }
     };
@@ -647,10 +791,10 @@ function formTomador(t, aoSalvar) {
 async function telaTomadores() {
   const lista = await api('GET', `/api/empresas/${estado.empresaId}/tomadores`);
   conteudo.innerHTML = `
-    <div class="topo"><div><h1>Tomadores</h1><p class="sutil">Clientes de ${esc(empresa().razao_social)}.</p></div>
+    <div class="topo"><div><h1>Clientes (tomadores)</h1><p class="sutil">Clientes de ${esc(empresa().razao_social)}.</p></div>
       <button class="primario" id="novo">Cadastrar tomador</button></div>
-    ${lista.length ? `<div class="rolagem"><table class="tabela"><thead><tr><th>Nome</th><th>Documento</th><th>E-mail</th><th>Município</th></tr></thead><tbody>
-      ${lista.map((t, i) => `<tr class="clicavel" data-i="${i}"><td>${esc(t.nome)}</td><td>${fmtDoc(t.documento)}</td><td>${esc(t.email ?? '')}</td><td>${esc(t.cod_municipio ?? '')}</td></tr>`).join('')}
+    ${lista.length ? `<div class="rolagem"><table class="tabela"><thead><tr><th>Nome</th><th>Documento</th><th>E-mail</th><th>Faturamento</th></tr></thead><tbody>
+      ${lista.map((t, i) => `<tr class="clicavel" data-i="${i}"><td>${esc(t.nome)}</td><td>${fmtDoc(t.documento)}</td><td>${esc(t.email ?? '')}</td><td>${NOME_MODO[t.modo_faturamento] ?? 'Nota'}</td></tr>`).join('')}
     </tbody></table></div>` : '<div class="vazio">Nenhum tomador cadastrado.</div>'}`;
   $('#novo').onclick = () => formTomador(null, telaTomadores);
   conteudo.querySelectorAll('tr[data-i]').forEach((tr) => (tr.onclick = () => formTomador(lista[tr.dataset.i], telaTomadores)));

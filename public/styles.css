@@ -151,3 +151,9 @@ dialog::backdrop { background: rgba(0, 0, 0, .7); }
 .com-aviso-versao .lateral { top: 52px; height: calc(100vh - 52px); }
 .aviso-versao { min-height: 52px; box-sizing: border-box; }
 @media (max-width: 860px) { .com-aviso-versao .lateral { top: 0; height: auto; } }
+
+.licenca-info { display: block; margin: 0 12px 8px; padding: 6px 10px; border-radius: 8px; font-size: 12px; text-decoration: none; background: var(--superficie); border: 1px solid var(--linha); color: var(--texto-suave, #bbb); }
+.licenca-info.aviso { background: var(--ambar-fundo); color: var(--ambar); border-color: #4d3f17; }
+.licenca-info.bloqueada { background: #3a1616; color: #ff8a8a; border-color: #6b2a2a; }
+.codigo-copia { font-family: ui-monospace, monospace; font-size: 22px; letter-spacing: 2px; padding: 10px 14px; background: var(--superficie); border: 1px dashed var(--laranja); border-radius: 8px; display: inline-block; }
+fieldset.sub { margin: 0 0 12px; padding: 12px; }

@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="pt-BR"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Kontor – Gerador de licenças</title>
+<style>
+body{font:15px system-ui,sans-serif;background:#14110f;color:#eee;max-width:760px;margin:24px auto;padding:0 16px}
+h1{color:#ff7a1a;font-size:22px} h2{font-size:16px;margin-top:28px;border-bottom:1px solid #333;padding-bottom:6px}
+label{display:block;margin:10px 0 4px;color:#bbb} input,textarea{width:100%;box-sizing:border-box;background:#1f1a17;color:#eee;border:1px solid #444;border-radius:6px;padding:8px;font:inherit}
+textarea{min-height:80px;font-family:ui-monospace,monospace;font-size:13px} button{background:#ff7a1a;color:#111;border:0;border-radius:6px;padding:9px 16px;font-weight:600;margin-top:10px;cursor:pointer}
+.aviso{background:#3a2a10;border:1px solid #ff7a1a;padding:10px;border-radius:6px;margin:12px 0}.ok{color:#7ddc7d}.erro{color:#ff6b6b}
+</style></head><body>
+<h1>Kontor Gestão – Gerador de licenças</h1>
+<div class="aviso">Ferramenta <b>só sua</b>. Funciona offline, sem enviar nada para a internet. Guarde a <b>chave privada</b> em local seguro e <b>nunca</b> a envie a ninguém – quem a tiver gera licenças.</div>
+
+<h2>1. Gerar o par de chaves (uma única vez)</h2>
+<button id="gerar">Gerar chaves</button>
+<label>Chave pública (envie esta ao desenvolvimento)</label><textarea id="pub" readonly></textarea>
+<label>Chave privada (GUARDE; não compartilhe)</label><textarea id="priv" readonly></textarea>
+
+<h2>2. Emitir código de ativação</h2>
+<label>Chave privada</label><textarea id="priv2" placeholder="Cole aqui a chave privada"></textarea>
+<label>Código do computador (informado pelo cliente)</label><input id="maq" placeholder="XXXX-XXXX-XXXX-XXXX">
+<label>Nome do cliente / escritório</label><input id="cli">
+<label>Válida até</label><input id="ate" type="date">
+<button id="emitir">Gerar código</button>
+<label>Código de ativação (envie ao cliente)</label><textarea id="saida" readonly></textarea>
+<p id="msg"></p>
+
+<script id="nucleo">
+const b64u = (buf) => btoa(String.fromCharCode(...new Uint8Array(buf))).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');
+const deB64u = (s) => Uint8Array.from(atob(s.replace(/-/g,'+').replace(/_/g,'/')), c => c.charCodeAt(0));
+async function gerarChaves() {
+  const par = await crypto.subtle.generateKey({ name: 'Ed25519' }, true, ['sign', 'verify']);
+  const pub = await crypto.subtle.exportKey('jwk', par.publicKey);
+  const priv = await crypto.subtle.exportKey('jwk', par.privateKey);
+  return { publica: pub.x, privada: JSON.stringify({ x: priv.x, d: priv.d }) };
+}
+function somaMeses(data, meses) {
+  const d = new Date(data.getTime()); const dia = d.getUTCDate();
+  d.setUTCDate(1); d.setUTCMonth(d.getUTCMonth() + meses);
+  const ult = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 0)).getUTCDate();
+  d.setUTCDate(Math.min(dia, ult)); return d.toISOString().slice(0, 10);
+}
+async function emitirCodigo(privada, maquina, ate, cliente) {
+  if (!/^[0-9A-Fa-f]{4}(-?[0-9A-Fa-f]{4}){3}$/.test(maquina.trim())) throw new Error('Código do computador inválido.');
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(ate)) throw new Error('Informe a data de validade.');
+  const k = JSON.parse(privada);
+  const chave = await crypto.subtle.importKey('jwk', { kty: 'OKP', crv: 'Ed25519', x: k.x, d: k.d }, { name: 'Ed25519' }, false, ['sign']);
+  const carga = new TextEncoder().encode([maquina.trim().toUpperCase(), ate, cliente.replace(/\|/g, ' ').trim()].join('|'));
+  const sig = await crypto.subtle.sign({ name: 'Ed25519' }, chave, carga);
+  return 'KG1.' + b64u(carga) + '.' + b64u(sig);
+}
+</script>
+<script>
+const $ = (i) => document.getElementById(i);
+$('ate').value = somaMeses(new Date(), 3);
+$('gerar').onclick = async () => { try { const k = await gerarChaves(); $('pub').value = k.publica; $('priv').value = k.privada; $('priv2').value = k.privada; } catch (e) { $('msg').className='erro'; $('msg').textContent = 'Seu navegador não suporta Ed25519: use um Chrome/Edge atualizado. ' + e.message; } };
+$('emitir').onclick = async () => { try { $('saida').value = await emitirCodigo($('priv2').value, $('maq').value, $('ate').value, $('cli').value); $('msg').className='ok'; $('msg').textContent = 'Código gerado.'; } catch (e) { $('msg').className='erro'; $('msg').textContent = e.message; } };
+</script></body></html>
