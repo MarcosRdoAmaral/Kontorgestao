@@ -96,6 +96,16 @@ test('painel financeiro, despesas e balanço', async () => {
     // serviços padrão do cliente (serviço + valor), base para emissão recorrente
     const sv1 = (await call('POST', `/api/empresas/${eid}/servicos`, { nome: 'Honorários', descricao: 'Honorários contábeis', c_trib_nac: '171901' }, t)).json.id;
     const sv2 = (await call('POST', `/api/empresas/${eid}/servicos`, { nome: 'Folha', descricao: 'Folha de pagamento', c_trib_nac: '171901' }, t)).json.id;
+    // exportação para a contabilidade (ZIP com OFX)
+    const { unzipSync, strFromU8 } = await import('fflate');
+    db.prepare("INSERT INTO despesas (empresa_id, data, categoria, descricao, valor) VALUES (?,?,?,?,?)").run(eid, '2026-10-12', 'Aluguel', 'Sala', 750.5);
+    const rz = await app.inject({ method: 'GET', url: `/api/contabilidade/exportar?empresaId=${eid}&de=2026-10-01&ate=2026-10-31&xml=0&pdf=0&ofx=1`, headers: { authorization: `Bearer ${t}` } });
+    assert.equal(rz.statusCode, 200);
+    const arqs = unzipSync(new Uint8Array(rz.rawPayload));
+    const ofx = strFromU8(arqs['extrato/movimentacao_2026-10-01_2026-10-31.ofx']);
+    assert.match(ofx, /<TRNTYPE>DEBIT[\s\S]*<TRNAMT>-750.50/); assert.match(ofx, /<TRNTYPE>CREDIT[\s\S]*<TRNAMT>1000.00/); assert.match(ofx, /<BANKID>085/);
+    assert.equal((await call('GET', `/api/contabilidade/exportar?empresaId=${eid}&de=2026-10-01&ate=2026-10-31&xml=0&pdf=0&ofx=0`, undefined, t)).status, 400);
+
     // tributação padrão do serviço
     const tri = { tribISSQN: 1, issRetido: 2, pPis: 0.65, pCofins: 3, pCsll: 1, pIrrf: 1.5, pCp: 11, pTotTrib: { fed: 11.33, mun: 3 }, municipioPrestacao: '4208203', infoComplementar: 'Ref. competência' };
     assert.equal((await call('POST', `/api/empresas/${eid}/servicos`, { nome: 'Ruim', descricao: 'x', c_trib_nac: '171901', tributacao: { municipioPrestacao: '123' } }, t)).status, 400);

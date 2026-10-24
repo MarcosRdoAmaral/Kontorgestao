@@ -45,7 +45,7 @@ const REGRAS: Regra[] = [
   { m: 'GET', r: /^\/api\/licenca$/, mod: 'livre' },
   { m: 'GET', r: /^\/api\/consulta\/cnpj\//, mod: 'livre' },
   { m: 'GET', r: /^\/api\/empresas$/, mod: 'livre' },
-  { r: /^\/api\/(usuarios|email\/config|email\/testar|backup|tabelas|licenca)(\/|$)/, mod: 'adm' },
+  { r: /^\/api\/(usuarios|email\/config|email\/testar|backup|tabelas|licenca|contabilidade)(\/|$)/, mod: 'adm' },
   { r: /^\/api\/empresas(\/\d+)?$|^\/api\/empresas\/\d+\/(certificado|logo)$/, mod: ['empresas'] },
   { m: 'GET', r: /^\/api\/empresas\/\d+\/tomadores$/, mod: ['tomadores', 'emitir', 'cobrancas'] },
   { r: /^\/api\/empresas\/\d+\/tomadores$|^\/api\/tomadores\/\d+$/, mod: ['tomadores'] },

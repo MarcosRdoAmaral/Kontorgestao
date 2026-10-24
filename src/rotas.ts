@@ -10,6 +10,7 @@ import { ativarLicenca, exigirLicenca, statusLicenca } from './licenca.js';
 import { BoletoAvulso, EntradaFaturamento, faturar, gerarBoletoAvulso, listarCobrancas } from './servicos/faturamento.js';
 import { ContaBancaria, obterModelosWhatsapp, reemitirCobranca, salvarModelosWhatsapp, boletoPdf, cancelarCobranca, gerarRemessaEmpresa, listarRemessas, marcarPago, obterCobranca, obterConta, obterRemessa, processarRetorno, salvarConta } from './servicos/cobranca.js';
 import { Despesa, criarDespesa, editarDespesa, excluirDespesa, listarCategorias, listarDespesas, painelFinanceiro, salvarCategorias } from './servicos/financeiro.js';
+import { pacoteContabilidade } from './servicos/contabilidade.js';
 import { criarBackup, listarBackups } from './servicos/backup.js';
 import { consultarCnpj } from './servicos/consulta-cnpj.js';
 import { strToU8, zipSync } from 'fflate';
@@ -562,6 +563,18 @@ export async function rotas(app: FastifyInstance) {
       if (!xml) throw new ErroNegocio('Nota sem XML.', 404);
       const nome = n.xml_nfse ? `NFSe_${n.n_nfse}.xml` : `DPS_${n.n_dps}.xml`;
       return reply.type('application/xml').header('Content-Disposition', `attachment; filename="${nome}"`).send(xml);
+    });
+
+    /** Pacote para a contabilidade: XML/PDF das notas do período e OFX da movimentação. */
+    api.get('/api/contabilidade/exportar', async (req, reply) => {
+      const q = z.object({
+        empresaId: z.coerce.number().int(),
+        de: z.string().regex(/^\d{4}-\d{2}-\d{2}$/), ate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+        xml: z.enum(['0', '1']).default('1'), pdf: z.enum(['0', '1']).default('1'), ofx: z.enum(['0', '1']).default('1'),
+      }).parse(req.query);
+      checarEmpresa(req, q.empresaId);
+      const r = await pacoteContabilidade(q.empresaId, { de: q.de, ate: q.ate, xml: q.xml === '1', pdf: q.pdf === '1', ofx: q.ofx === '1' });
+      return reply.type('application/zip').header('Content-Disposition', `attachment; filename="${r.nome}"`).send(r.zip);
     });
 
     // ---------- Relatórios ----------

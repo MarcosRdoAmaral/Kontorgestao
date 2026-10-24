@@ -23,7 +23,7 @@ test('primeiro acesso, backup e duplicidade', async () => {
     return { status: r.statusCode, json: r.headers['content-type']?.includes('json') ? r.json() : null, raw: r.rawPayload };
   };
   try {
-    assert.deepEqual((await call('GET', '/api/setup/status')).json, { configurado: false, desktop: true, versao: '2.8.0' });
+    assert.deepEqual((await call('GET', '/api/setup/status')).json, { configurado: false, desktop: true, versao: '2.9.0' });
     assert.equal((await call('POST', '/api/login', { email: 'a@b.com', senha: 'qualquer-coisa' })).status, 401);
     assert.equal((await call('POST', '/api/setup', { escritorio: 'X', nome: 'Ana', email: 'ana@x.com', senha: 'curta' })).status, 400);
 

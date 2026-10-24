@@ -1733,14 +1733,14 @@ async function telaConfig(aba) {
   const adm = estado.usuario.tipo === 'adm';
   const abas = [
     ['conta', 'Minha conta', true], ['usuarios', 'Usuários e acessos', adm], ['email', 'E-mail', adm],
-    ['backup', 'Backup', adm], ['licenca', 'Licença', true], ['atualizacoes', 'Atualizações', true],
+    ['backup', 'Backup', adm], ['contabilidade', 'Contabilidade', adm], ['licenca', 'Licença', true], ['atualizacoes', 'Atualizações', true],
   ].filter((x) => x[2]);
   if (!abas.some((x) => x[0] === aba)) aba = abas[0][0];
   conteudo.innerHTML = `
     <div class="topo"><div><h1>Configurações</h1><p class="sutil">Ajustes gerais do sistema${adm ? '' : ' e da sua conta'}.</p></div></div>
     <nav class="abas" aria-label="Configurações">${abas.map(([k, nome]) => `<a href="#/config/${k}" class="${k === aba ? 'ativo' : ''}">${nome}</a>`).join('')}</nav>
     <div id="cfg-corpo"></div>`;
-  const tela = { conta: telaMinhaConta, usuarios: telaUsuarios, email: telaEmail, backup: telaBackup, licenca: telaLicenca, atualizacoes: telaAtualizacoes }[aba];
+  const tela = { conta: telaMinhaConta, usuarios: telaUsuarios, email: telaEmail, backup: telaBackup, contabilidade: telaContabilidade, licenca: telaLicenca, atualizacoes: telaAtualizacoes }[aba];
   await tela();
 }
 
@@ -1755,6 +1755,34 @@ function telaMinhaConta() {
       <div class="acoes"><button class="primario" id="alterar-senha">Alterar minha senha</button></div>
     </div>`;
   $('#alterar-senha').onclick = () => trocarSenha();
+}
+
+async function telaContabilidade() {
+  const e = empresa();
+  const hoje0 = new Date(Date.now() - 3 * 3600e3), ini = new Date(Date.UTC(hoje0.getUTCFullYear(), hoje0.getUTCMonth(), 1)).toISOString().slice(0, 10);
+  const fim = new Date(Date.UTC(hoje0.getUTCFullYear(), hoje0.getUTCMonth() + 1, 0)).toISOString().slice(0, 10);
+  corpoConfig().innerHTML = `
+    <h2>Exportar para a contabilidade</h2>
+    <div class="cartao">
+      <p class="sutil">Gera um único arquivo ZIP para enviar ao contador, da empresa selecionada${e ? ': <strong>' + esc(e.razao_social) + '</strong>' : ''}. Para trocar a empresa, use o seletor no topo.</p>
+      <form id="form-contab" class="grade">
+        <label>De <input type="date" name="de" required value="${ini}"></label>
+        <label>Até <input type="date" name="ate" required value="${fim}"></label>
+        <label class="largo"><span><input type="checkbox" name="xml" checked> XML das notas emitidas</span></label>
+        <label class="largo"><span><input type="checkbox" name="pdf" checked> PDF (DANFSe) das notas emitidas</span></label>
+        <label class="largo"><span><input type="checkbox" name="ofx" checked> Extrato em OFX (boletos recebidos e despesas lançadas)</span>
+          <span class="dica">Também vai uma planilha com a mesma movimentação, e outra com a lista das notas. As notas são escolhidas pela competência.</span></label>
+        <p class="erro" id="erro-contab"></p>
+        <div class="acoes largo"><button class="primario" type="submit" ${e ? '' : 'disabled'}>Gerar pacote (ZIP)</button></div>
+      </form>
+    </div>`;
+  $('#form-contab').onsubmit = async (ev) => {
+    ev.preventDefault();
+    const f = ev.target, b = f.querySelector('[type=submit]');
+    b.disabled = true; b.textContent = 'Gerando…'; $('#erro-contab').textContent = '';
+    const p = new URLSearchParams({ empresaId: estado.empresaId, de: f.de.value, ate: f.ate.value, xml: +f.xml.checked, pdf: +f.pdf.checked, ofx: +f.ofx.checked });
+    try { await baixar(`/api/contabilidade/exportar?${p}`, `contabilidade_${f.de.value}_${f.ate.value}.zip`); } finally { b.disabled = false; b.textContent = 'Gerar pacote (ZIP)'; }
+  };
 }
 
 async function telaAtualizacoes() {
