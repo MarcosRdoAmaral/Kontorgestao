@@ -364,6 +364,9 @@ const migracoes: string[] = [
     criado_em TEXT NOT NULL DEFAULT (datetime('now'))
   );
   CREATE INDEX idx_despesas_empresa ON despesas(empresa_id, data);`,
+  // 11: modelos de mensagem de WhatsApp para cobrança (lembrete e atraso)
+  `ALTER TABLE empresas ADD COLUMN wa_lembrete TEXT;
+  ALTER TABLE empresas ADD COLUMN wa_atraso TEXT;`,
 ];
 
 export function migrar(): void {

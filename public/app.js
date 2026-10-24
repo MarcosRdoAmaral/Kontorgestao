@@ -651,6 +651,7 @@ async function telaCobrancas() {
   conteudo.innerHTML = `
     <div class="topo"><div><h1>Cobranças</h1><p class="sutil">${lista.length} registros · ${brl(aberto)} em aberto</p></div>
       ${podeEditar ? `<div class="acoes"><button id="gerar-remessa" class="primario" ${conta && aRemeter ? '' : 'disabled'}>Gerar remessa${aRemeter ? ` (${aRemeter})` : ''}</button>
+        <button id="modelo-wa">Mensagem do WhatsApp</button>
         <button id="ler-retorno" ${conta ? '' : 'disabled'}>Importar retorno</button><input type="file" id="arq-retorno" accept=".ret,.RET,.txt,.TXT,.rem,.REM,*/*" hidden></div>` : ''}</div>
     ${conta ? '' : `<div class="banner teste">Os dados bancários (Ailos) desta empresa ainda não foram informados. <a href="#/banco">Informar agora</a> — os boletos pendentes são gerados automaticamente depois disso.</div>`}
     ${lista.length ? `<div class="rolagem"><table class="tabela"><thead><tr><th>Vencimento</th><th>Cliente</th><th>Nota</th><th class="num">Valor</th><th>Situação</th><th></th></tr></thead><tbody>
@@ -658,7 +659,7 @@ async function telaCobrancas() {
         <td>${esc(c.tomador_nome)}<br><span class="dica">${esc((c.descricao ?? '').slice(0, 60))}</span></td>
         <td>${c.nota_id ? `<a href="#/nota/${c.nota_id}">${c.n_nfse ?? '—'}</a>` : '—'}</td><td class="num">${brl(c.valor)}</td>
         <td>${STATUS_COBRANCA[c.status] ?? c.status}${c.baixa_pendente ? ' <span class="dica">(baixa solicitada)</span>' : ''}${c.pago_em ? `<br><span class="dica">em ${dataBr(c.pago_em)}</span>` : ''}${c.observacao_banco ? `<br><span class="dica erro">${esc(c.observacao_banco)}</span>` : ''}</td>
-        <td class="acoes-linha">${c.nosso_numero ? `<button data-boleto="${c.id}">Boleto</button>` : ''}${podeEditar && !['PAGO', 'CANCELADO'].includes(c.status) ? `<button data-pago="${c.id}">Marcar pago</button><button data-cancelar="${c.id}">Cancelar</button>` : ''}</td></tr>`).join('')}
+        <td class="acoes-linha">${c.nosso_numero ? `<button data-boleto="${c.id}">Boleto</button>` : ''}${c.status !== 'PAGO' && c.status !== 'CANCELADO' ? `<button data-wa="${c.id}">WhatsApp</button>` : ''}${podeEditar ? `<button data-reemitir="${c.id}">Reemitir</button>` : ''}${podeEditar && !['PAGO', 'CANCELADO'].includes(c.status) ? `<button data-pago="${c.id}">Marcar pago</button><button data-cancelar="${c.id}">Cancelar</button>` : ''}</td></tr>`).join('')}
     </tbody></table></div>` : '<div class="vazio">Nenhuma cobrança registrada. Escolha “Nota + boleto” ou “Somente o boleto” ao emitir.</div>'}
     ${remessas.length ? `<h2>Remessas geradas</h2><div class="rolagem"><table class="tabela"><thead><tr><th>Nº</th><th>Data</th><th>Títulos</th><th class="num">Valor</th><th></th></tr></thead><tbody>
       ${remessas.map((r) => `<tr><td>${r.numero}</td><td>${esc(r.criado_em)}</td><td>${r.qtd_titulos}</td><td class="num">${brl(r.valor_total)}</td><td><button data-remessa="${r.id}" data-nome="${esc(r.nome_arquivo)}">Baixar arquivo</button></td></tr>`).join('')}</tbody></table></div>
@@ -673,6 +674,83 @@ async function telaCobrancas() {
     if (!confirm('Cancelar este boleto? Se ele já foi enviado ao banco, a baixa vai na próxima remessa.')) return;
     try { const r = await api('POST', `/api/cobrancas/${b.dataset.cancelar}/cancelar`, {}); aviso(r.baixaNoBanco ? 'Baixa solicitada: gere uma nova remessa para o banco.' : 'Boleto cancelado.'); telaCobrancas(); } catch (e) { aviso(mensagemErro(e)); }
   }));
+  // ---- WhatsApp de cobrança com modelo editável ----
+  const aplicarModelo = (modelo, c) => modelo
+    .replace(/\{cliente\}/g, c.tomador_nome).replace(/\{valor\}/g, brl(c.valor)).replace(/\{vencimento\}/g, dataBr(c.vencimento))
+    .replace(/\{empresa\}/g, empresa()?.nome_fantasia || empresa()?.razao_social || '')
+    .replace(/\{linha\}/g, c.linha_digitavel ? `\nLinha digitável: ${c.linha_digitavel}` : '');
+  conteudo.querySelectorAll('[data-wa]').forEach((b) => (b.onclick = async () => {
+    const c = lista.find((x) => x.id === Number(b.dataset.wa));
+    const m = await api('GET', `/api/empresas/${estado.empresaId}/modelos-whatsapp`);
+    const atrasado = c.vencimento < hoje;
+    abrirDialogo(`
+      <form id="form-wa"><h2>WhatsApp para ${esc(c.tomador_nome)}</h2>
+        <p class="sutil">${atrasado ? 'Cobrança vencida: usando o modelo de atraso.' : 'Usando o modelo de lembrete.'} Revise o texto; o WhatsApp abre com a mensagem pronta e você só confirma o envio.</p>
+        <label>WhatsApp do cliente (com DDD) <input name="fone" required value="${esc(c.tomador_fone ?? '')}" placeholder="(47) 99999-9999"></label>
+        <label>Mensagem <textarea name="texto" rows="7">${esc(aplicarModelo(atrasado ? m.atraso : m.lembrete, c))}</textarea></label>
+        <p class="erro" id="erro-wa"></p>
+        <div class="acoes"><button class="primario" type="submit">Abrir WhatsApp</button>${c.nosso_numero ? '<button type="button" id="wa-pdf">Baixar boleto para anexar</button>' : ''}<button type="button" data-fechar>Fechar</button></div>
+      </form>`, () => {
+      const pdf = $('#wa-pdf'); if (pdf) pdf.onclick = () => baixar(`/api/cobrancas/${c.id}/boleto`, `Boleto_${c.id}.pdf`);
+      $('#form-wa').onsubmit = (ev) => {
+        ev.preventDefault();
+        let num = ev.target.fone.value.replace(/\D/g, '');
+        if (num.length === 10 || num.length === 11) num = '55' + num;
+        if (num.length < 12 || num.length > 13) { $('#erro-wa').textContent = 'Número inválido. Informe DDD + número, por exemplo (47) 99999-9999.'; return; }
+        window.open(`https://wa.me/${num}?text=${encodeURIComponent(ev.target.texto.value)}`, '_blank');
+      };
+    });
+  }));
+  $('#modelo-wa').onclick = async () => {
+    const m = await api('GET', `/api/empresas/${estado.empresaId}/modelos-whatsapp`);
+    abrirDialogo(`
+      <form id="form-modelo"><h2>Mensagens de cobrança por WhatsApp</h2>
+        <p class="sutil">Campos que o sistema preenche sozinho: <code>{cliente}</code> <code>{valor}</code> <code>{vencimento}</code> <code>{empresa}</code> <code>{linha}</code> (linha digitável do boleto, quando existir).</p>
+        <label>Lembrete (boleto ainda não vencido) <textarea name="lembrete" rows="5">${esc(m.lembrete)}</textarea></label>
+        <label>Cobrança em atraso <textarea name="atraso" rows="5">${esc(m.atraso)}</textarea></label>
+        <p class="erro" id="erro-modelo"></p>
+        <div class="acoes"><button class="primario" type="submit">Salvar</button><button type="button" id="modelo-padrao">Voltar ao texto padrão</button><button type="button" data-fechar>Fechar</button></div>
+      </form>`, (d) => {
+      $('#modelo-padrao').onclick = () => { $('#form-modelo').lembrete.value = m.padrao.lembrete; $('#form-modelo').atraso.value = m.padrao.atraso; };
+      $('#form-modelo').onsubmit = async (ev) => {
+        ev.preventDefault();
+        try { await api('PUT', `/api/empresas/${estado.empresaId}/modelos-whatsapp`, { lembrete: ev.target.lembrete.value, atraso: ev.target.atraso.value }); d.close(); aviso('Mensagens salvas.'); }
+        catch (e) { $('#erro-modelo').textContent = mensagemErro(e); }
+      };
+    });
+  };
+
+  // ---- Reemitir: nova cobrança com os mesmos dados e outro vencimento ----
+  conteudo.querySelectorAll('[data-reemitir]').forEach((b) => (b.onclick = async () => {
+    const c = lista.find((x) => x.id === Number(b.dataset.reemitir));
+    const [a, m, dia] = c.vencimento.split('-').map(Number);
+    const prox = new Date(Date.UTC(a, m, Math.min(dia, new Date(Date.UTC(a, m + 1, 0)).getUTCDate()))).toISOString().slice(0, 10);
+    const sugerido = prox < hoje ? hoje : prox;
+    const fer = await api('GET', `/api/empresas/${estado.empresaId}/feriados`).then((r) => r.feriados_extra).catch(() => '');
+    abrirDialogo(`
+      <form id="form-re"><h2>Reemitir boleto</h2>
+        <p class="sutil">Gera uma nova cobrança para <strong>${esc(c.tomador_nome)}</strong> com a mesma descrição. Só o boleto: nenhuma nota é emitida.</p>
+        <div class="grade">
+          <label>Novo vencimento <input type="date" name="vencimento" required value="${sugerido}"></label>
+          <label>Valor (R$) <input name="valor" data-num required inputmode="decimal" value="${String(c.valor).replace('.', ',')}"></label>
+        </div>
+        <p class="dica" id="aviso-re"></p><p class="erro" id="erro-re"></p>
+        <div class="acoes"><button class="primario" type="submit">Gerar boleto</button><button type="button" data-fechar>Cancelar</button></div>
+      </form>`, (d) => {
+      const f = $('#form-re');
+      f.vencimento.onchange = () => { const r = ajustarVencimento(f.vencimento.value, fer); if (r.aviso) { f.vencimento.value = r.data; $('#aviso-re').textContent = r.aviso; } else $('#aviso-re').textContent = ''; };
+      f.vencimento.onchange();
+      f.onsubmit = async (ev) => {
+        ev.preventDefault();
+        const v = lerForm(f);
+        try {
+          const r = await api('POST', `/api/cobrancas/${c.id}/reemitir`, { vencimento: v.vencimento, valor: v.valor });
+          d.close(); aviso(`Novo boleto de ${brl(r.cobranca.valor)} com vencimento em ${dataBr(r.cobranca.vencimento)}.`); telaCobrancas();
+        } catch (e) { $('#erro-re').textContent = mensagemErro(e); }
+      };
+    });
+  }));
+
   const gr = $('#gerar-remessa');
   if (gr) gr.onclick = async () => {
     gr.disabled = true;

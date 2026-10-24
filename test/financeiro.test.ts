@@ -64,6 +64,22 @@ test('painel financeiro, despesas e balanço', async () => {
     assert.equal((await call('PUT', `/api/empresas/${eid}/feriados`, { feriados_extra: '24/06, 19/03' }, t)).status, 200);
     assert.equal((await call('PUT', `/api/empresas/${eid}/feriados`, { feriados_extra: 'amanhã' }, t)).status, 400);
 
+    // reemitir: copia cliente/descrição, vencimento ajustado para dia útil
+    const origem = (db.prepare("SELECT id FROM cobrancas WHERE status = 'PAGO' ORDER BY id LIMIT 1").get() as any).id;
+    const re = await call('POST', `/api/cobrancas/${origem}/reemitir`, { vencimento: '2027-01-31', valor: 1234.5 }, t); // domingo
+    assert.equal(re.status, 200, JSON.stringify(re.json));
+    assert.equal(re.json.cobranca.vencimento, '2027-01-29'); assert.equal(re.json.cobranca.valor, 1234.5); assert.equal(re.json.cobranca.tomador_id, c1);
+    assert.match(re.json.aviso, /antecipado/); assert.equal(re.json.cobranca.nota_id, null);
+    assert.equal((await call('POST', `/api/cobrancas/${origem}/reemitir`, { vencimento: 'x' }, t)).status, 400);
+
+    // modelos de WhatsApp: padrão até o usuário salvar o seu
+    const m0 = (await call('GET', `/api/empresas/${eid}/modelos-whatsapp`, undefined, t)).json;
+    assert.match(m0.lembrete, /\{cliente\}/); assert.equal(m0.lembrete, m0.padrao.lembrete);
+    assert.equal((await call('PUT', `/api/empresas/${eid}/modelos-whatsapp`, { lembrete: 'Oi {cliente}', atraso: '' }, t)).status, 200);
+    const m1 = (await call('GET', `/api/empresas/${eid}/modelos-whatsapp`, undefined, t)).json;
+    assert.equal(m1.lembrete, 'Oi {cliente}'); assert.equal(m1.atraso, m0.padrao.atraso);
+    assert.ok((await call('GET', `/api/empresas/${eid}/cobrancas`, undefined, t)).json.every((x: any) => 'tomador_fone' in x));
+
     // usuário normal sem o módulo não acessa despesas
     await call('POST', '/api/usuarios', { login: 'bia', nome: 'Bia', tipo: 'normal', senha: 'bia-senha-123', permissoes: ['painel'], empresas: [] }, t);
     const tb = (await call('POST', '/api/login', { usuario: 'BIA', senha: 'bia-senha-123' })).json.token;

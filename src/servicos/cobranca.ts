@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { db } from '../db.js';
+import { ajustarVencimento } from './diautil.js';
 import { ErroNegocio } from './emissao.js';
 import { gerarRemessa400 } from '../cobranca/ailos400.js';
 import { codigoBarras, descreverMotivo, gerarRemessa, lerRetornoAuto, linhaDigitavel, nossoNumero, MOVIMENTO_RETORNO, type ContaAilos, type Titulo } from '../cobranca/ailos.js';
@@ -113,7 +114,7 @@ export function obterCobranca(id: number) {
 
 export function listarCobrancas(empresaId: number) {
   return db.prepare(`SELECT c.id, c.nota_id, c.tomador_id, c.descricao, c.valor, c.vencimento, c.status, c.nosso_numero, c.linha_digitavel, c.baixa_pendente, c.pago_em, c.valor_pago,
-      c.observacao_banco, c.email_status, c.email_para, c.criado_em, t.nome AS tomador_nome, n.n_nfse FROM cobrancas c
+      c.observacao_banco, c.email_status, c.email_para, c.criado_em, t.nome AS tomador_nome, t.fone AS tomador_fone, c.codigo_barras, n.n_nfse FROM cobrancas c
     JOIN tomadores t ON t.id = c.tomador_id LEFT JOIN notas n ON n.id = c.nota_id
     WHERE c.empresa_id = ? ORDER BY c.vencimento DESC, c.id DESC LIMIT 500`).all(empresaId);
 }
@@ -242,4 +243,28 @@ export function processarRetorno(empresaId: number, texto: string) {
     }
   })();
   return resumo;
+}
+
+/** Nova cobrança (só boleto) copiando cliente, descrição e valor de uma anterior, com outro vencimento em dia útil. */
+export function reemitirCobranca(usuarioId: number, id: number, vencimento: string, valor?: number | null) {
+  const c = obterCobranca(id);
+  if (!c) throw new ErroNegocio('Cobrança não encontrada.', 404);
+  const v = valor ?? c.valor;
+  if (!(v > 0)) throw new ErroNegocio('O valor precisa ser maior que zero.');
+  const extras = (db.prepare('SELECT feriados_extra FROM empresas WHERE id = ?').get(c.empresa_id) as any)?.feriados_extra;
+  const ajuste = ajustarVencimento(vencimento, hojeBr(), extras);
+  const nova = criarCobranca({ empresaId: c.empresa_id, tomadorId: c.tomador_id, notaId: null, descricao: c.descricao, valor: v, vencimento: ajuste.data, usuarioId });
+  return { cobranca: nova, aviso: ajuste.aviso ?? null };
+}
+
+export const MODELOS_WHATSAPP = {
+  lembrete: 'Olá, {cliente}! Passando para lembrar que o boleto de {valor} vence em {vencimento}.{linha}\nQualquer dúvida, estamos à disposição. {empresa}',
+  atraso: 'Olá, {cliente}! Identificamos que o boleto de {valor}, com vencimento em {vencimento}, ainda não consta como pago.{linha}\nSe já pagou, desconsidere esta mensagem. {empresa}',
+};
+export function obterModelosWhatsapp(empresaId: number) {
+  const e = db.prepare('SELECT wa_lembrete, wa_atraso FROM empresas WHERE id = ?').get(empresaId) as any;
+  return { lembrete: e?.wa_lembrete || MODELOS_WHATSAPP.lembrete, atraso: e?.wa_atraso || MODELOS_WHATSAPP.atraso, padrao: MODELOS_WHATSAPP };
+}
+export function salvarModelosWhatsapp(empresaId: number, m: { lembrete: string; atraso: string }) {
+  db.prepare('UPDATE empresas SET wa_lembrete = ?, wa_atraso = ? WHERE id = ?').run(m.lembrete.trim() || null, m.atraso.trim() || null, empresaId);
 }

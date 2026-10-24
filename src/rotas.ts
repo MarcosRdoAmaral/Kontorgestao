@@ -8,7 +8,7 @@ import { config } from './config.js';
 import { ConfigSmtp, ListaEmails, configPublica, enviarNotaPorEmail, historicoEmails, salvarConfig, testarConfig } from './servicos/email.js';
 import { ativarLicenca, exigirLicenca, statusLicenca } from './licenca.js';
 import { EntradaFaturamento, faturar, listarCobrancas } from './servicos/faturamento.js';
-import { ContaBancaria, boletoPdf, cancelarCobranca, gerarRemessaEmpresa, listarRemessas, marcarPago, obterCobranca, obterConta, obterRemessa, processarRetorno, salvarConta } from './servicos/cobranca.js';
+import { ContaBancaria, obterModelosWhatsapp, reemitirCobranca, salvarModelosWhatsapp, boletoPdf, cancelarCobranca, gerarRemessaEmpresa, listarRemessas, marcarPago, obterCobranca, obterConta, obterRemessa, processarRetorno, salvarConta } from './servicos/cobranca.js';
 import { Despesa, criarDespesa, editarDespesa, excluirDespesa, listarCategorias, listarDespesas, painelFinanceiro, salvarCategorias } from './servicos/financeiro.js';
 import { criarBackup, listarBackups } from './servicos/backup.js';
 import { consultarCnpj } from './servicos/consulta-cnpj.js';
@@ -432,6 +432,21 @@ export async function rotas(app: FastifyInstance) {
       const id = Number((req.params as any).id);
       cobrancaDoUsuario(req, id);
       return cancelarCobranca(id);
+    });
+    api.post('/api/cobrancas/:id/reemitir', { preHandler: exigirPapel('admin', 'operador') }, async (req) => {
+      const id = Number((req.params as any).id);
+      cobrancaDoUsuario(req, id);
+      const d = z.object({ vencimento: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Informe o vencimento'), valor: z.number().positive().nullish() }).parse(req.body);
+      exigirLicenca();
+      return reemitirCobranca(u(req).id, id, d.vencimento, d.valor);
+    });
+    api.get('/api/empresas/:id/modelos-whatsapp', async (req) => {
+      const id = Number((req.params as any).id); checarEmpresa(req, id);
+      return obterModelosWhatsapp(id);
+    });
+    api.put('/api/empresas/:id/modelos-whatsapp', { preHandler: exigirPapel('admin', 'operador') }, async (req) => {
+      const id = Number((req.params as any).id); checarEmpresa(req, id);
+      salvarModelosWhatsapp(id, z.object({ lembrete: z.string().max(1000), atraso: z.string().max(1000) }).parse(req.body)); return { ok: true };
     });
     api.post('/api/cobrancas/:id/pagar', { preHandler: exigirPapel('admin', 'operador') }, async (req) => {
       const id = Number((req.params as any).id);
