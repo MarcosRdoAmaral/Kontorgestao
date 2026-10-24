@@ -34,8 +34,16 @@ jobs:
           if gh release view "v${{ steps.v.outputs.versao }}" >/dev/null 2>&1; then echo "existe=1" >> "$GITHUB_OUTPUT"; else echo "existe=0" >> "$GITHUB_OUTPUT"; fi
       - run: npm ci
         if: steps.ja.outputs.existe == '0'
-      - run: npm test
+      - name: Ferramentas dos testes (xmllint e openssl)
         if: steps.ja.outputs.existe == '0'
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq libxml2-utils openssl
+      - name: Testes
+        if: steps.ja.outputs.existe == '0'
+        run: |
+          npm test > test.log 2>&1 || {
+            grep -E "^not ok|error:|Error|expected|actual|ENOENT|not found|!==" -A2 test.log | head -40 | while IFS= read -r l; do echo "::error::$l"; done
+            exit 1
+          }
       - run: npm run dist
         if: steps.ja.outputs.existe == '0'
       - name: Checksum
