@@ -61,6 +61,7 @@ const REGRAS: Regra[] = [
   { m: 'GET', r: /^\/api\/relatorios\//, mod: ['painel'] },
   { m: 'GET', r: /^\/api\/empresas\/\d+\/painel$/, mod: ['painel'] },
   { r: /^\/api\/empresas\/\d+\/(despesas(\/\d+)?|despesas-categorias)$/, mod: ['despesas'] },
+  { r: /^\/api\/empresas\/\d+\/extrato(\/.*)?$/, mod: ['despesas'] },
   { m: 'GET', r: /^\/api\/empresas\/\d+\/feriados$/, mod: ['banco', 'emitir'] },
   { r: /^\/api\/empresas\/\d+\/feriados$/, mod: ['banco'] },
 ];

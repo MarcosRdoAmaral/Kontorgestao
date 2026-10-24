@@ -11,8 +11,13 @@ const csv = (v: unknown) => `"${String(v ?? '').replace(/"/g, '""')}"`;
 const num = (v: number) => v.toFixed(2);
 const sgml = (s: string) => s.replace(/[\r\n<>&]+/g, ' ').trim().slice(0, 64);
 
-/** Movimentação do período: boletos pagos (entradas) e despesas lançadas (saídas). */
+/** Movimentação do período: extrato importado ou, na falta dele, boletos pagos (entradas) e despesas lançadas (saídas). */
 export function movimentos(empresaId: number, de: string, ate: string): Movimento[] {
+  // com extrato bancário importado, ele é a fonte oficial (já traz tudo que passou pela conta)
+  const extrato = db.prepare('SELECT id, data, valor, descricao, documento, categoria FROM extrato_lancamentos WHERE empresa_id = ? AND data BETWEEN ? AND ? ORDER BY data, id').all(empresaId, de, ate) as any[];
+  if (extrato.length) {
+    return extrato.map((r): Movimento => ({ data: r.data, valor: Math.abs(r.valor), tipo: r.valor > 0 ? 'CREDIT' : 'DEBIT', id: `KG-EXT-${r.id}`, historico: `${r.descricao}${r.documento ? ' ' + r.documento : ''}${r.categoria ? ' [' + r.categoria + ']' : ''}` }));
+  }
   const entradas = db.prepare(`SELECT c.id, substr(c.pago_em,1,10) AS data, COALESCE(c.valor_pago, c.valor) AS valor, c.descricao, t.nome
       FROM cobrancas c LEFT JOIN tomadores t ON t.id = c.tomador_id
       WHERE c.empresa_id = ? AND c.status = 'PAGO' AND c.pago_em IS NOT NULL AND substr(c.pago_em,1,10) BETWEEN ? AND ?`).all(empresaId, de, ate) as any[];

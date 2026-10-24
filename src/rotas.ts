@@ -10,6 +10,7 @@ import { ativarLicenca, exigirLicenca, statusLicenca } from './licenca.js';
 import { BoletoAvulso, EntradaFaturamento, faturar, gerarBoletoAvulso, listarCobrancas } from './servicos/faturamento.js';
 import { ContaBancaria, obterModelosWhatsapp, reemitirCobranca, salvarModelosWhatsapp, boletoPdf, cancelarCobranca, gerarRemessaEmpresa, listarRemessas, marcarPago, obterCobranca, obterConta, obterRemessa, processarRetorno, salvarConta } from './servicos/cobranca.js';
 import { Despesa, criarDespesa, editarDespesa, excluirDespesa, listarCategorias, listarDespesas, painelFinanceiro, salvarCategorias } from './servicos/financeiro.js';
+import { Classificacao, balancoExtrato, candidatosBoleto, classificar, conciliar, excluirImportacao, extratoDoMes, importarExtrato } from './servicos/extrato.js';
 import { pacoteContabilidade } from './servicos/contabilidade.js';
 import { criarBackup, listarBackups } from './servicos/backup.js';
 import { consultarCnpj } from './servicos/consulta-cnpj.js';
@@ -563,6 +564,42 @@ export async function rotas(app: FastifyInstance) {
       if (!xml) throw new ErroNegocio('Nota sem XML.', 404);
       const nome = n.xml_nfse ? `NFSe_${n.n_nfse}.xml` : `DPS_${n.n_dps}.xml`;
       return reply.type('application/xml').header('Content-Disposition', `attachment; filename="${nome}"`).send(xml);
+    });
+
+    // ---------- Extrato bancário (PDF Ailos), classificação e conciliação ----------
+    api.post('/api/empresas/:id/extrato/importar', { bodyLimit: 12 * 1024 * 1024 }, async (req) => {
+      const id = Number((req.params as any).id); checarEmpresa(req, id);
+      const d = z.object({ nome: z.string().max(200).default('extrato.pdf'), pdfBase64: z.string().min(100) }).parse(req.body);
+      const pdf = Buffer.from(d.pdfBase64, 'base64');
+      if (pdf.subarray(0, 4).toString() !== '%PDF') throw new ErroNegocio('O arquivo não é um PDF.');
+      return importarExtrato(id, d.nome, pdf);
+    });
+    api.get('/api/empresas/:id/extrato', async (req) => {
+      const id = Number((req.params as any).id); checarEmpresa(req, id);
+      const mes = (req.query as any).mes;
+      return extratoDoMes(id, /^\d{4}-\d{2}$/.test(mes) ? mes : new Date(Date.now() - 3 * 3600e3).toISOString().slice(0, 7));
+    });
+    api.get('/api/empresas/:id/extrato/balanco', async (req) => {
+      const id = Number((req.params as any).id); checarEmpresa(req, id);
+      const q = z.object({ de: z.string().regex(/^\d{4}-\d{2}-\d{2}$/), ate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/) }).parse(req.query);
+      return balancoExtrato(id, q.de, q.ate);
+    });
+    api.put('/api/empresas/:id/extrato/:lid', async (req) => {
+      const p = req.params as any; checarEmpresa(req, Number(p.id));
+      classificar(Number(p.id), Number(p.lid), Classificacao.parse(req.body)); return { ok: true };
+    });
+    api.get('/api/empresas/:id/extrato/:lid/boletos', async (req) => {
+      const p = req.params as any; checarEmpresa(req, Number(p.id));
+      return candidatosBoleto(Number(p.id), Number(p.lid));
+    });
+    api.post('/api/empresas/:id/extrato/:lid/conciliar', async (req) => {
+      const p = req.params as any; checarEmpresa(req, Number(p.id));
+      const d = z.object({ cobrancaId: z.number().int().nullable(), darBaixa: z.boolean().default(false) }).parse(req.body);
+      conciliar(Number(p.id), Number(p.lid), d.cobrancaId, d.darBaixa); return { ok: true };
+    });
+    api.delete('/api/empresas/:id/extrato/importacoes/:iid', async (req) => {
+      const p = req.params as any; checarEmpresa(req, Number(p.id));
+      excluirImportacao(Number(p.id), Number(p.iid)); return { ok: true };
     });
 
     /** Pacote para a contabilidade: XML/PDF das notas do período e OFX da movimentação. */

@@ -307,13 +307,13 @@ async function iniciar() {
 
 /** A tela pertence a algum módulo liberado para o usuário? (o servidor confere de novo em cada chamada) */
 function telaPermitida(nome) {
-  const modulo = { painel: 'painel', emitir: 'emitir', notas: 'notas', nota: 'notas', cobrancas: 'cobrancas', banco: 'banco', despesas: 'despesas', tomadores: 'tomadores', servicos: 'servicos', empresas: 'empresas' }[nome];
+  const modulo = { painel: 'painel', emitir: 'emitir', notas: 'notas', nota: 'notas', cobrancas: 'cobrancas', banco: 'banco', despesas: 'despesas', extrato: 'despesas', tomadores: 'tomadores', servicos: 'servicos', empresas: 'empresas' }[nome];
   return nome === 'config' || (modulo && estado.usuario.modulos.includes(modulo));
 }
 
 const rotas = {
   painel: telaPainel, emitir: telaEmitir, notas: telaNotas, nota: telaNota,
-  cobrancas: telaCobrancas, banco: telaBanco, despesas: telaDespesas, tomadores: telaTomadores, servicos: telaServicos, empresas: telaEmpresas, config: telaConfig,
+  cobrancas: telaCobrancas, banco: telaBanco, despesas: telaDespesas, extrato: telaExtrato, tomadores: telaTomadores, servicos: telaServicos, empresas: telaEmpresas, config: telaConfig,
 };
 
 function rotear() {
@@ -961,6 +961,92 @@ async function telaBanco() {
 // ---------------------------------------------------------------------------
 // Despesas e balanço
 // ---------------------------------------------------------------------------
+async function telaExtrato() {
+  const mes = telaExtrato.mes ?? mesAtual();
+  const filtro = telaExtrato.filtro ?? 'todos';
+  const semelhantes = telaExtrato.semelhantes ?? true;
+  const base = `/api/empresas/${estado.empresaId}/extrato`;
+  const d = await api('GET', `${base}?mes=${mes}`);
+  const vis = d.lancamentos.filter((l) => ({ todos: true, sem: !l.categoria, entradas: l.valor > 0, saidas: l.valor < 0 }[filtro]));
+  const soma = (l) => l.reduce((t, x) => t + Math.abs(x.valor), 0);
+  const agrupar = (l) => Object.entries(l.reduce((a, x) => ({ ...a, [x.categoria ?? 'Sem classificação']: (a[x.categoria ?? 'Sem classificação'] ?? 0) + Math.abs(x.valor) }), {})).sort((a, b) => b[1] - a[1]);
+  const ent = d.lancamentos.filter((l) => l.valor > 0), sai = d.lancamentos.filter((l) => l.valor < 0);
+  const tabCat = (titulo, l, cor) => `<div class="cartao"><h2 style="margin-top:0">${titulo} <span class="sutil">· ${brl(soma(l))}</span></h2>
+    ${l.length ? `<table class="tabela"><tbody>${agrupar(l).map(([c, v]) => `<tr><td>${esc(c)}</td><td class="num" style="color:${cor}">${brl(v)}</td><td class="num sutil">${Math.round(v / soma(l) * 100)}%</td></tr>`).join('')}</tbody></table>` : '<p class="sutil">Nada neste mês.</p>'}</div>`;
+  conteudo.innerHTML = `
+    <div class="topo"><div><h1>Extrato e conciliação</h1><p class="sutil">Importe o extrato em PDF do Ailos, classifique entradas e saídas e ligue os recebimentos aos boletos.</p></div>
+      <div><label>Mês ${d.meses.length ? `<select id="mes-ext">${[...new Set([mes, ...d.meses])].sort().reverse().map((m) => `<option value="${m}" ${m === mes ? 'selected' : ''}>${nomeMes(m)}</option>`).join('')}</select>` : `<input type="month" id="mes-ext" value="${mes}">`}</label>
+        <button class="primario" id="imp-ext">Importar extrato (PDF)</button><input type="file" id="arq-ext" accept="application/pdf,.pdf" hidden></div></div>
+    <div id="res-import"></div>
+    ${d.lancamentos.length ? `<div class="resumo">
+      <div class="cartao"><div class="sutil">Entradas</div><div class="valor" style="color:${COR.verde}">${compacto(d.entradas)}</div><div class="dica">${ent.length} lançamento(s)</div></div>
+      <div class="cartao"><div class="sutil">Saídas</div><div class="valor" style="color:${COR.vermelho}">${compacto(d.saidas)}</div><div class="dica">${sai.length} lançamento(s)</div></div>
+      <div class="cartao"><div class="sutil">Resultado do mês</div><div class="valor" style="color:${d.resultado < 0 ? COR.vermelho : COR.verde}">${compacto(d.resultado)}</div></div>
+      <div class="cartao"><div class="sutil">Sem classificação</div><div class="valor" style="color:${d.semClassificacao ? COR.laranja : COR.verde}">${d.semClassificacao}</div><div class="dica">${d.semClassificacao ? 'classifique para fechar o balanço' : 'tudo classificado'}</div></div>
+    </div>
+    <div class="duas-colunas">${tabCat('Entradas por categoria', ent, COR.verde)}${tabCat('Saídas por categoria', sai, COR.vermelho)}</div>
+    <div class="topo"><h2>Lançamentos de ${nomeMes(mes)}</h2>
+      <div><nav class="abas" id="filtros-ext">${[['todos', 'Todos'], ['sem', `Sem classificação (${d.semClassificacao})`], ['entradas', 'Entradas'], ['saidas', 'Saídas']].map(([k, n]) => `<a href="#" data-f="${k}" class="${k === filtro ? 'ativo' : ''}">${n}</a>`).join('')}</nav></div></div>
+    <label class="sutil" style="flex-direction:row;display:flex;gap:8px;align-items:center;margin:8px 0"><input type="checkbox" id="semelhantes" style="width:auto" ${semelhantes ? 'checked' : ''}> Ao classificar, aplicar também aos lançamentos parecidos (mesma descrição) e lembrar nas próximas importações</label>
+    <datalist id="cat-ent">${d.categorias.entradas.map((c) => `<option value="${esc(c)}">`).join('')}</datalist>
+    <datalist id="cat-sai">${d.categorias.saidas.map((c) => `<option value="${esc(c)}">`).join('')}</datalist>
+    <div class="rolagem"><table class="tabela"><thead><tr><th>Data</th><th>Descrição</th><th class="num">Valor</th><th>Categoria</th><th>Boleto</th></tr></thead><tbody>
+      ${vis.map((l) => `<tr><td>${dataBr(l.data)}</td><td>${esc(l.descricao)}${l.documento ? ` <span class="sutil">${esc(l.documento)}</span>` : ''}</td>
+        <td class="num" style="color:${l.valor < 0 ? COR.vermelho : COR.verde}">${brl(l.valor)}</td>
+        <td><input data-cat="${l.id}" list="${l.valor > 0 ? 'cat-ent' : 'cat-sai'}" value="${esc(l.categoria ?? '')}" placeholder="Classificar…" ${l.categoria ? '' : 'style="border-color:' + (COR.laranja) + '"'}></td>
+        <td>${l.cobranca_id ? `<span title="Boleto com vencimento em ${dataBr(l.boleto_venc)}">✔ ${esc(l.tomador ?? 'boleto')}</span> <a href="#" data-des="${l.id}">desfazer</a>` : l.valor > 0 ? `<button data-bol="${l.id}">Ligar a boleto</button>` : ''}</td></tr>`).join('') || '<tr><td colspan="5" class="sutil">Nenhum lançamento neste filtro.</td></tr>'}
+    </tbody></table></div>
+    <h3>Importações</h3>
+    <table class="tabela"><tbody>${d.importacoes.map((i) => `<tr><td>${esc(i.arquivo)}</td><td>${i.periodo_ini ? dataBr(i.periodo_ini) + ' a ' + dataBr(i.periodo_fim) : ''}</td><td class="num">${i.qtd} lançamentos</td><td class="num"><a href="#" data-exi="${i.id}">excluir</a></td></tr>`).join('')}</tbody></table>`
+    : '<div class="vazio">Nenhum lançamento neste mês. Importe o extrato em PDF (Ailos Conta Online → Extrato → Conta corrente → exportar PDF).</div>'}`;
+
+  $('#mes-ext').onchange = (ev) => { telaExtrato.mes = ev.target.value || mesAtual(); telaExtrato(); };
+  const arq = $('#arq-ext');
+  $('#imp-ext').onclick = () => arq.click();
+  arq.onchange = async () => {
+    const f = arq.files[0]; if (!f) return;
+    const box = $('#res-import'); box.innerHTML = '<p class="sutil">Lendo o extrato…</p>';
+    try {
+      const b64 = await new Promise((ok, no) => { const r = new FileReader(); r.onload = () => ok(String(r.result).split(',')[1]); r.onerror = no; r.readAsDataURL(f); });
+      const r = await api('POST', `${base}/importar`, { nome: f.name, pdfBase64: b64 });
+      if (r.periodo?.[0]) telaExtrato.mes = r.periodo[1].slice(0, 7);
+      await telaExtrato();
+      $('#res-import').innerHTML = `<div class="banner"><strong>Extrato importado:</strong> ${r.novos} lançamento(s) novo(s)${r.repetidos ? `, ${r.repetidos} já existiam` : ''}${r.conciliados ? `, ${r.conciliados} ligado(s) a boletos automaticamente` : ''}. Os saldos e totais do PDF foram conferidos.
+        ${r.avisos.map((a) => `<br><span class="erro">⚠ ${esc(a)}</span>`).join('')}</div>`;
+    } catch (e) { box.innerHTML = `<p class="erro">${esc(mensagemErro(e))}</p>`; }
+    arq.value = '';
+  };
+  if (!d.lancamentos.length) return;
+  const recarregar = async () => { const y = window.scrollY; await telaExtrato(); window.scrollTo(0, y); };
+  $('#semelhantes').onchange = (ev) => { telaExtrato.semelhantes = ev.target.checked; };
+  conteudo.querySelectorAll('#filtros-ext a').forEach((a) => (a.onclick = (ev) => { ev.preventDefault(); telaExtrato.filtro = a.dataset.f; telaExtrato(); }));
+  conteudo.querySelectorAll('[data-cat]').forEach((i) => (i.onchange = async () => {
+    try { await api('PUT', `${base}/${i.dataset.cat}`, { categoria: i.value.trim() || null, aplicarSemelhantes: $('#semelhantes').checked }); await recarregar(); }
+    catch (e) { aviso(mensagemErro(e)); }
+  }));
+  conteudo.querySelectorAll('[data-des]').forEach((a) => (a.onclick = async (ev) => { ev.preventDefault(); await api('POST', `${base}/${a.dataset.des}/conciliar`, { cobrancaId: null }); await recarregar(); }));
+  conteudo.querySelectorAll('[data-exi]').forEach((a) => (a.onclick = async (ev) => {
+    ev.preventDefault();
+    if (!confirm('Excluir esta importação e todos os lançamentos dela (inclusive as classificações)?')) return;
+    await api('DELETE', `${base}/importacoes/${a.dataset.exi}`); await recarregar();
+  }));
+  conteudo.querySelectorAll('[data-bol]').forEach((b) => (b.onclick = async () => {
+    const l = d.lancamentos.find((x) => x.id === Number(b.dataset.bol));
+    const c = await api('GET', `${base}/${l.id}/boletos`);
+    abrirDialogo(`<form id="form-lig"><h2>Ligar a um boleto</h2>
+      <p class="sutil">${dataBr(l.data)} · ${esc(l.descricao)} · <strong>${brl(l.valor)}</strong></p>
+      ${c.length ? `<div class="rolagem"><table class="tabela"><tbody>${c.map((x) => `<tr><td>${esc(x.tomador)}</td><td>${esc(x.descricao ?? '')}</td><td>venc. ${dataBr(x.vencimento)}</td><td>${x.status === 'PAGO' ? 'pago' : 'em aberto'}</td><td><button type="button" data-lig="${x.id}" data-st="${x.status}">Ligar</button></td></tr>`).join('')}</tbody></table></div>
+      <label><input type="checkbox" name="baixa" checked> Se o boleto estiver em aberto, dar baixa como pago nesta data</label>`
+      : '<p class="sutil">Nenhum boleto com este valor e data próxima. Confira se o valor recebido é o do boleto (descontos e juros mudam o valor).</p>'}
+      <p class="erro" id="erro-lig"></p><div class="acoes"><button type="button" data-fechar>Fechar</button></div></form>`, (dlg) => {
+      dlg.querySelectorAll('[data-lig]').forEach((x) => (x.onclick = async () => {
+        try { await api('POST', `${base}/${l.id}/conciliar`, { cobrancaId: Number(x.dataset.lig), darBaixa: $('#form-lig').baixa?.checked ?? false }); dlg.close(); await recarregar(); }
+        catch (e) { $('#erro-lig').textContent = mensagemErro(e); }
+      }));
+    });
+  }));
+}
+
 async function telaDespesas() {
   const mes = telaDespesas.mes ?? mesAtual();
   const base = `/api/empresas/${estado.empresaId}`;
@@ -1770,7 +1856,7 @@ async function telaContabilidade() {
         <label>Até <input type="date" name="ate" required value="${fim}"></label>
         <label class="largo"><span><input type="checkbox" name="xml" checked> XML das notas emitidas</span></label>
         <label class="largo"><span><input type="checkbox" name="pdf" checked> PDF (DANFSe) das notas emitidas</span></label>
-        <label class="largo"><span><input type="checkbox" name="ofx" checked> Extrato em OFX (boletos recebidos e despesas lançadas)</span>
+        <label class="largo"><span><input type="checkbox" name="ofx" checked> Extrato em OFX (do extrato importado; sem ele, boletos recebidos e despesas lançadas)</span>
           <span class="dica">Também vai uma planilha com a mesma movimentação, e outra com a lista das notas. As notas são escolhidas pela competência.</span></label>
         <p class="erro" id="erro-contab"></p>
         <div class="acoes largo"><button class="primario" type="submit" ${e ? '' : 'disabled'}>Gerar pacote (ZIP)</button></div>

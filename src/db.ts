@@ -385,6 +385,41 @@ const migracoes: string[] = [
   CREATE INDEX ix_tomador_servicos ON tomador_servicos(tomador_id);`,
   // 14: tributação padrão do serviço (ISSQN, retenções, totais de tributos, município, informações complementares)
   `ALTER TABLE servicos ADD COLUMN tributacao_json TEXT;`,
+  // 15: extrato bancário importado (PDF), classificação e conciliação com boletos
+  `CREATE TABLE extrato_importacoes (
+    id INTEGER PRIMARY KEY,
+    empresa_id INTEGER NOT NULL REFERENCES empresas(id),
+    arquivo TEXT NOT NULL,
+    hash TEXT NOT NULL,
+    periodo_ini TEXT, periodo_fim TEXT,
+    saldo_anterior REAL, saldo_final REAL,
+    qtd INTEGER NOT NULL,
+    conta TEXT,
+    criado_em TEXT NOT NULL DEFAULT (datetime('now')),
+    UNIQUE (empresa_id, hash)
+  );
+  CREATE TABLE extrato_lancamentos (
+    id INTEGER PRIMARY KEY,
+    empresa_id INTEGER NOT NULL REFERENCES empresas(id),
+    importacao_id INTEGER NOT NULL REFERENCES extrato_importacoes(id) ON DELETE CASCADE,
+    data TEXT NOT NULL,
+    descricao TEXT NOT NULL,
+    documento TEXT,
+    valor REAL NOT NULL,                      -- positivo = entrada, negativo = saída
+    saldo REAL,
+    categoria TEXT,
+    categoria_origem TEXT,                    -- auto | regra | manual
+    cobranca_id INTEGER REFERENCES cobrancas(id),
+    chave TEXT NOT NULL,
+    UNIQUE (empresa_id, chave)
+  );
+  CREATE INDEX ix_extrato_data ON extrato_lancamentos(empresa_id, data);
+  CREATE TABLE extrato_regras (
+    empresa_id INTEGER NOT NULL REFERENCES empresas(id),
+    chave TEXT NOT NULL,
+    categoria TEXT NOT NULL,
+    PRIMARY KEY (empresa_id, chave)
+  );`,
 ];
 
 export function migrar(): void {
