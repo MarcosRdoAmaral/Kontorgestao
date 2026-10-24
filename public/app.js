@@ -354,7 +354,7 @@ async function telaEmitir(notaIdCorrecao) {
             <select name="acao"><option value="NOTA">Somente a nota fiscal</option><option value="NOTA_BOLETO">Nota fiscal + boleto</option><option value="BOLETO">Somente o boleto</option></select>
             <span class="dica" id="dica-acao"></span></label>
           <label data-boleto>Vencimento do boleto <input type="date" name="vencimento"></label>
-          <label data-boleto>Valor do boleto (R$) <input name="valorBoleto" data-num inputmode="decimal" placeholder="Valor líquido da nota"><span class="dica">Em branco: valor do serviço menos descontos e retenções.</span></label>
+          <label data-boleto>Valor do boleto (R$) <input name="valorBoleto" data-num inputmode="decimal" placeholder="Valor líquido da nota"><span class="dica">Preenchido sozinho com o líquido da nota (serviço menos descontos e retenções). Você pode alterar; apague o campo para voltar ao automático.</span></label>
         </div>
       </fieldset>
 
@@ -465,6 +465,20 @@ async function telaEmitir(notaIdCorrecao) {
     aplicarModo();
   });
   f.acao.addEventListener('change', aplicarModo);
+  // Valor do boleto: acompanha o líquido da nota (mesma conta do servidor), até o usuário digitar outro valor
+  let boletoManual = false;
+  const sugerirBoleto = () => {
+    if (boletoManual || !f.valorBoleto) return;
+    const d = lerForm(f), r = d;
+    const base = (d.valor ?? 0) - (d.descontoIncondicionado ?? 0);
+    const iss = Number(d.issRetido) === 2 ? Math.round(base * (d.aliquota ?? 0)) / 100 : 0;
+    const ret = (r.irrf ?? 0) + (r.cp ?? 0) + (r.csll ?? 0) + (r.pis ?? 0) + (r.cofins ?? 0) + iss;
+    const liquido = f.acao.value === 'BOLETO' ? (d.valor ?? 0) : Math.round((base - ret) * 100) / 100;
+    f.valorBoleto.value = liquido > 0 ? liquido.toFixed(2).replace('.', ',') : '';
+  };
+  f.valorBoleto?.addEventListener('input', () => { boletoManual = f.valorBoleto.value.trim() !== ''; if (!boletoManual) sugerirBoleto(); });
+  f.addEventListener('input', (ev) => { if (ev.target !== f.valorBoleto) sugerirBoleto(); });
+  f.addEventListener('change', (ev) => { if (ev.target !== f.valorBoleto) sugerirBoleto(); });
   if (f.tomadorId.value) f.tomadorId.dispatchEvent(new Event('change'));
 
   const recalcular = () => {
