@@ -1,14 +1,15 @@
 name: Publicar versão
 
-# Para publicar uma versão: suba o número em package.json, faça o commit e crie a tag, por exemplo:
-#   git tag v1.0.6 && git push origin v1.0.6
-# O fluxo testa, gera o instalador do Windows e cria a release com o .exe e o .sha256,
+# Para publicar uma versão: aumente "version" no package.json e envie para a branch main.
+# O fluxo testa, gera o instalador do Windows e cria a release v<versão> com o .exe e o .sha256,
 # que os aplicativos instalados usam para avisar/baixar a atualização.
+# Também pode ser executado manualmente em Actions > Publicar versão > Run workflow.
 
 on:
   workflow_dispatch:
   push:
-    tags: ['v*']
+    branches: [main]
+    paths: [package.json]
 
 permissions:
   contents: write
@@ -22,20 +23,39 @@ jobs:
         with:
           node-version: 22
           cache: npm
+      - name: Versão
+        id: v
+        run: echo "versao=$(node -p "require('./package.json').version")" >> "$GITHUB_OUTPUT"
+      - name: Esta versão já foi publicada?
+        id: ja
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view "v${{ steps.v.outputs.versao }}" >/dev/null 2>&1; then echo "existe=1" >> "$GITHUB_OUTPUT"; else echo "existe=0" >> "$GITHUB_OUTPUT"; fi
       - run: npm ci
-      - name: A tag precisa bater com a versão do package.json
-        if: startsWith(github.ref, 'refs/tags/v')
-        run: test "v$(node -p "require('./package.json').version")" = "${GITHUB_REF_NAME}"
-      - run: npm test
+        if: steps.ja.outputs.existe == '0'
+      - name: Ferramentas dos testes (xmllint e openssl)
+        if: steps.ja.outputs.existe == '0'
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq libxml2-utils openssl nsis
+      - name: Testes
+        if: steps.ja.outputs.existe == '0'
+        run: |
+          npm test > test.log 2>&1 || {
+            grep -E "^not ok|error:|Error|expected|actual|ENOENT|not found|!==" -A2 test.log | head -40 | while IFS= read -r l; do echo "::error::$l"; done
+            exit 1
+          }
       - run: npm run dist
+        if: steps.ja.outputs.existe == '0'
       - name: Checksum
+        if: steps.ja.outputs.existe == '0'
         run: cd release && sha256sum Kontor-Gestao-Instalador-*.exe > "$(ls Kontor-Gestao-Instalador-*.exe).sha256"
       - uses: actions/upload-artifact@v4
+        if: steps.ja.outputs.existe == '0'
         with:
           name: Kontor-Gestao-Instalador
           path: release/Kontor-Gestao-Instalador-*
       - name: Criar release
-        if: startsWith(github.ref, 'refs/tags/v')
+        if: steps.ja.outputs.existe == '0'
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "${GITHUB_REF_NAME}" release/Kontor-Gestao-Instalador-* --title "Kontor Gestão ${GITHUB_REF_NAME#v}" --generate-notes
+        run: gh release create "v${{ steps.v.outputs.versao }}" release/Kontor-Gestao-Instalador-* --target "${GITHUB_SHA}" --title "Kontor Gestão ${{ steps.v.outputs.versao }}" --generate-notes
