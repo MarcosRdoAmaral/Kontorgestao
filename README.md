@@ -107,3 +107,6 @@ Observação: o instalador não é assinado digitalmente; o Windows SmartScreen 
 
 ## Versão 1.0.14 – Controle de licença ativado
 Chave pública de licenciamento configurada: teste de 30 dias a partir do primeiro uso após a atualização e, depois, código de ativação por computador.
+
+## Versão 2.0.0
+Marco da versão 2: emissão de NFS-e nacional, faturamento por cliente (nota / nota + boleto / só boleto), envio por e-mail e WhatsApp, atualização automática e controle de licença por computador. A integração bancária dos boletos é a próxima etapa.
