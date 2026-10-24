@@ -58,4 +58,4 @@ jobs:
         if: steps.ja.outputs.existe == '0'
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "v${{ steps.v.outputs.versao }}" release/Kontor-Gestao-Instalador-* --target "${GITHUB_SHA}" --title "Kontor Gestão ${{ steps.v.outputs.versao }}" --generate-notes
+        run: gh release create "v${{ steps.v.outputs.versao }}" release/Kontor-Gestao-Instalador-* --target "${GITHUB_SHA}" --title "Kontor Gestão ${{ steps.v.outputs.versao }}" $( [ -f "novidades/${{ steps.v.outputs.versao }}.md" ] && echo "--notes-file novidades/${{ steps.v.outputs.versao }}.md" || echo "--notes Melhorias e correções de desempenho e estabilidade." )

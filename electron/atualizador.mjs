@@ -34,7 +34,7 @@ export async function buscarNovaVersao(repo, versaoAtual, buscar = fetch) {
   if (!versao || compararVersoes(versao, versaoAtual) <= 0) return { situacao: 'atualizado', versao: versaoAtual };
   const assets = escolherAssets(rel);
   if (!assets) return { situacao: 'sem_instalador', versao };
-  return { situacao: 'nova', versao, notas: rel.body ?? '', ...assets };
+  return { situacao: 'nova', versao, notas: String(rel.body ?? '').split('\n').filter((l) => !/https?:\/\/|Full Changelog/i.test(l)).join('\n').replace(/\*\*/g, '').trim(), ...assets };
 }
 
 /** Só baixa de github.com (release assets). */
