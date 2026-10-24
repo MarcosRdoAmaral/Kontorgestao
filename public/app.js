@@ -189,13 +189,13 @@ async function iniciar() {
 
 const rotas = {
   painel: telaPainel, emitir: telaEmitir, notas: telaNotas, nota: telaNota,
-  tomadores: telaTomadores, servicos: telaServicos, empresas: telaEmpresas, usuarios: telaUsuarios, backup: telaBackup,
+  tomadores: telaTomadores, servicos: telaServicos, empresas: telaEmpresas, usuarios: telaUsuarios, email: telaEmail, backup: telaBackup,
 };
 
 function rotear() {
   const [, nome = 'painel', param] = location.hash.split('/');
   document.querySelectorAll('nav a').forEach((a) => a.classList.toggle('ativo', a.getAttribute('href') === `#/${nome}`));
-  const precisaEmpresa = !['painel', 'empresas', 'usuarios', 'nota', 'backup'].includes(nome);
+  const precisaEmpresa = !['painel', 'empresas', 'usuarios', 'nota', 'backup', 'email'].includes(nome);
   if (precisaEmpresa && !empresa()) {
     conteudo.innerHTML = `<div class="vazio"><p>Cadastre a primeira empresa para começar a emitir.</p>
       ${estado.usuario.papel !== 'cliente' ? '<a href="#/empresas">Cadastrar empresa</a>' : ''}</div>`;
@@ -322,6 +322,7 @@ async function telaEmitir(notaIdCorrecao) {
               <label>Estaduais (%) <input name="tEst" data-num inputmode="decimal" value="${p.pTotTrib?.est ?? ''}"></label>
               <label>Municipais (%) <input name="tMun" data-num inputmode="decimal" value="${p.pTotTrib?.mun ?? ''}"></label>
             </div></fieldset>` : ''}
+          ${empresa()?.ambiente === 1 && estado.usuario.papel !== 'cliente' ? '<label class="largo"><span><input type="checkbox" name="enviarEmail"> Enviar por e-mail ao tomador quando a nota for autorizada</span><span class="dica">Usa o e-mail do cadastro do tomador. Configure o servidor em E-mail.</span></label>' : ''}
           <label class="largo">Informações complementares <textarea name="infoComplementar" maxlength="2000">${esc(p.infoComplementar ?? '')}</textarea></label>
         </div>
       </fieldset>
@@ -376,6 +377,15 @@ async function telaEmitir(notaIdCorrecao) {
     try {
       const nota = corrigindo ? await api('POST', `/api/notas/${corrigindo.id}/reenviar`, corpo) : await api('POST', '/api/notas', corpo);
       aviso(nota.status === 'AUTORIZADA' ? `NFS-e nº ${nota.n_nfse} autorizada.` : `A nota ficou ${STATUS[nota.status].toLowerCase()}. Veja o motivo.`);
+      if (nota.status === 'AUTORIZADA' && d.enviarEmail) {
+        // o envio é opcional: se falhar (sem e-mail no tomador, SMTP errado), a nota continua válida
+        try {
+          const completa = await api('GET', `/api/notas/${nota.id}`);
+          if (!completa.tomador_email) throw new Error('o tomador não tem e-mail cadastrado');
+          await api('POST', `/api/notas/${nota.id}/email`, { para: [completa.tomador_email] });
+          aviso(`NFS-e nº ${nota.n_nfse} autorizada e enviada para ${completa.tomador_email}.`);
+        } catch (e2) { aviso(`NFS-e autorizada, mas o e-mail não foi enviado: ${mensagemErro(e2)}`); }
+      }
       location.hash = `#/nota/${nota.id}`;
     } catch (err) {
       $('#erro-emitir').textContent = mensagemErro(err);
@@ -444,7 +454,7 @@ async function telaNota(id) {
     ${n.erros.length ? `<h2>Motivo${n.erros.length > 1 ? 's' : ''} da recusa</h2><ul class="lista-erros">${n.erros.map((e) => `<li><strong>${esc(e.codigo)}</strong> ${esc(e.descricao)}${e.complemento ? ` <span class="dica">${esc(e.complemento)}</span>` : ''}</li>`).join('')}</ul>` : ''}
     ${n.alertas.length ? `<h2>Alertas da Sefin</h2><ul>${n.alertas.map((a) => `<li>${esc(a.Descricao ?? a.descricao ?? JSON.stringify(a))}</li>`).join('')}</ul>` : ''}
     <div class="acoes">
-      ${n.chave_acesso ? `<button class="primario" id="b-pdf">Abrir DANFSe</button><button id="b-xml">Baixar XML</button><button id="b-portal">Consultar no portal nacional</button>` : ''}
+      ${n.chave_acesso ? `<button class="primario" id="b-pdf">Abrir DANFSe</button><button id="b-xml">Baixar XML</button><button id="b-portal">Consultar no portal nacional</button>${estado.usuario.papel !== 'cliente' && n.ambiente === 1 ? '<button id="b-email">Enviar por e-mail</button>' : ''}` : ''}
       ${['REJEITADA', 'ERRO_COMUNICACAO', 'PENDENTE'].includes(n.status) ? `<a href="#/emitir/${n.id}"><button type="button">Corrigir e reenviar</button></a><button id="b-reenviar">Reenviar sem alterar</button>` : ''}
       ${n.status === 'ERRO_COMUNICACAO' ? '<button id="b-consultar">Consultar na Sefin</button>' : ''}
       ${podeCancelar ? '<button class="perigo" id="b-cancelar">Cancelar nota</button>' : ''}
@@ -462,9 +472,27 @@ async function telaNota(id) {
       ${n.autorizada_em ? `<dt>Autorizada em</dt><dd>${dhBr(n.autorizada_em)}</dd>` : ''}
       ${n.cancelada_em ? `<dt>Cancelada em</dt><dd>${dhBr(n.cancelada_em)}</dd>` : ''}
     </dl>
+    ${n.emails?.length ? `<h2>E-mails enviados</h2><ul>${n.emails.map((m) => `<li>${dhBr(m.criado_em)} — ${esc(m.para)}: ${m.status === 'ENVIADO' ? 'enviado' : '<span class="pendente-txt">falhou</span> ' + esc(m.erro ?? '')}</li>`).join('')}</ul>` : ''}
     ${n.eventos.length ? `<h2>Eventos</h2><ul>${n.eventos.map((e) => `<li>${dhBr(e.criado_em)} — ${e.tipo}: ${e.status} (${esc(e.motivo ?? '')})</li>`).join('')}</ul>` : ''}`;
 
   $('#b-pdf') && ($('#b-pdf').onclick = () => baixar(`/api/notas/${id}/danfse`, `DANFSe_${n.n_nfse}.pdf`, true));
+  $('#b-email') && ($('#b-email').onclick = () => abrirDialogo(`
+    <form id="form-email"><h2>Enviar NFS-e nº ${n.n_nfse} por e-mail</h2>
+      <p class="sutil">Segue o PDF (DANFSe) e o XML em anexo. Separe vários e-mails com vírgula (até 5).</p>
+      <label>Para <input name="para" required placeholder="cliente@empresa.com.br" value="${esc(n.tomador_email ?? '')}"></label>
+      <p class="erro" id="erro-email"></p>
+      <div class="acoes"><button class="primario" type="submit">Enviar</button><button type="button" data-fechar>Fechar</button></div>
+    </form>`, (d) => {
+    $('#form-email').onsubmit = async (ev) => {
+      ev.preventDefault();
+      const botao = ev.target.querySelector('[type=submit]');
+      botao.disabled = true; botao.textContent = 'Enviando…';
+      try {
+        await api('POST', `/api/notas/${id}/email`, { para: ev.target.para.value.split(/[,;\s]+/).filter(Boolean) });
+        d.close(); aviso('E-mail enviado.'); telaNota(id);
+      } catch (er) { $('#erro-email').textContent = mensagemErro(er); botao.disabled = false; botao.textContent = 'Enviar'; }
+    };
+  }));
   $('#b-portal') && ($('#b-portal').onclick = () => window.open(`https://www.nfse.gov.br/ConsultaPublica/?tpc=1&chave=${n.chave_acesso}`, '_blank'));
   $('#b-xml') && ($('#b-xml').onclick = () => baixar(`/api/notas/${id}/xml`, `NFSe_${n.n_nfse}.xml`));
   const acao = (sel, url, ok) => $(sel) && ($(sel).onclick = async (ev) => {
@@ -885,6 +913,55 @@ async function telaUsuarios() {
 // Backup
 // ---------------------------------------------------------------------------
 
+const PROVEDORES = {
+  gmail: { host: 'smtp.gmail.com', port: 465, secure: true, dica: 'Gmail: ative a verificação em duas etapas e crie uma "senha de app" em myaccount.google.com/apppasswords. Use essa senha aqui, não a senha normal.' },
+  outlook: { host: 'smtp.office365.com', port: 587, secure: false, dica: 'Outlook/Microsoft 365: use uma senha de aplicativo (ou habilite SMTP autenticado na conta).' },
+  outro: { host: '', port: 587, secure: false, dica: 'Peça ao provedor do e-mail (ou ao responsável pelo domínio) o servidor SMTP, a porta e o tipo de segurança.' },
+};
+
+async function telaEmail() {
+  const c = (await api('GET', '/api/email/config')) ?? { host: '', port: 587, secure: false, usuario: '', remetente_nome: estado.usuario.nome ? '' : '', remetente_email: '' };
+  conteudo.innerHTML = `
+    <div class="topo"><div><h1>E-mail</h1><p class="sutil">Servidor usado para enviar a NFS-e (PDF e XML) ao tomador. A senha fica criptografada neste computador.</p></div></div>
+    <form id="form-smtp" class="cartao">
+      <div class="grade">
+        <label>Provedor <select id="provedor"><option value="gmail">Gmail</option><option value="outlook">Outlook / Microsoft 365</option><option value="outro" ${c.host && !/gmail|office365/.test(c.host) ? 'selected' : ''}>Outro</option></select></label>
+        <label>Servidor SMTP <input name="host" required value="${esc(c.host)}"></label>
+        <label>Porta <input name="port" data-num required value="${c.port}"></label>
+        <label>Segurança <select name="secure"><option value="0">STARTTLS (porta 587)</option><option value="1" ${c.secure ? 'selected' : ''}>SSL (porta 465)</option></select></label>
+        <label>Usuário (e-mail de login) <input name="usuario" required autocomplete="off" value="${esc(c.usuario)}"></label>
+        <label>Senha (ou senha de aplicativo) <input name="senha" type="password" autocomplete="new-password" placeholder="${c.tem_senha ? 'já salva — deixe em branco para manter' : ''}" ${c.tem_senha ? '' : 'required'}></label>
+        <label>Nome do remetente <input name="remetente_nome" required placeholder="Escritório Silva Contabilidade" value="${esc(c.remetente_nome)}"></label>
+        <label>E-mail do remetente <input name="remetente_email" type="email" required value="${esc(c.remetente_email)}"></label>
+      </div>
+      <p class="dica" id="dica-provedor"></p>
+      <p class="erro" id="erro-smtp"></p>
+      <div class="acoes"><button class="primario" type="submit">Salvar</button>
+        <button type="button" id="testar" ${c.host ? '' : 'disabled'}>Enviar e-mail de teste</button></div>
+    </form>
+    <p class="sutil">O e-mail sai em nome do escritório e o cliente responde para o e-mail cadastrado da empresa emitente. Só notas em <b>Produção</b> podem ser enviadas.</p>`;
+  const f = $('#form-smtp');
+  const dica = () => ($('#dica-provedor').textContent = PROVEDORES[$('#provedor').value].dica);
+  $('#provedor').onchange = () => { const p = PROVEDORES[$('#provedor').value]; if (p.host) { f.host.value = p.host; f.port.value = p.port; f.secure.value = p.secure ? '1' : '0'; } dica(); };
+  dica();
+  f.onsubmit = async (ev) => {
+    ev.preventDefault();
+    const d = lerForm(f);
+    try {
+      await api('PUT', '/api/email/config', { host: d.host, port: d.port, secure: d.secure === '1', usuario: d.usuario, senha: d.senha || null, remetente_nome: d.remetente_nome, remetente_email: d.remetente_email });
+      aviso('Configuração de e-mail salva.'); telaEmail();
+    } catch (e) { $('#erro-smtp').textContent = mensagemErro(e); }
+  };
+  $('#testar').onclick = async (ev) => {
+    const para = prompt('Enviar e-mail de teste para qual endereço?', estado.usuario.email);
+    if (!para) return;
+    ev.target.disabled = true; ev.target.textContent = 'Enviando…';
+    try { await api('POST', '/api/email/testar', { para }); aviso('E-mail de teste enviado. Confira a caixa de entrada.'); }
+    catch (e) { $('#erro-smtp').textContent = mensagemErro(e); }
+    ev.target.disabled = false; ev.target.textContent = 'Enviar e-mail de teste';
+  };
+}
+
 async function telaBackup() {
   const b = await api('GET', '/api/backup');
   const tam = (n) => (n > 1048576 ? `${(n / 1048576).toFixed(1)} MB` : `${Math.max(1, Math.round(n / 1024))} KB`);
@@ -910,4 +987,30 @@ async function telaBackup() {
     if (!st.configurado) return mostrarSetup();
   } catch { /* servidor indisponível: segue para o login */ }
   if (estado.token) iniciar(); else sair();
+})();
+
+
+// ---------------------------------------------------------------------------
+// Aviso fixo de nova versão (aplicativo instalado)
+// ---------------------------------------------------------------------------
+(function avisoDeVersao() {
+  const ponte = window.nfseDesktop;
+  if (!ponte || typeof ponte.versaoPendente !== 'function') return;
+  const faixa = document.getElementById('aviso-versao');
+  let dispensado = false;
+  const mostrar = (info) => {
+    if (!info || dispensado) return;
+    faixa.innerHTML = `<span><strong>Nova versão ${esc(info.versao)} disponível.</strong> Seus dados são preservados e uma cópia de segurança é feita antes de atualizar.</span>
+      <span class="acoes-faixa"><button class="primario" id="av-atualizar">Atualizar agora</button><button id="av-depois">Depois</button></span>`;
+    faixa.hidden = false;
+    document.body.classList.add('com-aviso-versao');
+    document.getElementById('av-depois').onclick = () => { dispensado = true; faixa.hidden = true; document.body.classList.remove('com-aviso-versao'); };
+    document.getElementById('av-atualizar').onclick = async (ev) => {
+      ev.target.disabled = true; ev.target.textContent = 'Baixando…';
+      const r = await ponte.instalarAtualizacao();
+      if (!r?.ok) { ev.target.disabled = false; ev.target.textContent = 'Atualizar agora'; aviso(r?.erro ?? 'Não foi possível atualizar agora.'); }
+    };
+  };
+  ponte.aoHaverAtualizacao(mostrar);
+  ponte.versaoPendente().then(mostrar).catch(() => {});
 })();

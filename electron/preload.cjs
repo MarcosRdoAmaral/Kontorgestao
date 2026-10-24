@@ -1,3 +1,7 @@
-const { contextBridge } = require('electron');
-// Sinaliza para a interface que está rodando como aplicativo instalado.
-contextBridge.exposeInMainWorld('nfseDesktop', true);
+const { contextBridge, ipcRenderer } = require('electron');
+// Ponte mínima entre a interface e o aplicativo instalado (atualização automática).
+contextBridge.exposeInMainWorld('nfseDesktop', {
+  versaoPendente: () => ipcRenderer.invoke('atualizacao:pendente'),
+  instalarAtualizacao: () => ipcRenderer.invoke('atualizacao:instalar'),
+  aoHaverAtualizacao: (cb) => ipcRenderer.on('atualizacao:nova', (_e, info) => cb(info)),
+});

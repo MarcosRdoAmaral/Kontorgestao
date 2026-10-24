@@ -355,6 +355,8 @@ export function obterNota(id: number) {
     erros: n.erros_json ? JSON.parse(n.erros_json) : [],
     alertas: n.alertas_json ? JSON.parse(n.alertas_json) : [],
     eventos: db.prepare('SELECT id, tipo, status, motivo, erros_json, criado_em FROM eventos WHERE nota_id = ? ORDER BY id').all(id),
+    tomador_email: n.tomador_id ? (db.prepare('SELECT email FROM tomadores WHERE id = ?').get(n.tomador_id) as any)?.email ?? null : null,
+    emails: db.prepare('SELECT id, para, status, erro, criado_em FROM emails_enviados WHERE nota_id = ? ORDER BY id DESC').all(id),
     payload_json: undefined,
   };
 }

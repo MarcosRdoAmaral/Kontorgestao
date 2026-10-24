@@ -183,6 +183,26 @@ test('fluxo completo: cadastro, emissão, rejeição, queda de rede, DANFSe e ca
   assert.equal(semEnd.status, 422 === semEnd.status ? 422 : semEnd.status);
   assert.match(JSON.stringify(semEnd.json), /E0234/);
 
+  // 4d) e-mail: SMTP do escritório, bloqueio de nota de teste, envio com PDF + XML anexos
+  const { trocarTransporte } = await import('../src/servicos/email.js');
+  const { db: bancoEmail } = await import('../src/db.js');
+  const enviadosEmail: any[] = [];
+  trocarTransporte(() => ({ sendMail: async (m: any) => { enviadosEmail.push(m); return {}; } }) as any);
+  assert.equal((await call('PUT', '/api/email/config', { host: 'smtp.exemplo.com', port: 587, secure: false, usuario: 'u@x.com', senha: 's3nh4', remetente_nome: 'Escritório', remetente_email: 'u@x.com' }, token)).status, 200);
+  const emTeste = await call('POST', `/api/notas/${nota1}/email`, { para: ['cliente@x.com'] }, token);
+  assert.equal(emTeste.status, 400);
+  assert.match(JSON.stringify(emTeste.json), /teste/i);
+  bancoEmail.prepare('UPDATE notas SET ambiente = 1 WHERE id = ?').run(nota1);
+  assert.equal((await call('POST', `/api/notas/${nota1}/email`, { para: ['nao-e-email'] }, token)).status, 400);
+  const ok = await call('POST', `/api/notas/${nota1}/email`, { para: ['cliente@x.com', 'financeiro@x.com'] }, token);
+  assert.equal(ok.status, 200, JSON.stringify(ok.json));
+  const msg = enviadosEmail.at(-1);
+  assert.equal(msg.to, 'cliente@x.com, financeiro@x.com');
+  assert.deepEqual(msg.attachments.map((a: any) => a.filename).sort(), [`DANFSe_${(await call('GET', `/api/notas/${nota1}`, undefined, token)).json.n_nfse}.pdf`, `NFSe_${(await call('GET', `/api/notas/${nota1}`, undefined, token)).json.n_nfse}.xml`].sort());
+  assert.equal(Buffer.from(msg.attachments[0].content).subarray(0, 4).toString(), '%PDF');
+  assert.equal((await call('GET', `/api/notas/${nota1}/emails`, undefined, token)).json[0].status, 'ENVIADO');
+  bancoEmail.prepare('UPDATE notas SET ambiente = 2 WHERE id = ?').run(nota1);
+
   // 4c) logo no DANFSe + download em lote
   const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64');
   const mpl = Buffer.concat([Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="arquivo"; filename="l.png"\r\nContent-Type: image/png\r\n\r\n`), png, Buffer.from(`\r\n--${boundary}--\r\n`)]);

@@ -1,6 +1,6 @@
 // Processo principal do aplicativo de desktop (Windows).
 // Sobe o servidor do sistema em 127.0.0.1 (só este computador acessa) e abre a janela.
-import { app, BrowserWindow, Menu, dialog, shell, safeStorage, net } from 'electron';
+import { app, BrowserWindow, Menu, dialog, shell, safeStorage, net, ipcMain } from 'electron';
 import { spawn } from 'node:child_process';
 import { buscarNovaVersao, urlPermitida } from './atualizador.mjs';
 import crypto from 'node:crypto';
@@ -142,6 +142,15 @@ function repositorioAtualizacoes() {
 }
 
 let verificando = false;
+let pendente_atualizacao = null; // { versao, notas, exe, sha } quando há versão nova
+
+ipcMain.handle('atualizacao:pendente', () => (pendente_atualizacao ? { versao: pendente_atualizacao.versao, notas: pendente_atualizacao.notas } : null));
+ipcMain.handle('atualizacao:instalar', async () => {
+  if (!pendente_atualizacao) return { ok: false };
+  try { await baixarEInstalar(pendente_atualizacao); return { ok: true }; }
+  catch (e) { return { ok: false, erro: String(e?.message ?? e) }; }
+});
+
 async function verificarAtualizacao({ manual = false } = {}) {
   if (verificando) return;
   verificando = true;
@@ -156,6 +165,9 @@ async function verificarAtualizacao({ manual = false } = {}) {
       if (manual) dialog.showMessageBox(janela, { type: 'info', message: r.situacao === 'atualizado' ? 'Você já está na versão mais recente.' : 'Nenhuma atualização disponível.', detail: `Versão instalada: ${app.getVersion()}` });
       return;
     }
+    pendente_atualizacao = r;
+    janela?.webContents.send('atualizacao:nova', { versao: r.versao, notas: r.notas });
+    if (!manual) return; // verificação automática: o aviso fixo na tela da interface basta
     const c = await dialog.showMessageBox(janela, {
       type: 'question', buttons: ['Atualizar agora', 'Depois'], defaultId: 0, cancelId: 1,
       message: `Nova versão ${r.versao} disponível`,

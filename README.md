@@ -79,3 +79,10 @@ município (Blumenau) antes de emitir.
 3. O aplicativo verifica ao abrir e a cada 6 horas (e em Ajuda → Verificar atualizações). Ao aceitar, faz a cópia de
    segurança dos dados, baixa o instalador, confere o SHA-256 e o abre. Os dados não são alterados.
 Observação: o instalador não é assinado digitalmente; o Windows SmartScreen pode avisar na primeira execução.
+
+## E-mail da NFS-e e aviso de versão (1.0.11)
+
+- Menu **E-mail**: configure o SMTP do escritório (Gmail/Outlook usam senha de aplicativo). A senha fica criptografada.
+- Na nota (Produção): **Enviar por e-mail** manda o PDF (DANFSe) e o XML. Na emissão, a caixa "Enviar por e-mail ao tomador"
+  envia automaticamente quando autorizar. O histórico de envios aparece na nota.
+- Quando sai uma versão nova, uma faixa fixa no topo da tela avisa ("Atualizar agora" / "Depois").

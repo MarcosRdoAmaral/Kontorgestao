@@ -143,3 +143,11 @@ dialog::backdrop { background: rgba(0, 0, 0, .7); }
 .res-serv li[data-c]:hover { background: rgba(251, 146, 61, .14); }
 .res-serv b { color: var(--laranja); }
 .versao { font-size: 11px; padding: 6px 14px 12px; opacity: .7; }
+
+/* Aviso fixo de nova versão */
+.aviso-versao { position: sticky; top: 0; z-index: 50; display: flex; gap: 12px; align-items: center; justify-content: space-between; flex-wrap: wrap; padding: 10px 16px; background: #3a2208; border-bottom: 1px solid var(--laranja); color: #ffd9b0; font-size: 14px; }
+.aviso-versao[hidden] { display: none; }
+.acoes-faixa { display: flex; gap: 8px; }
+.com-aviso-versao .lateral { top: 52px; height: calc(100vh - 52px); }
+.aviso-versao { min-height: 52px; box-sizing: border-box; }
+@media (max-width: 860px) { .com-aviso-versao .lateral { top: 0; height: auto; } }

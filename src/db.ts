@@ -217,6 +217,18 @@ const migracoes: string[] = [
   `ALTER TABLE empresas ADD COLUMN logo BLOB;`,
   // 3: lembra a última empresa escolhida por usuário
   `ALTER TABLE usuarios ADD COLUMN ultima_empresa_id INTEGER;`,
+  // 4: envio de NFS-e por e-mail (SMTP do escritório, senha criptografada) + histórico
+  `ALTER TABLE escritorios ADD COLUMN smtp_enc TEXT;
+  CREATE TABLE emails_enviados (
+    id INTEGER PRIMARY KEY,
+    nota_id INTEGER NOT NULL REFERENCES notas(id),
+    para TEXT NOT NULL,
+    status TEXT NOT NULL CHECK (status IN ('ENVIADO','ERRO')),
+    erro TEXT,
+    enviado_por INTEGER REFERENCES usuarios(id),
+    criado_em TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+  CREATE INDEX idx_emails_nota ON emails_enviados(nota_id);`,
 ];
 
 export function migrar(): void {

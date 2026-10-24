@@ -4,6 +4,7 @@ import { db } from './db.js';
 import { cifrar, cifrarTexto } from './cofre.js';
 import { conferirSenha, configurarPrimeiroAcesso, empresaPermitida, exigirLogin, exigirPapel, gerarToken, hashSenha, sistemaConfigurado, type Usuario } from './auth.js';
 import { config } from './config.js';
+import { ConfigSmtp, ListaEmails, configPublica, enviarNotaPorEmail, historicoEmails, salvarConfig, testarConfig } from './servicos/email.js';
 import { criarBackup, listarBackups } from './servicos/backup.js';
 import { consultarCnpj } from './servicos/consulta-cnpj.js';
 import { strToU8, zipSync } from 'fflate';
@@ -289,6 +290,29 @@ export async function rotas(app: FastifyInstance) {
       return db.prepare(`SELECT n.id, n.empresa_id, e.razao_social AS empresa, n.ambiente, n.serie, n.n_dps, n.n_nfse, n.status, n.competencia,
         n.valor_servico, n.tomador_nome, n.tomador_documento, n.descricao, n.chave_acesso, n.criado_em, n.erros_json
         FROM notas n JOIN empresas e ON e.id = n.empresa_id WHERE ${filtros.join(' AND ')} ORDER BY n.id DESC LIMIT 500`).all(...params);
+    });
+
+    // ---------- E-mail (SMTP do escritório) ----------
+    api.get('/api/email/config', { preHandler: exigirPapel('admin') }, async (req) => configPublica(u(req).escritorio_id));
+    api.put('/api/email/config', { preHandler: exigirPapel('admin') }, async (req) => {
+      salvarConfig(u(req).escritorio_id, ConfigSmtp.parse(req.body));
+      return { ok: true };
+    });
+    api.post('/api/email/testar', { preHandler: exigirPapel('admin') }, async (req) => {
+      const { para } = z.object({ para: z.string().email('E-mail de destino inválido') }).parse(req.body);
+      await testarConfig(u(req).escritorio_id, para);
+      return { ok: true };
+    });
+    api.post('/api/notas/:id/email', { preHandler: exigirPapel('admin', 'operador') }, async (req) => {
+      const id = Number((req.params as any).id);
+      notaDoUsuario(req, id);
+      const { para } = z.object({ para: ListaEmails }).parse(req.body);
+      return enviarNotaPorEmail(id, u(req).escritorio_id, para, u(req).id);
+    });
+    api.get('/api/notas/:id/emails', async (req) => {
+      const id = Number((req.params as any).id);
+      notaDoUsuario(req, id);
+      return historicoEmails(id);
     });
 
     /** Download em lote: ZIP com XML e/ou PDF (DANFSe) das notas autorizadas/canceladas do filtro. */
