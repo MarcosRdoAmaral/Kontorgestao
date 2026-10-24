@@ -100,6 +100,55 @@ async function buscarCep(form) {
   } catch { /* sem internet: preenchimento manual */ }
 }
 
+// ---- Dia útil (espelha src/servicos/diautil.ts; o servidor confere de novo) ----
+const DIA_MS = 864e5;
+function pascoaMs(y) {
+  const a = y % 19, b = Math.floor(y / 100), c = y % 100, d = Math.floor(b / 4), e = b % 4, f = Math.floor((b + 8) / 25), g = Math.floor((b - f + 1) / 3);
+  const h = (19 * a + b - d - g + 15) % 30, i = Math.floor(c / 4), k = c % 4, l = (32 + 2 * e + 2 * i - h - k) % 7, m = Math.floor((a + 11 * h + 22 * l) / 451);
+  return Date.UTC(y, Math.floor((h + l - 7 * m + 114) / 31) - 1, ((h + l - 7 * m + 114) % 31) + 1);
+}
+function feriadosAno(y, extras) {
+  const S = new Set(), p = pascoaMs(y), iso = (t) => new Date(t).toISOString().slice(0, 10);
+  ['01-01', '04-21', '05-01', '09-07', '10-12', '11-02', '11-15', '11-20', '12-25'].forEach((x) => S.add(`${y}-${x}`));
+  [-48, -47, -2, 60].forEach((n) => S.add(iso(p + n * DIA_MS)));
+  String(extras ?? '').split(/[,;\s]+/).forEach((t) => { const m = t.match(/^(\d{1,2})\/(\d{1,2})$/); if (m) S.add(`${y}-${m[2].padStart(2, '0')}-${m[1].padStart(2, '0')}`); });
+  return S;
+}
+function motivoNaoUtil(ds, extras) {
+  const [y, m, d] = ds.split('-').map(Number), w = new Date(Date.UTC(y, m - 1, d)).getUTCDay();
+  return w === 0 ? 'domingo' : w === 6 ? 'sábado' : feriadosAno(y, extras).has(ds) ? 'feriado' : '';
+}
+function ajustarVencimento(venc, extras) {
+  const motivo = motivoNaoUtil(venc, extras);
+  if (!motivo) return { data: venc };
+  const andar = (sentido) => { let t = Date.parse(venc + 'T00:00:00Z'); for (let i = 0; i < 15 && motivoNaoUtil(new Date(t).toISOString().slice(0, 10), extras); i++) t += sentido * DIA_MS; return new Date(t).toISOString().slice(0, 10); };
+  let novo = andar(-1);
+  if (novo < hoje()) novo = andar(1);
+  return { data: novo, aviso: `Vencimento ajustado: ${dataBr(venc)} cai em ${motivo}; ${novo < venc ? 'antecipado' : 'adiado'} para ${dataBr(novo)}.` };
+}
+
+// ---- Gráficos simples em SVG ----
+const compacto = (n) => (n >= 1000 ? 'R$ ' + (n / 1000).toLocaleString('pt-BR', { maximumFractionDigits: 1 }) + ' mil' : brl(n));
+const nomeMes = (ym) => ['jan', 'fev', 'mar', 'abr', 'mai', 'jun', 'jul', 'ago', 'set', 'out', 'nov', 'dez'][Number(ym.slice(5)) - 1] + '/' + ym.slice(2, 4);
+/** Barras agrupadas: cada série é { cor, valores[] }; rótulos no eixo X. */
+function graficoBarras(rotulos, series, destaque) {
+  const max = Math.max(1, ...series.flatMap((x) => x.valores));
+  const larg = 600 / rotulos.length, bw = Math.min(40, (larg - 14) / series.length);
+  let svg = '<svg viewBox="0 0 600 230" role="img" style="width:100%;height:auto"><line x1="10" x2="590" y1="190" y2="190" stroke="currentColor" opacity=".25"/>';
+  rotulos.forEach((r, i) => {
+    const x0 = i * larg + (larg - bw * series.length) / 2;
+    series.forEach((se, j) => {
+      const v = se.valores[i], h = (v / max) * 150, x = x0 + j * bw;
+      svg += `<rect x="${x}" y="${190 - h}" width="${bw - 3}" height="${h}" rx="3" fill="${se.cor}"/>`;
+      if (v > 0) svg += `<text x="${x + (bw - 3) / 2}" y="${186 - h}" text-anchor="middle" font-size="10" fill="currentColor">${compacto(v).replace('R$ ', '')}</text>`;
+    });
+    svg += `<text x="${i * larg + larg / 2}" y="210" text-anchor="middle" font-size="11" fill="currentColor" opacity="${i === destaque ? 1 : .65}" ${i === destaque ? 'font-weight="700"' : ''}>${nomeMes(r)}</text>`;
+  });
+  return svg + '</svg>';
+}
+const legenda = (itens) => `<div class="legenda">${itens.map(([cor, t]) => `<span><i style="background:${cor}"></i>${t}</span>`).join('')}</div>`;
+const COR = { verde: '#4ade80', laranja: '#fb923d', vermelho: '#f87171' };
+
 // ---------------------------------------------------------------------------
 // Sessão e estrutura
 // ---------------------------------------------------------------------------
@@ -258,13 +307,13 @@ async function iniciar() {
 
 /** A tela pertence a algum módulo liberado para o usuário? (o servidor confere de novo em cada chamada) */
 function telaPermitida(nome) {
-  const modulo = { painel: 'painel', emitir: 'emitir', notas: 'notas', nota: 'notas', cobrancas: 'cobrancas', banco: 'banco', tomadores: 'tomadores', servicos: 'servicos', empresas: 'empresas' }[nome];
+  const modulo = { painel: 'painel', emitir: 'emitir', notas: 'notas', nota: 'notas', cobrancas: 'cobrancas', banco: 'banco', despesas: 'despesas', tomadores: 'tomadores', servicos: 'servicos', empresas: 'empresas' }[nome];
   return nome === 'config' || (modulo && estado.usuario.modulos.includes(modulo));
 }
 
 const rotas = {
   painel: telaPainel, emitir: telaEmitir, notas: telaNotas, nota: telaNota,
-  cobrancas: telaCobrancas, banco: telaBanco, tomadores: telaTomadores, servicos: telaServicos, empresas: telaEmpresas, config: telaConfig,
+  cobrancas: telaCobrancas, banco: telaBanco, despesas: telaDespesas, tomadores: telaTomadores, servicos: telaServicos, empresas: telaEmpresas, config: telaConfig,
 };
 
 function rotear() {
@@ -291,11 +340,41 @@ async function telaPainel() {
   const mes = telaPainel.mes ?? mesAtual();
   const linhas = await api('GET', `/api/relatorios/resumo?mes=${mes}`);
   const tot = linhas.reduce((a, l) => ({ fat: a.fat + (l.faturado ?? 0), aut: a.aut + (l.autorizadas ?? 0), pend: a.pend + (l.pendencias ?? 0) }), { fat: 0, aut: 0, pend: 0 });
+  const fin = empresa() ? await api('GET', `/api/empresas/${estado.empresaId}/painel?mes=${mes}`).catch(() => null) : null;
+  const k = fin?.kpis;
   conteudo.innerHTML = `
     <div class="topo">
-      <div><h1>Painel do mês</h1><p class="sutil">Notas por competência, em todas as empresas que você acompanha.</p></div>
-      <label>Competência <input type="month" id="mes" value="${mes}"></label>
+      <div><h1>Painel do mês</h1><p class="sutil">Cobranças e recebimentos de ${esc(empresa()?.nome_fantasia || empresa()?.razao_social || 'sua empresa')} e notas de todas as empresas.</p></div>
+      <label>Mês <input type="month" id="mes" value="${mes}"></label>
     </div>
+    ${fin ? `
+    <div class="resumo">
+      <div class="cartao"><div class="sutil">Faturado</div><div class="valor">${compacto(k.faturado)}</div><div class="dica">${k.qtd} cobrança(s) com vencimento no mês</div></div>
+      <div class="cartao"><div class="sutil">Recebido</div><div class="valor" style="color:${COR.verde}">${compacto(k.recebido)}</div><div class="dica">${k.pctRecebido}% do faturado</div></div>
+      <div class="cartao"><div class="sutil">A receber</div><div class="valor">${compacto(k.aReceber)}</div><div class="dica">${k.qtdAReceber} em dia</div></div>
+      <div class="cartao"><div class="sutil">Em atraso</div><div class="valor" style="color:${k.qtdAtraso ? COR.vermelho : 'inherit'}">${compacto(k.emAtraso)}</div><div class="dica">${k.qtdAtraso} cobrança(s) · inadimplência ${k.inadimplencia}%</div></div>
+      <div class="cartao"><div class="sutil">Falta emitir</div><div class="valor">${fin.faltamEmitir.qtd}</div><div class="dica">de ${fin.faltamEmitir.total} cliente(s) em ${nomeMes(mes)}</div></div>
+    </div>
+    <div class="cartao" style="margin-top:16px"><h2 style="margin-top:0">Dicas para o seu caixa</h2>
+      <ul class="dicas">${fin.dicas.map((d) => `<li>${esc(d)}</li>`).join('')}</ul></div>
+    <div class="duas-colunas">
+      <div class="cartao"><h2 style="margin-top:0">Cobranças dos últimos 6 meses</h2>
+        ${graficoBarras(fin.serie.map((x) => x.mes), [{ cor: COR.verde, valores: fin.serie.map((x) => x.recebido) }, { cor: COR.laranja, valores: fin.serie.map((x) => x.aberto) }], 5)}
+        ${legenda([[COR.verde, 'Recebido'], [COR.laranja, 'Em aberto']])}</div>
+      <div class="cartao"><h2 style="margin-top:0">Receitas × despesas</h2>
+        ${graficoBarras(fin.balanco.map((x) => x.mes), [{ cor: COR.verde, valores: fin.balanco.map((x) => x.receitas) }, { cor: COR.vermelho, valores: fin.balanco.map((x) => x.despesas) }], 5)}
+        ${legenda([[COR.verde, 'Recebido no mês'], [COR.vermelho, 'Despesas']])}
+        <p class="dica"><a href="#/despesas">Lançar despesas e ver o balanço</a></p></div>
+    </div>
+    <div class="duas-colunas">
+      <div class="cartao"><h2 style="margin-top:0">Atrasadas</h2>
+        ${fin.atrasadas.length ? `<table class="tabela"><tbody>${fin.atrasadas.map((c) => `<tr><td>${esc(c.tomador)}</td><td class="num">${brl(c.valor)}</td><td class="sutil">venceu em ${dataBr(c.vencimento)} (${c.dias} dia(s))</td></tr>`).join('')}</tbody></table>` : '<p class="sutil">Nenhuma cobrança em atraso.</p>'}
+        <p class="dica"><a href="#/cobrancas">Abrir Cobranças</a></p></div>
+      <div class="cartao"><h2 style="margin-top:0">Falta emitir em ${nomeMes(mes)}</h2>
+        ${fin.faltamEmitir.qtd ? `<ul class="dicas">${fin.faltamEmitir.clientes.map((c) => `<li>${esc(c.nome)}</li>`).join('')}${fin.faltamEmitir.qtd > fin.faltamEmitir.clientes.length ? `<li class="sutil">e mais ${fin.faltamEmitir.qtd - fin.faltamEmitir.clientes.length}…</li>` : ''}</ul>` : '<p class="sutil">Todos os clientes já foram faturados neste mês.</p>'}
+        <p class="dica"><a href="#/emitir">Emitir agora</a></p></div>
+    </div>
+    <h2>Notas por empresa</h2>` : ''}
     <div class="resumo">
       <div class="cartao"><div class="sutil">Faturado (autorizadas)</div><div class="valor">${brl(tot.fat)}</div></div>
       <div class="cartao"><div class="sutil">Notas autorizadas</div><div class="valor">${tot.aut}</div></div>
@@ -465,6 +544,18 @@ async function telaEmitir(notaIdCorrecao) {
     aplicarModo();
   });
   f.acao.addEventListener('change', aplicarModo);
+  // vencimento em dia útil: antecipa fim de semana/feriado e avisa (o servidor repete a regra)
+  let feriadosLocais = '';
+  api('GET', `/api/empresas/${e.id}/feriados`).then((r) => { feriadosLocais = r.feriados_extra ?? ''; }).catch(() => {});
+  const avisoVenc = document.createElement('span'); avisoVenc.className = 'dica'; f.vencimento?.after(avisoVenc);
+  const conferirVenc = () => {
+    avisoVenc.textContent = '';
+    if (!f.vencimento?.value) return;
+    const r = ajustarVencimento(f.vencimento.value, feriadosLocais);
+    if (r.aviso) { f.vencimento.value = r.data; avisoVenc.textContent = r.aviso; }
+  };
+  f.vencimento?.addEventListener('change', conferirVenc);
+  f.tomadorId.addEventListener('change', () => setTimeout(conferirVenc, 0));
   // Valor do boleto: acompanha o líquido da nota (mesma conta do servidor), até o usuário digitar outro valor
   let boletoManual = false;
   const sugerirBoleto = () => {
@@ -639,7 +730,20 @@ async function telaBanco() {
       <p class="erro" id="erro-banco" role="alert"></p>
       <div class="acoes"><button class="primario" type="submit">Salvar dados bancários</button></div>
     </form>
+    <form id="form-feriados" class="cartao" style="margin-top:20px">
+      <h2 style="margin-top:0">Feriados locais</h2>
+      <p class="dica">Boleto não vence em sábado, domingo nem feriado: o sistema antecipa para o dia útil anterior. Os feriados nacionais, o carnaval, a sexta-feira santa e o Corpus Christi já estão incluídos. Informe aqui os feriados do seu município (dia/mês, separados por vírgula).</p>
+      <label>Feriados municipais <input name="feriados_extra" placeholder="ex.: 24/06, 19/03" value=""></label>
+      <p class="erro" id="erro-feriados"></p>
+      <div class="acoes"><button type="submit">Salvar feriados</button></div>
+    </form>
 `;
+  api('GET', `/api/empresas/${estado.empresaId}/feriados`).then((r) => { $('#form-feriados').feriados_extra.value = r.feriados_extra ?? ''; }).catch(() => {});
+  $('#form-feriados').onsubmit = async (ev) => {
+    ev.preventDefault();
+    try { await api('PUT', `/api/empresas/${estado.empresaId}/feriados`, { feriados_extra: ev.target.feriados_extra.value }); aviso('Feriados salvos.'); }
+    catch (e) { $('#erro-feriados').textContent = mensagemErro(e); }
+  };
   const f = $('#form-banco');
   f.onsubmit = async (ev) => {
     ev.preventDefault();
@@ -649,6 +753,81 @@ async function telaBanco() {
       aviso('Dados bancários salvos.'); telaBanco();
     } catch (e) { $('#erro-banco').textContent = mensagemErro(e); }
   };
+}
+
+// ---------------------------------------------------------------------------
+// Despesas e balanço
+// ---------------------------------------------------------------------------
+async function telaDespesas() {
+  const mes = telaDespesas.mes ?? mesAtual();
+  const base = `/api/empresas/${estado.empresaId}`;
+  const [d, fin] = await Promise.all([api('GET', `${base}/despesas?mes=${mes}`), api('GET', `${base}/painel?mes=${mes}`).catch(() => null)]);
+  const total = d.despesas.reduce((t, x) => t + x.valor, 0);
+  const porCat = Object.entries(d.despesas.reduce((a, x) => ({ ...a, [x.categoria]: (a[x.categoria] ?? 0) + x.valor }), {})).sort((a, b) => b[1] - a[1]);
+  const bal = fin?.balanco.at(-1);
+  conteudo.innerHTML = `
+    <div class="topo"><div><h1>Despesas e balanço</h1><p class="sutil">Receitas = boletos pagos no mês. Despesas = o que você lançar aqui.</p></div>
+      <label>Mês <input type="month" id="mes-desp" value="${mes}"></label></div>
+    ${bal ? `<div class="resumo">
+      <div class="cartao"><div class="sutil">Receitas</div><div class="valor" style="color:${COR.verde}">${compacto(bal.receitas)}</div></div>
+      <div class="cartao"><div class="sutil">Despesas</div><div class="valor" style="color:${COR.vermelho}">${compacto(bal.despesas)}</div><div class="dica">${d.despesas.length} lançamento(s)</div></div>
+      <div class="cartao"><div class="sutil">Resultado</div><div class="valor" style="color:${bal.resultado < 0 ? COR.vermelho : COR.verde}">${compacto(bal.resultado)}</div><div class="dica">${bal.receitas ? 'margem de ' + Math.round(bal.resultado / bal.receitas * 100) + '%' : 'sem receitas no mês'}</div></div>
+    </div>
+    <div class="duas-colunas">
+      <div class="cartao"><h2 style="margin-top:0">Últimos 6 meses</h2>
+        ${graficoBarras(fin.balanco.map((x) => x.mes), [{ cor: COR.verde, valores: fin.balanco.map((x) => x.receitas) }, { cor: COR.vermelho, valores: fin.balanco.map((x) => x.despesas) }], 5)}
+        ${legenda([[COR.verde, 'Receitas'], [COR.vermelho, 'Despesas']])}</div>
+      <div class="cartao"><h2 style="margin-top:0">Resultado por mês</h2>
+        <table class="tabela"><thead><tr><th>Mês</th><th class="num">Receitas</th><th class="num">Despesas</th><th class="num">Resultado</th></tr></thead><tbody>
+        ${[...fin.balanco].reverse().map((x) => `<tr><td>${nomeMes(x.mes)}</td><td class="num">${brl(x.receitas)}</td><td class="num">${brl(x.despesas)}</td><td class="num" style="color:${x.resultado < 0 ? COR.vermelho : COR.verde}">${brl(x.resultado)}</td></tr>`).join('')}</tbody></table></div>
+    </div>` : ''}
+    <div class="topo"><h2>Lançamentos de ${nomeMes(mes)} <span class="sutil">· ${brl(total)}</span></h2>
+      <div><button id="cats">Categorias</button> <button class="primario" id="nova-desp">Lançar despesa</button></div></div>
+    ${d.despesas.length ? `<div class="rolagem"><table class="tabela"><thead><tr><th>Data</th><th>Categoria</th><th>Descrição</th><th class="num">Valor</th><th></th></tr></thead><tbody>
+      ${d.despesas.map((x) => `<tr><td>${dataBr(x.data)}</td><td>${esc(x.categoria)}</td><td>${esc(x.descricao ?? '')}</td><td class="num">${brl(x.valor)}</td>
+        <td class="acoes-linha"><button data-ed="${x.id}">Editar</button> <button data-ex="${x.id}">Excluir</button></td></tr>`).join('')}</tbody></table></div>
+      ${porCat.length > 1 ? `<p class="sutil">Por categoria: ${porCat.map(([c, v]) => `${esc(c)} ${brl(v)}`).join(' · ')}</p>` : ''}` : '<div class="vazio">Nenhuma despesa lançada neste mês.</div>'}`;
+  $('#mes-desp').onchange = (ev) => { telaDespesas.mes = ev.target.value || mesAtual(); telaDespesas(); };
+  const formDespesa = (x) => abrirDialogo(`
+    <form id="form-desp"><h2>${x ? 'Editar despesa' : 'Lançar despesa'}</h2>
+      <div class="grade">
+        <label>Data <input type="date" name="data" required value="${x?.data ?? (mes === mesAtual() ? hoje() : mes + '-01')}"></label>
+        <label>Valor (R$) <input name="valor" data-num required inputmode="decimal" value="${x ? String(x.valor).replace('.', ',') : ''}"></label>
+        <label>Categoria <input name="categoria" required list="lista-cat" value="${esc(x?.categoria ?? '')}"><datalist id="lista-cat">${d.categorias.map((c) => `<option value="${esc(c)}">`).join('')}</datalist></label>
+        <label>Descrição <input name="descricao" maxlength="200" value="${esc(x?.descricao ?? '')}"></label>
+      </div>
+      <p class="erro" id="erro-desp"></p>
+      <div class="acoes"><button class="primario" type="submit">Salvar</button><button type="button" data-fechar>Fechar</button></div>
+    </form>`, (dlg) => {
+    $('#form-desp').onsubmit = async (ev) => {
+      ev.preventDefault();
+      const v = lerForm(ev.target);
+      try {
+        const corpo = { data: v.data, categoria: v.categoria, descricao: v.descricao, valor: v.valor };
+        if (x) await api('PUT', `${base}/despesas/${x.id}`, corpo); else await api('POST', `${base}/despesas`, corpo);
+        dlg.close(); telaDespesas();
+      } catch (e) { $('#erro-desp').textContent = mensagemErro(e); }
+    };
+  });
+  $('#nova-desp').onclick = () => formDespesa(null);
+  conteudo.querySelectorAll('[data-ed]').forEach((b) => (b.onclick = () => formDespesa(d.despesas.find((x) => x.id === Number(b.dataset.ed)))));
+  conteudo.querySelectorAll('[data-ex]').forEach((b) => (b.onclick = () => abrirDialogo(`
+    <form id="form-ex"><h2>Excluir despesa?</h2><p>Esta ação não pode ser desfeita.</p>
+      <div class="acoes"><button class="primario" type="submit">Excluir</button><button type="button" data-fechar>Cancelar</button></div></form>`, (dlg) => {
+    $('#form-ex').onsubmit = async (ev) => { ev.preventDefault(); await api('DELETE', `${base}/despesas/${b.dataset.ex}`); dlg.close(); telaDespesas(); };
+  })));
+  $('#cats').onclick = () => abrirDialogo(`
+    <form id="form-cats"><h2>Categorias de despesa</h2>
+      <p class="sutil">Uma por linha. Despesas já lançadas não mudam.</p>
+      <label><textarea name="cats" rows="10">${esc(d.categorias.join('\n'))}</textarea></label>
+      <p class="erro" id="erro-cats"></p>
+      <div class="acoes"><button class="primario" type="submit">Salvar</button><button type="button" data-fechar>Fechar</button></div></form>`, (dlg) => {
+    $('#form-cats').onsubmit = async (ev) => {
+      ev.preventDefault();
+      try { await api('PUT', `${base}/despesas-categorias`, { categorias: ev.target.cats.value.split('\n') }); dlg.close(); telaDespesas(); }
+      catch (e) { $('#erro-cats').textContent = mensagemErro(e); }
+    };
+  });
 }
 
 // ---------------------------------------------------------------------------

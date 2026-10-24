@@ -260,7 +260,7 @@ test('fluxo completo: cadastro, emissão, rejeição, queda de rede, DANFSe e ca
   assert.equal(soBoleto.status, 200, JSON.stringify(soBoleto.json));
   assert.equal(soBoleto.json.nota, undefined);
   assert.equal(soBoleto.json.cobranca.valor, 300);
-  assert.equal(soBoleto.json.cobranca.vencimento, '2026-12-05');
+  assert.equal(soBoleto.json.cobranca.vencimento, '2026-12-04');
   assert.equal((await call('POST', '/api/faturar', { ...base, tomadorId: null, acao: 'BOLETO' }, token)).status, 400, 'boleto exige cliente');
   const cobs = await call('GET', `/api/empresas/${eid}/cobrancas`, undefined, token);
   assert.equal(cobs.json.length, 2);

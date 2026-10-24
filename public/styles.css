@@ -165,3 +165,9 @@ fieldset.sub { margin: 0 0 12px; padding: 12px; }
 .abas a.ativo { border-bottom-color: var(--laranja-forte, #fb923d); opacity: 1; font-weight: 600; }
 tr.inativo td { opacity: .55; }
 .acoes-linha { white-space: nowrap; }
+
+/* Painel financeiro */
+.duas-colunas { display: grid; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); gap: 16px; margin-top: 16px; }
+.dicas { margin: 8px 0 0; padding-left: 18px; display: grid; gap: 8px; }
+.legenda { display: flex; gap: 16px; font-size: .85rem; margin-top: 6px; }
+.legenda i { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 6px; }

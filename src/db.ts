@@ -345,6 +345,25 @@ const migracoes: string[] = [
     tentativas INTEGER NOT NULL DEFAULT 0,
     pedidos_em TEXT NOT NULL DEFAULT '[]'
   );`,
+  // 10: despesas e categorias por empresa, feriados locais (vencimento em dia útil)
+  `ALTER TABLE empresas ADD COLUMN feriados_extra TEXT;     -- ex.: "24/06, 19/03" (municipais)
+  CREATE TABLE despesa_categorias (
+    id INTEGER PRIMARY KEY,
+    empresa_id INTEGER NOT NULL REFERENCES empresas(id),
+    nome TEXT NOT NULL,
+    UNIQUE (empresa_id, nome)
+  );
+  CREATE TABLE despesas (
+    id INTEGER PRIMARY KEY,
+    empresa_id INTEGER NOT NULL REFERENCES empresas(id),
+    data TEXT NOT NULL,
+    categoria TEXT NOT NULL,
+    descricao TEXT,
+    valor REAL NOT NULL CHECK (valor > 0),
+    criado_por INTEGER REFERENCES usuarios(id),
+    criado_em TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+  CREATE INDEX idx_despesas_empresa ON despesas(empresa_id, data);`,
 ];
 
 export function migrar(): void {

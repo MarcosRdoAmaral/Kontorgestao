@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { db } from '../db.js';
 import type { Usuario } from '../auth.js';
+import { ajustarVencimento } from './diautil.js';
 import { EntradaEmissao, ErroNegocio, emitir } from './emissao.js';
 import { enviarMensagemBoleto, enviarNotaPorEmail } from './email.js';
 import { exigirLicenca } from '../licenca.js';
@@ -74,7 +75,10 @@ export async function faturar(u: Usuario, entrada: EntradaFaturamento) {
 
   if (fazBoleto) {
     const hoje = new Date(Date.now() - 3 * 3600e3);
-    const vencimento = entrada.vencimento ?? calcularVencimento(hoje, tomador.vencimento_tipo, tomador.vencimento_valor);
+    const ajuste = ajustarVencimento(entrada.vencimento ?? calcularVencimento(hoje, tomador.vencimento_tipo, tomador.vencimento_valor), dataIso(hoje),
+      (db.prepare('SELECT feriados_extra FROM empresas WHERE id = ?').get(entrada.empresaId) as any)?.feriados_extra);
+    const vencimento = ajuste.data;
+    if (ajuste.aviso) resultado.avisos.push(ajuste.aviso);
     const valor = entrada.valorBoleto ?? (fazNota ? valorLiquido(entrada) : entrada.valor);
     if (!(valor > 0)) throw new ErroNegocio('O valor do boleto precisa ser maior que zero.');
     resultado.cobranca = criarCobranca({ empresaId: entrada.empresaId, tomadorId: tomador.id, notaId: resultado.nota?.id ?? null, descricao: entrada.descricao, valor, vencimento, usuarioId: u.id });

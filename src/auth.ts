@@ -9,7 +9,7 @@ export type Tipo = 'adm' | 'normal';
 /** Módulos que podem ser liberados por usuário. Configurações (usuários, e-mail, backup, licença) é sempre só do adm. */
 export const MODULOS = {
   painel: 'Painel do mês', emitir: 'Emitir nota', notas: 'Notas emitidas', cobrancas: 'Cobranças',
-  banco: 'Dados bancários', tomadores: 'Clientes', servicos: 'Serviços', empresas: 'Empresas',
+  banco: 'Dados bancários', despesas: 'Despesas e balanço', tomadores: 'Clientes', servicos: 'Serviços', empresas: 'Empresas',
 } as const;
 export type Modulo = keyof typeof MODULOS;
 export const TODOS_MODULOS = Object.keys(MODULOS) as Modulo[];
@@ -59,6 +59,10 @@ const REGRAS: Regra[] = [
   { m: 'GET', r: /^\/api\/(notas|notas-lote)$|^\/api\/notas\/\d+(\/(danfse|xml|emails))?$/, mod: LER_NOTA },
   { m: 'POST', r: /^\/api\/notas\/\d+\/(email|reenviar|reconciliar|cancelar)$/, mod: ['notas', 'emitir'] },
   { m: 'GET', r: /^\/api\/relatorios\//, mod: ['painel'] },
+  { m: 'GET', r: /^\/api\/empresas\/\d+\/painel$/, mod: ['painel'] },
+  { r: /^\/api\/empresas\/\d+\/(despesas(\/\d+)?|despesas-categorias)$/, mod: ['despesas'] },
+  { m: 'GET', r: /^\/api\/empresas\/\d+\/feriados$/, mod: ['banco', 'emitir'] },
+  { r: /^\/api\/empresas\/\d+\/feriados$/, mod: ['banco'] },
 ];
 
 /** null = permitido; senão a mensagem de recusa. */

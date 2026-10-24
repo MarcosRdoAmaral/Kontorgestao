@@ -9,6 +9,7 @@ import { ConfigSmtp, ListaEmails, configPublica, enviarNotaPorEmail, historicoEm
 import { ativarLicenca, exigirLicenca, statusLicenca } from './licenca.js';
 import { EntradaFaturamento, faturar, listarCobrancas } from './servicos/faturamento.js';
 import { ContaBancaria, boletoPdf, cancelarCobranca, gerarRemessaEmpresa, listarRemessas, marcarPago, obterCobranca, obterConta, obterRemessa, processarRetorno, salvarConta } from './servicos/cobranca.js';
+import { Despesa, criarDespesa, editarDespesa, excluirDespesa, listarCategorias, listarDespesas, painelFinanceiro, salvarCategorias } from './servicos/financeiro.js';
 import { criarBackup, listarBackups } from './servicos/backup.js';
 import { consultarCnpj } from './servicos/consulta-cnpj.js';
 import { strToU8, zipSync } from 'fflate';
@@ -522,6 +523,45 @@ export async function rotas(app: FastifyInstance) {
           ROUND(SUM(CASE WHEN n.status = 'AUTORIZADA' THEN n.valor_servico ELSE 0 END), 2) AS faturado
         FROM empresas e LEFT JOIN notas n ON n.empresa_id = e.id AND substr(n.competencia,1,7) = ? AND n.ambiente = e.ambiente
         WHERE e.escritorio_id = ? ${filtroCliente} GROUP BY e.id ORDER BY faturado DESC`).all(...params);
+    });
+
+    // ---------- Painel financeiro, despesas e balanço ----------
+    const mesDe = (v: unknown) => z.string().regex(/^\d{4}-\d{2}$/).catch(new Date(Date.now() - 3 * 3600e3).toISOString().slice(0, 7)).parse(v);
+    api.get('/api/empresas/:id/painel', async (req) => {
+      const id = Number((req.params as any).id); checarEmpresa(req, id);
+      return painelFinanceiro(id, mesDe((req.query as any).mes));
+    });
+    api.get('/api/empresas/:id/despesas', async (req) => {
+      const id = Number((req.params as any).id); checarEmpresa(req, id);
+      const mes = mesDe((req.query as any).mes);
+      return { mes, categorias: listarCategorias(id), despesas: listarDespesas(id, mes) };
+    });
+    api.post('/api/empresas/:id/despesas', async (req) => {
+      const id = Number((req.params as any).id); checarEmpresa(req, id);
+      return { id: criarDespesa(id, u(req).id, Despesa.parse(req.body)) };
+    });
+    api.put('/api/empresas/:id/despesas/:did', async (req) => {
+      const p = req.params as any; checarEmpresa(req, Number(p.id));
+      editarDespesa(Number(p.id), Number(p.did), Despesa.parse(req.body)); return { ok: true };
+    });
+    api.delete('/api/empresas/:id/despesas/:did', async (req) => {
+      const p = req.params as any; checarEmpresa(req, Number(p.id));
+      excluirDespesa(Number(p.id), Number(p.did)); return { ok: true };
+    });
+    api.put('/api/empresas/:id/despesas-categorias', async (req) => {
+      const id = Number((req.params as any).id); checarEmpresa(req, id);
+      salvarCategorias(id, z.object({ categorias: z.array(z.string()) }).parse(req.body).categorias); return { ok: true };
+    });
+    api.get('/api/empresas/:id/feriados', async (req) => {
+      const id = Number((req.params as any).id); checarEmpresa(req, id);
+      return { feriados_extra: (db.prepare('SELECT feriados_extra FROM empresas WHERE id = ?').get(id) as any)?.feriados_extra ?? '' };
+    });
+    api.put('/api/empresas/:id/feriados', async (req) => {
+      const id = Number((req.params as any).id); checarEmpresa(req, id);
+      const t = z.object({ feriados_extra: z.string().max(200) }).parse(req.body).feriados_extra;
+      const lista = t.split(/[,;\s]+/).filter(Boolean);
+      if (lista.some((x) => !/^(0?[1-9]|[12]\d|3[01])\/(0?[1-9]|1[0-2])$/.test(x))) throw new ErroNegocio('Use datas no formato dia/mês separadas por vírgula, por exemplo: 24/06, 19/03.');
+      db.prepare('UPDATE empresas SET feriados_extra = ? WHERE id = ?').run(lista.join(', ') || null, id); return { ok: true };
     });
 
     // ---------- Consulta pública de CNPJ ----------
