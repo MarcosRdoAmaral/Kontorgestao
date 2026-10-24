@@ -524,7 +524,7 @@ async function telaCobrancas() {
 async function telaBanco() {
   const c = (await api('GET', `/api/empresas/${estado.empresaId}/conta-bancaria`)) ?? { cooperativa_nome: 'Ailos', carteira: '01', multa_pct: 2, juros_pct_mes: 1 };
   conteudo.innerHTML = `
-    <div class="topo"><div><h1>Dados bancários</h1><p class="sutil">${esc(empresa().razao_social)} — cobrança Ailos (banco 085, CNAB 240)</p></div></div>
+    <div class="topo"><div><h1>Dados bancários</h1><p class="sutil">${esc(empresa().razao_social)} — cobrança Ailos (banco 085)</p></div></div>
     <form id="form-banco">
       <fieldset><legend>Conta e convênio de cobrança</legend><p class="dica">Peça estes dados à sua cooperativa: o número do convênio de cobrança e a carteira são informados por ela.</p><div class="grade">
         <label>Cooperativa <input name="cooperativa_nome" required maxlength="30" value="${esc(c.cooperativa_nome ?? '')}"></label>
@@ -534,7 +534,15 @@ async function telaBanco() {
         <label>Dígito da conta <input name="conta_dv" required maxlength="1" value="${esc(c.conta_dv ?? '')}"></label>
         <label>Convênio de cobrança <input name="convenio" required inputmode="numeric" maxlength="6" value="${esc(c.convenio ?? '')}"></label>
         <label>Carteira <input name="carteira" required maxlength="2" value="${esc(c.carteira ?? '01')}"></label>
+        <label>Formato do arquivo
+          <select name="layout"><option value="CNAB400" ${c.layout !== 'CNAB240' ? 'selected' : ''}>CNAB 400 (padrão Ailos)</option><option value="CNAB240" ${c.layout === 'CNAB240' ? 'selected' : ''}>CNAB 240</option></select></label>
       </div></fieldset>
+      <fieldset><legend>Numeração (para quem já emitia boletos em outro sistema)</legend>
+        <p class="dica">O nosso número nunca pode repetir. Se esta conta já emitiu boletos antes do Kontor, informe aqui o <strong>próximo</strong> número livre (último usado + 1) e o número da próxima remessa. Depois que houver boletos emitidos, só é possível aumentar.</p>
+        <div class="grade">
+          <label>Próximo número de boleto <input name="proximo_boleto" type="number" min="1" value="${c.proximo_boleto ?? 1}"></label>
+          <label>Número da próxima remessa <input name="proxima_remessa" type="number" min="1" value="${c.proxima_remessa ?? 1}"></label>
+        </div></fieldset>
       <fieldset><legend>Encargos e mensagem do boleto</legend><div class="grade">
         <label>Multa após o vencimento (%) <input name="multa_pct" data-num inputmode="decimal" value="${String(c.multa_pct ?? 2).replace('.', ',')}"></label>
         <label>Juros ao mês (%) <input name="juros_pct_mes" data-num inputmode="decimal" value="${String(c.juros_pct_mes ?? 1).replace('.', ',')}"></label>
@@ -543,13 +551,13 @@ async function telaBanco() {
       <p class="erro" id="erro-banco" role="alert"></p>
       <div class="acoes"><button class="primario" type="submit">Salvar dados bancários</button></div>
     </form>
-    ${c.proximo_boleto ? `<p class="dica">Próximo número de boleto: ${c.proximo_boleto} · próxima remessa: ${c.proxima_remessa}. Esses contadores nunca voltam atrás, como exige o banco.</p>` : ''}`;
+`;
   const f = $('#form-banco');
   f.onsubmit = async (ev) => {
     ev.preventDefault();
     const d = lerForm(f);
     try {
-      await api('PUT', `/api/empresas/${estado.empresaId}/conta-bancaria`, { ...d, multa_pct: d.multa_pct ?? 0, juros_pct_mes: d.juros_pct_mes ?? 0, instrucoes: d.instrucoes || null });
+      await api('PUT', `/api/empresas/${estado.empresaId}/conta-bancaria`, { ...d, multa_pct: d.multa_pct ?? 0, juros_pct_mes: d.juros_pct_mes ?? 0, instrucoes: d.instrucoes || null, proximo_boleto: Number(d.proximo_boleto) || null, proxima_remessa: Number(d.proxima_remessa) || null });
       aviso('Dados bancários salvos.'); telaBanco();
     } catch (e) { $('#erro-banco').textContent = mensagemErro(e); }
   };

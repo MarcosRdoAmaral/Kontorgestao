@@ -1,7 +1,8 @@
 import { z } from 'zod';
 import { db } from '../db.js';
 import { ErroNegocio } from './emissao.js';
-import { codigoBarras, descreverMotivo, gerarRemessa, lerRetorno, linhaDigitavel, nossoNumero, MOVIMENTO_RETORNO, type ContaAilos, type Titulo } from '../cobranca/ailos.js';
+import { gerarRemessa400 } from '../cobranca/ailos400.js';
+import { codigoBarras, descreverMotivo, gerarRemessa, lerRetornoAuto, linhaDigitavel, nossoNumero, MOVIMENTO_RETORNO, type ContaAilos, type Titulo } from '../cobranca/ailos.js';
 import { gerarBoletoPdf } from '../cobranca/boleto-pdf.js';
 
 const UF_IBGE: Record<string, string> = { '11': 'RO', '12': 'AC', '13': 'AM', '14': 'RR', '15': 'PA', '16': 'AP', '17': 'TO', '21': 'MA', '22': 'PI', '23': 'CE', '24': 'RN', '25': 'PB', '26': 'PE', '27': 'AL', '28': 'SE', '29': 'BA', '31': 'MG', '32': 'ES', '33': 'RJ', '35': 'SP', '41': 'PR', '42': 'SC', '43': 'RS', '50': 'MS', '51': 'MT', '52': 'GO', '53': 'DF' };
@@ -22,6 +23,10 @@ export const ContaBancaria = z.object({
   multa_pct: z.number().min(0).max(20).default(2),
   juros_pct_mes: z.number().min(0).max(20).default(1),
   instrucoes: z.string().max(40, 'A instrução cabe em 40 caracteres').nullish(),
+  layout: z.enum(['CNAB400', 'CNAB240']).default('CNAB400'),
+  /** Só para quem já emitia boletos em outro sistema: continua a numeração (nunca pode repetir um nosso número já usado). */
+  proximo_boleto: z.number().int().min(1).max(999999999).nullish(),
+  proxima_remessa: z.number().int().min(1).max(9999999).nullish(),
 });
 export type ContaBancaria = z.infer<typeof ContaBancaria>;
 
@@ -31,11 +36,16 @@ export function obterConta(empresaId: number): (ContaBancaria & { proximo_boleto
 
 export function salvarConta(empresaId: number, d: ContaBancaria) {
   const atual = obterConta(empresaId);
-  db.prepare(`INSERT INTO contas_bancarias (empresa_id, cooperativa_nome, agencia, agencia_dv, conta, conta_dv, convenio, carteira, multa_pct, juros_pct_mes, instrucoes)
-    VALUES (?,?,?,?,?,?,?,?,?,?,?)
-    ON CONFLICT(empresa_id) DO UPDATE SET cooperativa_nome=excluded.cooperativa_nome, agencia=excluded.agencia, agencia_dv=excluded.agencia_dv, conta=excluded.conta, conta_dv=excluded.conta_dv,
+  const usados = (db.prepare('SELECT COUNT(*) AS n FROM cobrancas WHERE empresa_id = ? AND nosso_numero IS NOT NULL').get(empresaId) as { n: number }).n;
+  const remessasFeitas = (db.prepare('SELECT COUNT(*) AS n FROM remessas WHERE empresa_id = ?').get(empresaId) as { n: number }).n;
+  const pb = d.proximo_boleto ?? atual?.proximo_boleto ?? 1, pr = d.proxima_remessa ?? atual?.proxima_remessa ?? 1;
+  if (atual && usados && pb < atual.proximo_boleto) throw new ErroNegocio(`O próximo número de boleto não pode voltar (atual: ${atual.proximo_boleto}): repetiria um nosso número.`);
+  if (atual && remessasFeitas && pr < atual.proxima_remessa) throw new ErroNegocio(`O número da próxima remessa não pode voltar (atual: ${atual.proxima_remessa}).`);
+  db.prepare(`INSERT INTO contas_bancarias (empresa_id, cooperativa_nome, agencia, agencia_dv, conta, conta_dv, convenio, carteira, multa_pct, juros_pct_mes, instrucoes, layout, proximo_boleto, proxima_remessa)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+    ON CONFLICT(empresa_id) DO UPDATE SET layout=excluded.layout, proximo_boleto=excluded.proximo_boleto, proxima_remessa=excluded.proxima_remessa, cooperativa_nome=excluded.cooperativa_nome, agencia=excluded.agencia, agencia_dv=excluded.agencia_dv, conta=excluded.conta, conta_dv=excluded.conta_dv,
       convenio=excluded.convenio, carteira=excluded.carteira, multa_pct=excluded.multa_pct, juros_pct_mes=excluded.juros_pct_mes, instrucoes=excluded.instrucoes, atualizado_em=datetime('now')`)
-    .run(empresaId, d.cooperativa_nome, d.agencia, d.agencia_dv, d.conta, d.conta_dv, d.convenio, d.carteira, d.multa_pct, d.juros_pct_mes, d.instrucoes || null);
+    .run(empresaId, d.cooperativa_nome, d.agencia, d.agencia_dv, d.conta, d.conta_dv, d.convenio, d.carteira, d.multa_pct, d.juros_pct_mes, d.instrucoes || null, d.layout, pb, pr);
   // quem já tem boleto emitido não pode trocar de conta (o nosso número inclui a conta)
   if (atual && (atual.conta !== d.conta || atual.conta_dv !== d.conta_dv || atual.convenio !== d.convenio)) {
     const n = (db.prepare("SELECT COUNT(*) AS n FROM cobrancas WHERE empresa_id = ? AND nosso_numero IS NOT NULL AND status NOT IN ('PAGO','CANCELADO','REJEITADO')").get(empresaId) as { n: number }).n;
@@ -182,10 +192,13 @@ export function gerarRemessaEmpresa(empresaId: number, usuarioId: number) {
     pagador: { documento: c.t_doc, nome: c.t_nome, endereco: [c.logradouro, c.numero].filter(Boolean).join(', ') + (c.complemento ? ` - ${c.complemento}` : ''), bairro: c.bairro ?? '', cep: c.cep ?? '', cidade: c.cidade ?? '', uf: c.uf || UF_IBGE[String(c.cod_municipio ?? '').slice(0, 2)] || '' },
   }));
   const numero = conta.proxima_remessa;
-  const conteudo = gerarRemessa({ beneficiario: { documento: emp.documento, nome: emp.razao_social }, conta: contaAilos(conta), numeroRemessa: numero, agora: new Date(), titulos });
+  const gerar = (conta as any).layout === 'CNAB240' ? gerarRemessa : gerarRemessa400;
+  const conteudo = gerar({ beneficiario: { documento: emp.documento, nome: emp.razao_social }, conta: contaAilos(conta), numeroRemessa: numero, agora: new Date(), titulos });
   const entradas = linhas.filter((c) => c.status === 'A_REMETER');
   const total = entradas.reduce((a, c) => a + c.valor, 0);
-  const nome = `REMESSA_AILOS_${String(numero).padStart(6, '0')}.REM`;
+  const brHoje = new Date(Date.now() - 3 * 3600e3).toISOString().slice(0, 10).split('-').reverse().join('');
+  const hojeN = (db.prepare("SELECT COUNT(*) AS n FROM remessas WHERE empresa_id = ? AND nome_arquivo LIKE ?").get(empresaId, `${brHoje}%`) as { n: number }).n;
+  const nome = `${brHoje}${hojeN ? `_${hojeN + 1}` : ''}.rem`;
   return db.transaction(() => {
     db.prepare('UPDATE contas_bancarias SET proxima_remessa = proxima_remessa + 1 WHERE empresa_id = ?').run(empresaId);
     const r = db.prepare('INSERT INTO remessas (empresa_id, numero, nome_arquivo, conteudo, qtd_titulos, valor_total, criado_por) VALUES (?,?,?,?,?,?,?)')
@@ -208,7 +221,7 @@ export function obterRemessa(id: number) {
 
 export function processarRetorno(empresaId: number, texto: string) {
   let r;
-  try { r = lerRetorno(texto); } catch (e: any) { throw new ErroNegocio(e.message); }
+  try { r = lerRetornoAuto(texto); } catch (e: any) { throw new ErroNegocio(e.message); }
   const resumo = { titulos: r.itens.length, registrados: 0, rejeitados: 0, pagos: 0, baixados: 0, tarifas: 0, naoEncontrados: [] as string[], detalhes: [] as string[] };
   db.transaction(() => {
     for (const i of r.itens) {
@@ -218,10 +231,10 @@ export function processarRetorno(empresaId: number, texto: string) {
       const rotulo = MOVIMENTO_RETORNO[i.movimento] ?? `Movimento ${i.movimento}`;
       switch (i.movimento) {
         case '02': if (c.status !== 'PAGO') db.prepare("UPDATE cobrancas SET status = 'REGISTRADO', observacao_banco = NULL WHERE id = ?").run(c.id); resumo.registrados++; break;
-        case '03': db.prepare("UPDATE cobrancas SET status = 'REJEITADO', observacao_banco = ? WHERE id = ?").run(motivos || 'Entrada rejeitada pelo banco', c.id); resumo.rejeitados++; resumo.detalhes.push(`${c.id}: ${motivos}`); break;
-        case '06': case '17': case '76': case '77':
+        case '03': db.prepare("UPDATE cobrancas SET status = 'REJEITADO', observacao_banco = ? WHERE id = ?").run(motivos || 'Entrada rejeitada pelo banco (veja o motivo no Ailos Conta Online)', c.id); resumo.rejeitados++; resumo.detalhes.push(`${c.id}: ${motivos}`); break;
+        case '06': case '15': case '17': case '76': case '77':
           db.prepare("UPDATE cobrancas SET status = 'PAGO', pago_em = ?, valor_pago = ?, baixa_pendente = 0, observacao_banco = NULL WHERE id = ?").run(i.dataCredito ?? i.dataOcorrencia ?? hojeBr(), i.valorPago || c.valor, c.id); resumo.pagos++; break;
-        case '09': if (c.status !== 'PAGO') db.prepare("UPDATE cobrancas SET status = 'CANCELADO', baixa_pendente = 0 WHERE id = ?").run(c.id); resumo.baixados++; break;
+        case '09': case '10': if (c.status !== 'PAGO') db.prepare("UPDATE cobrancas SET status = 'CANCELADO', baixa_pendente = 0 WHERE id = ?").run(c.id); resumo.baixados++; break;
         case '26': db.prepare('UPDATE cobrancas SET observacao_banco = ? WHERE id = ?').run(`Instrução rejeitada: ${motivos}`, c.id); resumo.detalhes.push(`${c.id}: instrução rejeitada – ${motivos}`); break;
         case '28': resumo.tarifas++; break;
         default: resumo.detalhes.push(`${c.id}: ${rotulo}${motivos ? ' – ' + motivos : ''}`);

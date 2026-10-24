@@ -268,7 +268,7 @@ test('fluxo completo: cadastro, emissão, rejeição, queda de rede, DANFSe e ca
 
   // 7c) cobrança Ailos: conta, boleto em PDF, remessa CNAB 240 e retorno
   assert.equal((await call('PUT', `/api/empresas/${eid}/conta-bancaria`, { cooperativa_nome: 'Ailos', agencia: '0101', agencia_dv: '5', conta: '903306', conta_dv: '8', convenio: '101002', carteira: '01', multa_pct: 2, juros_pct_mes: 1 }, tc)).status, 403, 'cliente não altera dados bancários');
-  const cb = await call('PUT', `/api/empresas/${eid}/conta-bancaria`, { cooperativa_nome: 'Ailos', agencia: '0101', agencia_dv: '5', conta: '903306', conta_dv: '8', convenio: '101002', carteira: '01', multa_pct: 2, juros_pct_mes: 1 }, token);
+  const cb = await call('PUT', `/api/empresas/${eid}/conta-bancaria`, { cooperativa_nome: 'Ailos', agencia: '0101', agencia_dv: '5', conta: '903306', conta_dv: '8', convenio: '101002', carteira: '01', multa_pct: 2, juros_pct_mes: 1, layout: 'CNAB240' }, token);
   assert.equal(cb.status, 200, JSON.stringify(cb.json));
   assert.equal(cb.json.convenio, '101002');
   const semCidade = await call('POST', '/api/faturar', { ...base, tomadorId: tFat.json.id, valor: 500 }, token);

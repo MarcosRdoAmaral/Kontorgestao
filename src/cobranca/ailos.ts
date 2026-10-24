@@ -197,6 +197,8 @@ export function gerarRemessa(d: DadosRemessa): string {
   return linhas.join('\r\n') + '\r\n';
 }
 
+import { lerRetorno400 } from './ailos400.js';
+
 // ---------------------------------------------------------------------------
 // Retorno CNAB 240 (segmentos T e U)
 // ---------------------------------------------------------------------------
@@ -217,10 +219,18 @@ export interface ItemRetorno {
 const dataIso = (s: string) => (/^\d{8}$/.test(s) && s !== ZERO_DATA ? `${s.slice(4)}-${s.slice(2, 4)}-${s.slice(0, 2)}` : null);
 const valor = (s: string) => Number(s) / 100;
 
+/** Lê um retorno do Ailos em CNAB 400 ou CNAB 240 (identificado pelo tamanho das linhas). */
+export function lerRetornoAuto(texto: string): { numeroRetorno: number | null; itens: ItemRetorno[]; layout: 'CNAB240' | 'CNAB400' } {
+  const linhas = texto.split(/\r?\n/).filter((l) => l.trim().length);
+  if (!linhas.length) throw new Error('Arquivo vazio.');
+  if (linhas.every((l) => l.length === 400)) return { ...lerRetorno400(linhas), layout: 'CNAB400' };
+  return { ...lerRetorno(texto), layout: 'CNAB240' };
+}
+
 export function lerRetorno(texto: string): { numeroRetorno: number | null; itens: ItemRetorno[] } {
   const linhas = texto.split(/\r?\n/).filter((l) => l.trim().length);
   if (!linhas.length) throw new Error('Arquivo vazio.');
-  if (linhas.some((l) => l.length !== 240)) throw new Error('O arquivo não está no formato CNAB 240 (as linhas devem ter 240 posições).');
+  if (linhas.some((l) => l.length !== 240)) throw new Error('O arquivo não está no formato CNAB 240 nem CNAB 400 (as linhas devem ter 240 ou 400 posições).');
   if (linhas[0].slice(0, 3) !== '085' || linhas[0][7] !== '0') throw new Error('O arquivo não é um retorno do Ailos (banco 085).');
   if (linhas[0][142] !== '2') throw new Error('Este arquivo é uma remessa, não um retorno.');
   const itens: ItemRetorno[] = [];

@@ -325,6 +325,8 @@ const migracoes: string[] = [
   CREATE INDEX idx_cobrancas_empresa ON cobrancas(empresa_id, vencimento);
   CREATE INDEX idx_cobrancas_nota ON cobrancas(nota_id);
   CREATE UNIQUE INDEX idx_cobrancas_nosso ON cobrancas(empresa_id, nosso_numero) WHERE nosso_numero IS NOT NULL;`,
+  // 8: layout do arquivo de cobrança (CNAB 400 é o padrão do Ailos; CNAB 240 também suportado)
+  `ALTER TABLE contas_bancarias ADD COLUMN layout TEXT NOT NULL DEFAULT 'CNAB400' CHECK (layout IN ('CNAB400','CNAB240'));`,
 ];
 
 export function migrar(): void {
