@@ -36,7 +36,7 @@ jobs:
         if: steps.ja.outputs.existe == '0'
       - name: Ferramentas dos testes (xmllint e openssl)
         if: steps.ja.outputs.existe == '0'
-        run: sudo apt-get update -qq && sudo apt-get install -y -qq libxml2-utils openssl
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq libxml2-utils openssl nsis
       - name: Testes
         if: steps.ja.outputs.existe == '0'
         run: |
