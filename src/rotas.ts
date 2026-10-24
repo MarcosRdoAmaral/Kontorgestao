@@ -7,6 +7,7 @@ import { config } from './config.js';
 import { ConfigSmtp, ListaEmails, configPublica, enviarNotaPorEmail, historicoEmails, salvarConfig, testarConfig } from './servicos/email.js';
 import { ativarLicenca, exigirLicenca, statusLicenca } from './licenca.js';
 import { EntradaFaturamento, faturar, listarCobrancas } from './servicos/faturamento.js';
+import { ContaBancaria, boletoPdf, cancelarCobranca, gerarRemessaEmpresa, listarRemessas, marcarPago, obterCobranca, obterConta, obterRemessa, processarRetorno, salvarConta } from './servicos/cobranca.js';
 import { criarBackup, listarBackups } from './servicos/backup.js';
 import { consultarCnpj } from './servicos/consulta-cnpj.js';
 import { strToU8, zipSync } from 'fflate';
@@ -60,6 +61,8 @@ const Tomador = z.object({
   numero: z.string().nullish(),
   complemento: z.string().nullish(),
   bairro: z.string().nullish(),
+  cidade: z.string().max(60).nullish(),
+  uf: z.string().length(2).nullish().or(z.literal('')),
   // faturamento do cliente
   modo_faturamento: z.enum(['NOTA', 'NOTA_BOLETO', 'BOLETO']).default('NOTA'),
   vencimento_tipo: z.enum(['PRAZO', 'DIA_FIXO']).default('PRAZO'),
@@ -235,10 +238,10 @@ export async function rotas(app: FastifyInstance) {
       checarEmpresa(req, id);
       const d = Tomador.parse(req.body);
       const r = db.prepare(`INSERT INTO tomadores (empresa_id, tipo_doc, documento, nome, inscricao_municipal, email, fone, cep, cod_municipio, logradouro, numero, complemento, bairro,
-        modo_faturamento, vencimento_tipo, vencimento_valor, email_cobranca, enviar_email_auto)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(id, d.tipo_doc, d.documento, d.nome, d.inscricao_municipal ?? null, d.email || null, d.fone, d.cep,
+        modo_faturamento, vencimento_tipo, vencimento_valor, email_cobranca, enviar_email_auto, cidade, uf)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(id, d.tipo_doc, d.documento, d.nome, d.inscricao_municipal ?? null, d.email || null, d.fone, d.cep,
         d.cod_municipio ?? null, d.logradouro ?? null, d.numero ?? null, d.complemento ?? null, d.bairro ?? null,
-        d.modo_faturamento, d.vencimento_tipo, d.vencimento_valor, d.email_cobranca || null, d.enviar_email_auto);
+        d.modo_faturamento, d.vencimento_tipo, d.vencimento_valor, d.email_cobranca || null, d.enviar_email_auto, d.cidade || null, d.uf || null);
       return { id: Number(r.lastInsertRowid) };
     });
     api.put('/api/tomadores/:id', async (req) => {
@@ -248,10 +251,10 @@ export async function rotas(app: FastifyInstance) {
       checarEmpresa(req, t.empresa_id);
       const d = Tomador.parse(req.body);
       db.prepare(`UPDATE tomadores SET tipo_doc=?, documento=?, nome=?, inscricao_municipal=?, email=?, fone=?, cep=?, cod_municipio=?, logradouro=?, numero=?, complemento=?, bairro=?,
-        modo_faturamento=?, vencimento_tipo=?, vencimento_valor=?, email_cobranca=?, enviar_email_auto=? WHERE id=?`)
+        modo_faturamento=?, vencimento_tipo=?, vencimento_valor=?, email_cobranca=?, enviar_email_auto=?, cidade=?, uf=? WHERE id=?`)
         .run(d.tipo_doc, d.documento, d.nome, d.inscricao_municipal ?? null, d.email || null, d.fone, d.cep, d.cod_municipio ?? null,
           d.logradouro ?? null, d.numero ?? null, d.complemento ?? null, d.bairro ?? null,
-          d.modo_faturamento, d.vencimento_tipo, d.vencimento_valor, d.email_cobranca || null, d.enviar_email_auto, id);
+          d.modo_faturamento, d.vencimento_tipo, d.vencimento_valor, d.email_cobranca || null, d.enviar_email_auto, d.cidade || null, d.uf || null, id);
       return { ok: true };
     });
 
@@ -379,6 +382,64 @@ export async function rotas(app: FastifyInstance) {
       const id = Number((req.params as any).id);
       checarEmpresa(req, id);
       return listarCobrancas(id);
+    });
+
+    // ---- cobrança bancária (Ailos) ----
+    const cobrancaDoUsuario = (req: FastifyRequest, id: number) => {
+      const c = obterCobranca(id);
+      if (!c) throw new ErroNegocio('Cobrança não encontrada.', 404);
+      checarEmpresa(req, c.empresa_id);
+      return c;
+    };
+    api.get('/api/empresas/:id/conta-bancaria', async (req) => {
+      const id = Number((req.params as any).id);
+      checarEmpresa(req, id);
+      return obterConta(id) ?? null;
+    });
+    api.put('/api/empresas/:id/conta-bancaria', { preHandler: exigirPapel('admin', 'operador') }, async (req) => {
+      const id = Number((req.params as any).id);
+      checarEmpresa(req, id);
+      return salvarConta(id, ContaBancaria.parse(req.body));
+    });
+    api.get('/api/cobrancas/:id/boleto', async (req, reply) => {
+      const id = Number((req.params as any).id);
+      cobrancaDoUsuario(req, id);
+      const { pdf, nome } = await boletoPdf(id);
+      return reply.type('application/pdf').header('Content-Disposition', `inline; filename="${nome}"`).send(pdf);
+    });
+    api.post('/api/cobrancas/:id/cancelar', { preHandler: exigirPapel('admin', 'operador') }, async (req) => {
+      const id = Number((req.params as any).id);
+      cobrancaDoUsuario(req, id);
+      return cancelarCobranca(id);
+    });
+    api.post('/api/cobrancas/:id/pagar', { preHandler: exigirPapel('admin', 'operador') }, async (req) => {
+      const id = Number((req.params as any).id);
+      cobrancaDoUsuario(req, id);
+      const d = z.object({ data: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullish(), valor: z.number().positive().nullish() }).parse(req.body ?? {});
+      marcarPago(id, d.data ?? undefined, d.valor ?? undefined);
+      return { ok: true };
+    });
+    api.get('/api/empresas/:id/remessas', async (req) => {
+      const id = Number((req.params as any).id);
+      checarEmpresa(req, id);
+      return listarRemessas(id);
+    });
+    api.post('/api/empresas/:id/remessas', { preHandler: exigirPapel('admin', 'operador') }, async (req) => {
+      const id = Number((req.params as any).id);
+      checarEmpresa(req, id);
+      return gerarRemessaEmpresa(id, u(req).id);
+    });
+    api.get('/api/remessas/:id/arquivo', async (req, reply) => {
+      const r = obterRemessa(Number((req.params as any).id));
+      if (!r) throw new ErroNegocio('Remessa não encontrada.', 404);
+      checarEmpresa(req, r.empresa_id);
+      return reply.type('text/plain; charset=latin1').header('Content-Disposition', `attachment; filename="${r.nome_arquivo}"`).send(Buffer.from(r.conteudo, 'latin1'));
+    });
+    api.post('/api/empresas/:id/retorno', { preHandler: exigirPapel('admin', 'operador'), bodyLimit: 10 * 1024 * 1024 }, async (req) => {
+      const id = Number((req.params as any).id);
+      checarEmpresa(req, id);
+      const d = z.object({ conteudo: z.string().min(240) }).parse(req.body);
+      return processarRetorno(id, d.conteudo);
     });
 
     api.get('/api/licenca', async () => statusLicenca());

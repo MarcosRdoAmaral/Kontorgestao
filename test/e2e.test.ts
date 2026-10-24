@@ -266,6 +266,62 @@ test('fluxo completo: cadastro, emissão, rejeição, queda de rede, DANFSe e ca
   assert.equal(cobs.json.length, 2);
   assert.equal((await call('GET', `/api/empresas/${eid}/cobrancas`, undefined, tc)).status, 200);
 
+  // 7c) cobrança Ailos: conta, boleto em PDF, remessa CNAB 240 e retorno
+  assert.equal((await call('PUT', `/api/empresas/${eid}/conta-bancaria`, { cooperativa_nome: 'Ailos', agencia: '0101', agencia_dv: '5', conta: '903306', conta_dv: '8', convenio: '101002', carteira: '01', multa_pct: 2, juros_pct_mes: 1 }, tc)).status, 403, 'cliente não altera dados bancários');
+  const cb = await call('PUT', `/api/empresas/${eid}/conta-bancaria`, { cooperativa_nome: 'Ailos', agencia: '0101', agencia_dv: '5', conta: '903306', conta_dv: '8', convenio: '101002', carteira: '01', multa_pct: 2, juros_pct_mes: 1 }, token);
+  assert.equal(cb.status, 200, JSON.stringify(cb.json));
+  assert.equal(cb.json.convenio, '101002');
+  const semCidade = await call('POST', '/api/faturar', { ...base, tomadorId: tFat.json.id, valor: 500 }, token);
+  assert.equal(semCidade.status, 400);
+  assert.match(JSON.stringify(semCidade.json), /cidade/);
+  const tAtual = (await call('GET', `/api/empresas/${eid}/tomadores`, undefined, token)).json.find((x: any) => x.id === tFat.json.id);
+  assert.equal((await call('PUT', `/api/tomadores/${tFat.json.id}`, { ...tAtual, email: 'mensal@x.com', cidade: 'Blumenau', uf: 'SC' }, token)).status, 200);
+  const fat2 = await call('POST', '/api/faturar', { ...base, tomadorId: tFat.json.id, valor: 500, vencimento: '2027-01-15', enviarEmail: false }, token);
+  assert.equal(fat2.status, 200, JSON.stringify(fat2.json));
+  const cob2 = fat2.json.cobranca;
+  assert.equal(cob2.status, 'A_REMETER');
+  assert.match(cob2.nosso_numero, /^09033068\d{9}$/);
+  assert.equal(cob2.codigo_barras.length, 44);
+  assert.match(cob2.linha_digitavel, /^\d{5}\.\d{5} \d{5}\.\d{6} \d{5}\.\d{6} \d \d{14}$/);
+  const pdfBol = await app.inject({ method: 'GET', url: `/api/cobrancas/${cob2.id}/boleto`, headers: { authorization: `Bearer ${token}` } });
+  assert.equal(pdfBol.statusCode, 200); assert.equal(pdfBol.rawPayload.subarray(0, 4).toString(), '%PDF');
+  // só boleto com e-mail: vai o PDF em anexo
+  const antesEmail = enviadosEmail.length;
+  const soB = await call('POST', '/api/faturar', { ...base, tomadorId: tFat.json.id, acao: 'BOLETO', valor: 250, vencimento: '2027-01-20', enviarEmail: true }, token);
+  assert.equal(soB.status, 200, JSON.stringify(soB.json));
+  assert.equal(soB.json.email.status, 'ENVIADO');
+  assert.equal(enviadosEmail.length, antesEmail + 1);
+  assert.ok(enviadosEmail.at(-1).attachments.some((a: any) => /^Boleto_\d{17}\.pdf$/.test(a.filename)));
+  assert.equal((await call('POST', '/api/faturar', { ...base, tomadorId: tFat.json.id, acao: 'BOLETO', valor: 250, vencimento: '2020-01-01' }, token)).status, 400, 'vencimento no passado');
+  // remessa
+  const rem = await call('POST', `/api/empresas/${eid}/remessas`, {}, token);
+  assert.equal(rem.status, 200, JSON.stringify(rem.json));
+  assert.equal(rem.json.entradas, 2); assert.equal(rem.json.valor_total, 750);
+  assert.equal((await call('POST', `/api/empresas/${eid}/remessas`, {}, token)).status, 400, 'nada novo para enviar');
+  const arq = await app.inject({ method: 'GET', url: `/api/remessas/${rem.json.id}/arquivo`, headers: { authorization: `Bearer ${token}` } });
+  const linhasRem = arq.payload.split('\r\n').filter(Boolean);
+  assert.ok(linhasRem.every((l: string) => l.length === 240));
+  assert.equal(linhasRem.filter((l: string) => l[13] === 'P').length, 2);
+  // retorno: entrada confirmada de um título e liquidação do outro
+  const reg = (pos: Record<number, string>, seg: string) => { const a = Array(240).fill(' '); const put = (de: number, t: string) => { for (let i = 0; i < t.length; i++) a[de - 1 + i] = t[i]; }; put(1, '085'); put(4, '0001'); put(8, '3'); put(14, seg); for (const k of Object.keys(pos)) put(Number(k), pos[Number(k)]); return a.join(''); };
+  const cab = (() => { const a = Array(240).fill(' '); const put = (de: number, t: string) => { for (let i = 0; i < t.length; i++) a[de - 1 + i] = t[i]; }; put(1, '085'); put(4, '0000'); put(8, '0'); put(143, '2'); put(158, '000001'); return a.join(''); })();
+  const retArq = [cab,
+    reg({ 16: '02', 38: cob2.nosso_numero, 74: '15012027', 82: '000000000050000' }, 'T'), reg({ 16: '02' }, 'U'),
+    reg({ 16: '06', 38: soB.json.cobranca.nosso_numero, 74: '20012027', 82: '000000000025000' }, 'T'), reg({ 16: '06', 78: '000000000025000', 138: '19012027', 146: '20012027' }, 'U'),
+    reg({ 16: '02', 38: '99999999900000000' }, 'T')].join('\r\n');
+  const pr = await call('POST', `/api/empresas/${eid}/retorno`, { conteudo: retArq }, token);
+  assert.equal(pr.status, 200, JSON.stringify(pr.json));
+  assert.equal(pr.json.registrados, 1); assert.equal(pr.json.pagos, 1); assert.deepEqual(pr.json.naoEncontrados, ['99999999900000000']);
+  const listaCob = (await call('GET', `/api/empresas/${eid}/cobrancas`, undefined, token)).json;
+  assert.equal(listaCob.find((c: any) => c.id === cob2.id).status, 'REGISTRADO');
+  const pago = listaCob.find((c: any) => c.id === soB.json.cobranca.id);
+  assert.equal(pago.status, 'PAGO'); assert.equal(pago.pago_em, '2027-01-20'); assert.equal(pago.valor_pago, 250);
+  // cancelar título já registrado = pedido de baixa na próxima remessa
+  assert.equal((await call('POST', `/api/cobrancas/${cob2.id}/cancelar`, {}, token)).json.baixaNoBanco, true);
+  const rem2 = await call('POST', `/api/empresas/${eid}/remessas`, {}, token);
+  assert.equal(rem2.json.baixas, 1);
+  assert.equal((await call('POST', `/api/empresas/${eid}/retorno`, { conteudo: 'lixo'.repeat(100) }, token)).status, 400);
+
   // 8) o certificado está criptografado em repouso
   const { db } = await import('../src/db.js');
   const bruto = (db.prepare('SELECT cert_pfx_enc FROM empresas WHERE id = ?').get(eid) as any).cert_pfx_enc as Buffer;

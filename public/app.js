@@ -93,6 +93,8 @@ async function buscarCep(form) {
       if (form[campo] && valor && !form[campo].value) form[campo].value = valor;
     }
     if (form.cod_municipio && r.ibge) form.cod_municipio.value = r.ibge;
+    if (form.cidade && r.localidade) form.cidade.value = r.localidade;
+    if (form.uf && r.uf) form.uf.value = r.uf;
     const info = form.querySelector('[data-municipio]');
     if (info) info.textContent = `${r.localidade}/${r.uf} — IBGE ${r.ibge}`;
   } catch { /* sem internet: preenchimento manual */ }
@@ -190,7 +192,7 @@ async function iniciar() {
 
 const rotas = {
   painel: telaPainel, emitir: telaEmitir, notas: telaNotas, nota: telaNota,
-  cobrancas: telaCobrancas, licenca: telaLicenca, tomadores: telaTomadores, servicos: telaServicos, empresas: telaEmpresas, usuarios: telaUsuarios, email: telaEmail, backup: telaBackup,
+  cobrancas: telaCobrancas, banco: telaBanco, licenca: telaLicenca, tomadores: telaTomadores, servicos: telaServicos, empresas: telaEmpresas, usuarios: telaUsuarios, email: telaEmail, backup: telaBackup,
 };
 
 function rotear() {
@@ -451,20 +453,106 @@ async function telaEmitir(notaIdCorrecao) {
 }
 
 // ---------------------------------------------------------------------------
-// Cobranças (boletos) – a integração bancária entra numa próxima versão
+// Cobranças (boletos Ailos): boleto em PDF, remessa CNAB 240 e retorno
 // ---------------------------------------------------------------------------
-const STATUS_COBRANCA = { AGUARDANDO_BANCO: 'Aguardando banco', EMITIDO: 'Boleto emitido', PAGO: 'Pago', CANCELADO: 'Cancelado' };
+const STATUS_COBRANCA = {
+  AGUARDANDO_BANCO: 'Pendente (sem boleto)', A_REMETER: 'Boleto pronto', REMETIDO: 'Enviado ao banco', REGISTRADO: 'Registrado no banco',
+  REJEITADO: 'Rejeitado pelo banco', PAGO: 'Pago', CANCELADO: 'Cancelado',
+};
 async function telaCobrancas() {
-  const lista = await api('GET', `/api/empresas/${estado.empresaId}/cobrancas`);
-  const total = lista.filter((c) => c.status !== 'CANCELADO' && c.status !== 'PAGO').reduce((a, c) => a + c.valor, 0);
+  const [lista, remessas, conta] = await Promise.all([
+    api('GET', `/api/empresas/${estado.empresaId}/cobrancas`),
+    api('GET', `/api/empresas/${estado.empresaId}/remessas`),
+    api('GET', `/api/empresas/${estado.empresaId}/conta-bancaria`),
+  ]);
+  const podeEditar = estado.usuario.papel !== 'cliente';
+  const aberto = lista.filter((c) => !['CANCELADO', 'PAGO', 'REJEITADO'].includes(c.status)).reduce((a, c) => a + c.valor, 0);
+  const aRemeter = lista.filter((c) => c.status === 'A_REMETER' || c.baixa_pendente === 1).length;
+  const hoje = new Date(Date.now() - 3 * 3600e3).toISOString().slice(0, 10);
   conteudo.innerHTML = `
-    <div class="topo"><div><h1>Cobranças</h1><p class="sutil">${lista.length} registros · ${brl(total)} em aberto</p></div></div>
-    <div class="banner teste">A integração com o banco ainda não está ativa. Os boletos ficam registrados como “aguardando banco” e serão gerados quando a integração for configurada.</div>
-    ${lista.length ? `<div class="rolagem"><table class="tabela"><thead><tr><th>Vencimento</th><th>Cliente</th><th>Descrição</th><th>Nota</th><th class="num">Valor</th><th>Situação</th></tr></thead><tbody>
-      ${lista.map((c) => `<tr ${c.nota_id ? `class="clicavel" data-nota="${c.nota_id}"` : ''}><td>${dataBr(c.vencimento)}</td><td>${esc(c.tomador_nome)}</td><td>${esc((c.descricao ?? '').slice(0, 60))}</td>
-        <td>${c.n_nfse ?? '—'}</td><td class="num">${brl(c.valor)}</td><td>${STATUS_COBRANCA[c.status] ?? c.status}</td></tr>`).join('')}
-    </tbody></table></div>` : '<div class="vazio">Nenhuma cobrança registrada. Escolha “Nota + boleto” ou “Somente o boleto” ao emitir.</div>'}`;
-  conteudo.querySelectorAll('tr[data-nota]').forEach((tr) => (tr.onclick = () => (location.hash = `#/nota/${tr.dataset.nota}`)));
+    <div class="topo"><div><h1>Cobranças</h1><p class="sutil">${lista.length} registros · ${brl(aberto)} em aberto</p></div>
+      ${podeEditar ? `<div class="acoes"><button id="gerar-remessa" class="primario" ${conta && aRemeter ? '' : 'disabled'}>Gerar remessa${aRemeter ? ` (${aRemeter})` : ''}</button>
+        <button id="ler-retorno" ${conta ? '' : 'disabled'}>Importar retorno</button><input type="file" id="arq-retorno" accept=".ret,.RET,.txt,.TXT,.rem,.REM,*/*" hidden></div>` : ''}</div>
+    ${conta ? '' : `<div class="banner teste">Os dados bancários (Ailos) desta empresa ainda não foram informados. <a href="#/banco">Informar agora</a> — os boletos pendentes são gerados automaticamente depois disso.</div>`}
+    ${lista.length ? `<div class="rolagem"><table class="tabela"><thead><tr><th>Vencimento</th><th>Cliente</th><th>Nota</th><th class="num">Valor</th><th>Situação</th><th></th></tr></thead><tbody>
+      ${lista.map((c) => `<tr><td>${dataBr(c.vencimento)}${c.status !== 'PAGO' && c.status !== 'CANCELADO' && c.vencimento < hoje ? ' <span class="dica erro">vencido</span>' : ''}</td>
+        <td>${esc(c.tomador_nome)}<br><span class="dica">${esc((c.descricao ?? '').slice(0, 60))}</span></td>
+        <td>${c.nota_id ? `<a href="#/nota/${c.nota_id}">${c.n_nfse ?? '—'}</a>` : '—'}</td><td class="num">${brl(c.valor)}</td>
+        <td>${STATUS_COBRANCA[c.status] ?? c.status}${c.baixa_pendente ? ' <span class="dica">(baixa solicitada)</span>' : ''}${c.pago_em ? `<br><span class="dica">em ${dataBr(c.pago_em)}</span>` : ''}${c.observacao_banco ? `<br><span class="dica erro">${esc(c.observacao_banco)}</span>` : ''}</td>
+        <td class="acoes-linha">${c.nosso_numero ? `<button data-boleto="${c.id}">Boleto</button>` : ''}${podeEditar && !['PAGO', 'CANCELADO'].includes(c.status) ? `<button data-pago="${c.id}">Marcar pago</button><button data-cancelar="${c.id}">Cancelar</button>` : ''}</td></tr>`).join('')}
+    </tbody></table></div>` : '<div class="vazio">Nenhuma cobrança registrada. Escolha “Nota + boleto” ou “Somente o boleto” ao emitir.</div>'}
+    ${remessas.length ? `<h2>Remessas geradas</h2><div class="rolagem"><table class="tabela"><thead><tr><th>Nº</th><th>Data</th><th>Títulos</th><th class="num">Valor</th><th></th></tr></thead><tbody>
+      ${remessas.map((r) => `<tr><td>${r.numero}</td><td>${esc(r.criado_em)}</td><td>${r.qtd_titulos}</td><td class="num">${brl(r.valor_total)}</td><td><button data-remessa="${r.id}" data-nome="${esc(r.nome_arquivo)}">Baixar arquivo</button></td></tr>`).join('')}</tbody></table></div>
+      <p class="dica">Envie o arquivo no Ailos Conta Online: Cobrança Bancária → Arquivo de Cobrança. O arquivo de retorno fica no mesmo menu; importe-o aqui para dar baixa nos pagamentos.</p>` : ''}`;
+  conteudo.querySelectorAll('[data-boleto]').forEach((b) => (b.onclick = () => baixar(`/api/cobrancas/${b.dataset.boleto}/boleto`, `Boleto_${b.dataset.boleto}.pdf`, true)));
+  conteudo.querySelectorAll('[data-remessa]').forEach((b) => (b.onclick = () => baixar(`/api/remessas/${b.dataset.remessa}/arquivo`, b.dataset.nome)));
+  conteudo.querySelectorAll('[data-pago]').forEach((b) => (b.onclick = async () => {
+    if (!confirm('Marcar este boleto como pago hoje?')) return;
+    try { await api('POST', `/api/cobrancas/${b.dataset.pago}/pagar`, {}); telaCobrancas(); } catch (e) { aviso(mensagemErro(e)); }
+  }));
+  conteudo.querySelectorAll('[data-cancelar]').forEach((b) => (b.onclick = async () => {
+    if (!confirm('Cancelar este boleto? Se ele já foi enviado ao banco, a baixa vai na próxima remessa.')) return;
+    try { const r = await api('POST', `/api/cobrancas/${b.dataset.cancelar}/cancelar`, {}); aviso(r.baixaNoBanco ? 'Baixa solicitada: gere uma nova remessa para o banco.' : 'Boleto cancelado.'); telaCobrancas(); } catch (e) { aviso(mensagemErro(e)); }
+  }));
+  const gr = $('#gerar-remessa');
+  if (gr) gr.onclick = async () => {
+    gr.disabled = true;
+    try {
+      const r = await api('POST', `/api/empresas/${estado.empresaId}/remessas`, {});
+      await baixar(`/api/remessas/${r.id}/arquivo`, r.nome_arquivo);
+      aviso(`Remessa ${r.numero} gerada: ${r.entradas} boleto(s) e ${r.baixas} baixa(s).`); telaCobrancas();
+    } catch (e) { aviso(mensagemErro(e)); gr.disabled = false; }
+  };
+  const lr = $('#ler-retorno'), arq = $('#arq-retorno');
+  if (lr) {
+    lr.onclick = () => arq.click();
+    arq.onchange = async () => {
+      const f = arq.files[0]; if (!f) return;
+      try {
+        const r = await api('POST', `/api/empresas/${estado.empresaId}/retorno`, { conteudo: await f.text() });
+        const partes = [r.pagos && `${r.pagos} pago(s)`, r.registrados && `${r.registrados} registrado(s)`, r.rejeitados && `${r.rejeitados} rejeitado(s)`, r.baixados && `${r.baixados} baixado(s)`].filter(Boolean);
+        aviso(`Retorno processado: ${partes.join(', ') || 'sem alterações'}.${r.naoEncontrados.length ? ` ${r.naoEncontrados.length} título(s) não encontrados.` : ''}`);
+        telaCobrancas();
+      } catch (e) { aviso(mensagemErro(e)); }
+    };
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Dados bancários (convênio de cobrança Ailos)
+// ---------------------------------------------------------------------------
+async function telaBanco() {
+  const c = (await api('GET', `/api/empresas/${estado.empresaId}/conta-bancaria`)) ?? { cooperativa_nome: 'Ailos', carteira: '01', multa_pct: 2, juros_pct_mes: 1 };
+  conteudo.innerHTML = `
+    <div class="topo"><div><h1>Dados bancários</h1><p class="sutil">${esc(empresa().razao_social)} — cobrança Ailos (banco 085, CNAB 240)</p></div></div>
+    <form id="form-banco">
+      <fieldset><legend>Conta e convênio de cobrança</legend><p class="dica">Peça estes dados à sua cooperativa: o número do convênio de cobrança e a carteira são informados por ela.</p><div class="grade">
+        <label>Cooperativa <input name="cooperativa_nome" required maxlength="30" value="${esc(c.cooperativa_nome ?? '')}"></label>
+        <label>Agência <input name="agencia" required inputmode="numeric" maxlength="5" value="${esc(c.agencia ?? '')}"></label>
+        <label>Dígito da agência <input name="agencia_dv" required maxlength="1" value="${esc(c.agencia_dv ?? '')}"></label>
+        <label>Conta corrente (sem dígito) <input name="conta" required inputmode="numeric" maxlength="7" value="${esc(c.conta ?? '')}"></label>
+        <label>Dígito da conta <input name="conta_dv" required maxlength="1" value="${esc(c.conta_dv ?? '')}"></label>
+        <label>Convênio de cobrança <input name="convenio" required inputmode="numeric" maxlength="6" value="${esc(c.convenio ?? '')}"></label>
+        <label>Carteira <input name="carteira" required maxlength="2" value="${esc(c.carteira ?? '01')}"></label>
+      </div></fieldset>
+      <fieldset><legend>Encargos e mensagem do boleto</legend><div class="grade">
+        <label>Multa após o vencimento (%) <input name="multa_pct" data-num inputmode="decimal" value="${String(c.multa_pct ?? 2).replace('.', ',')}"></label>
+        <label>Juros ao mês (%) <input name="juros_pct_mes" data-num inputmode="decimal" value="${String(c.juros_pct_mes ?? 1).replace('.', ',')}"></label>
+        <label class="largo">Instrução adicional (até 40 caracteres) <input name="instrucoes" maxlength="40" value="${esc(c.instrucoes ?? '')}"></label>
+      </div></fieldset>
+      <p class="erro" id="erro-banco" role="alert"></p>
+      <div class="acoes"><button class="primario" type="submit">Salvar dados bancários</button></div>
+    </form>
+    ${c.proximo_boleto ? `<p class="dica">Próximo número de boleto: ${c.proximo_boleto} · próxima remessa: ${c.proxima_remessa}. Esses contadores nunca voltam atrás, como exige o banco.</p>` : ''}`;
+  const f = $('#form-banco');
+  f.onsubmit = async (ev) => {
+    ev.preventDefault();
+    const d = lerForm(f);
+    try {
+      await api('PUT', `/api/empresas/${estado.empresaId}/conta-bancaria`, { ...d, multa_pct: d.multa_pct ?? 0, juros_pct_mes: d.juros_pct_mes ?? 0, instrucoes: d.instrucoes || null });
+      aviso('Dados bancários salvos.'); telaBanco();
+    } catch (e) { $('#erro-banco').textContent = mensagemErro(e); }
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -698,6 +786,7 @@ function ligarConsultaCnpj(form, modo) {
       preencher('cep', d.cep);
       preencher('cod_municipio', d.cod_municipio);
       preencher('uf', d.uf);
+      preencher('cidade', d.municipio);
       preencher('logradouro', d.logradouro);
       preencher('numero', d.numero);
       preencher('complemento', d.complemento);
@@ -742,6 +831,8 @@ function formTomador(t, aoSalvar) {
       <fieldset class="sub"><legend>Endereço</legend><div class="grade">
         <label>CEP <input name="cep" value="${esc(t.cep ?? '')}"><span class="dica" data-municipio></span></label>
         <label>Município (IBGE) <input name="cod_municipio" maxlength="7" value="${esc(t.cod_municipio ?? '')}"></label>
+        <label>Cidade <input name="cidade" maxlength="60" value="${esc(t.cidade ?? '')}"></label>
+        <label>UF <input name="uf" maxlength="2" value="${esc(t.uf ?? '')}"></label>
         <label class="largo">Logradouro <input name="logradouro" value="${esc(t.logradouro ?? '')}"></label>
         <label>Número <input name="numero" value="${esc(t.numero ?? '')}"></label>
         <label>Complemento <input name="complemento" value="${esc(t.complemento ?? '')}"></label>
@@ -779,6 +870,7 @@ function formTomador(t, aoSalvar) {
         const corpo = lerForm(f);
         corpo.enviar_email_auto = f.enviar_email_auto.checked;
         corpo.vencimento_valor = Number(f.vencimento_valor.value || 0);
+        corpo.cidade = f.cidade.value.trim() || null; corpo.uf = f.uf.value.trim().toUpperCase() || null;
         corpo.email_cobranca = f.email_cobranca.value.trim() || null;
         const r = t.id ? await api('PUT', `/api/tomadores/${t.id}`, corpo) : await api('POST', `/api/empresas/${estado.empresaId}/tomadores`, corpo);
         d.close(); aviso('Cliente salvo.');
@@ -792,7 +884,7 @@ async function telaTomadores() {
   const lista = await api('GET', `/api/empresas/${estado.empresaId}/tomadores`);
   conteudo.innerHTML = `
     <div class="topo"><div><h1>Clientes (tomadores)</h1><p class="sutil">Clientes de ${esc(empresa().razao_social)}.</p></div>
-      <button class="primario" id="novo">Cadastrar tomador</button></div>
+      <button class="primario" id="novo">Cadastrar cliente</button></div>
     ${lista.length ? `<div class="rolagem"><table class="tabela"><thead><tr><th>Nome</th><th>Documento</th><th>E-mail</th><th>Faturamento</th></tr></thead><tbody>
       ${lista.map((t, i) => `<tr class="clicavel" data-i="${i}"><td>${esc(t.nome)}</td><td>${fmtDoc(t.documento)}</td><td>${esc(t.email ?? '')}</td><td>${NOME_MODO[t.modo_faturamento] ?? 'Nota'}</td></tr>`).join('')}
     </tbody></table></div>` : '<div class="vazio">Nenhum tomador cadastrado.</div>'}`;

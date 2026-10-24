@@ -262,6 +262,69 @@ const migracoes: string[] = [
     ultimo_visto TEXT,
     maquina_alt TEXT
   );`,
+  // 7: cobrança bancária Ailos (conta, boletos, remessas e retornos)
+  `ALTER TABLE tomadores ADD COLUMN cidade TEXT;
+  ALTER TABLE tomadores ADD COLUMN uf TEXT;
+  CREATE TABLE contas_bancarias (
+    empresa_id INTEGER PRIMARY KEY REFERENCES empresas(id),
+    banco TEXT NOT NULL DEFAULT '085',
+    cooperativa_nome TEXT NOT NULL DEFAULT 'AILOS',
+    agencia TEXT NOT NULL, agencia_dv TEXT NOT NULL,
+    conta TEXT NOT NULL, conta_dv TEXT NOT NULL,
+    convenio TEXT NOT NULL,
+    carteira TEXT NOT NULL DEFAULT '01',
+    multa_pct REAL NOT NULL DEFAULT 2,
+    juros_pct_mes REAL NOT NULL DEFAULT 1,
+    instrucoes TEXT,
+    proximo_boleto INTEGER NOT NULL DEFAULT 1,
+    proxima_remessa INTEGER NOT NULL DEFAULT 1,
+    atualizado_em TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+  CREATE TABLE remessas (
+    id INTEGER PRIMARY KEY,
+    empresa_id INTEGER NOT NULL REFERENCES empresas(id),
+    numero INTEGER NOT NULL,
+    nome_arquivo TEXT NOT NULL,
+    conteudo TEXT NOT NULL,
+    qtd_titulos INTEGER NOT NULL,
+    valor_total REAL NOT NULL,
+    criado_por INTEGER REFERENCES usuarios(id),
+    criado_em TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+  CREATE INDEX idx_remessas_empresa ON remessas(empresa_id, id);
+  CREATE TABLE cobrancas_nova (
+    id INTEGER PRIMARY KEY,
+    empresa_id INTEGER NOT NULL REFERENCES empresas(id),
+    tomador_id INTEGER NOT NULL REFERENCES tomadores(id),
+    nota_id INTEGER REFERENCES notas(id),
+    descricao TEXT NOT NULL,
+    valor REAL NOT NULL,
+    vencimento TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'AGUARDANDO_BANCO' CHECK (status IN ('AGUARDANDO_BANCO','A_REMETER','REMETIDO','REGISTRADO','REJEITADO','PAGO','CANCELADO')),
+    emissao TEXT,
+    numero_boleto INTEGER,
+    nosso_numero TEXT,
+    linha_digitavel TEXT,
+    codigo_barras TEXT,
+    remessa_id INTEGER REFERENCES remessas(id),
+    baixa_pendente INTEGER NOT NULL DEFAULT 0,
+    pago_em TEXT,
+    valor_pago REAL,
+    observacao_banco TEXT,
+    email_status TEXT,
+    email_para TEXT,
+    email_em TEXT,
+    criado_por INTEGER REFERENCES usuarios(id),
+    criado_em TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+  INSERT INTO cobrancas_nova (id, empresa_id, tomador_id, nota_id, descricao, valor, vencimento, status, nosso_numero, linha_digitavel, criado_por, criado_em)
+    SELECT id, empresa_id, tomador_id, nota_id, descricao, valor, vencimento,
+      CASE status WHEN 'EMITIDO' THEN 'A_REMETER' ELSE status END, nosso_numero, linha_digitavel, criado_por, criado_em FROM cobrancas;
+  DROP TABLE cobrancas;
+  ALTER TABLE cobrancas_nova RENAME TO cobrancas;
+  CREATE INDEX idx_cobrancas_empresa ON cobrancas(empresa_id, vencimento);
+  CREATE INDEX idx_cobrancas_nota ON cobrancas(nota_id);
+  CREATE UNIQUE INDEX idx_cobrancas_nosso ON cobrancas(empresa_id, nosso_numero) WHERE nosso_numero IS NOT NULL;`,
 ];
 
 export function migrar(): void {

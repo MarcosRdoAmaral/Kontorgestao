@@ -2,8 +2,9 @@ import { z } from 'zod';
 import { db } from '../db.js';
 import type { Usuario } from '../auth.js';
 import { EntradaEmissao, ErroNegocio, emitir } from './emissao.js';
-import { enviarNotaPorEmail } from './email.js';
+import { enviarMensagemBoleto, enviarNotaPorEmail } from './email.js';
 import { exigirLicenca } from '../licenca.js';
+import { boletoPdf, criarCobranca, listarCobrancas as listar, obterConta, obterCobranca, pendenciasPagador, registrarEmailCobranca } from './cobranca.js';
 
 export type Acao = 'NOTA' | 'NOTA_BOLETO' | 'BOLETO';
 
@@ -53,6 +54,14 @@ export async function faturar(u: Usuario, entrada: EntradaFaturamento) {
   const fazNota = acao !== 'BOLETO';
   const fazBoleto = acao !== 'NOTA';
 
+  // confere o cadastro antes de emitir a nota, para não deixar a nota emitida sem o boleto
+  if (fazBoleto && obterConta(entrada.empresaId)) {
+    const falta = pendenciasPagador(tomador);
+    if (falta.length) throw new ErroNegocio(`Para gerar o boleto, complete o cadastro de ${tomador.nome}: ${falta.join(', ')}.`);
+    const venc = entrada.vencimento ?? calcularVencimento(new Date(Date.now() - 3 * 3600e3), tomador.vencimento_tipo, tomador.vencimento_valor);
+    if (venc < new Date(Date.now() - 3 * 3600e3).toISOString().slice(0, 10)) throw new ErroNegocio('O vencimento do boleto não pode estar no passado.');
+  }
+
   const resultado: { acao: Acao; nota?: any; cobranca?: any; email?: { status: 'ENVIADO' | 'ERRO' | 'NAO_ENVIADO'; para?: string; erro?: string }; avisos: string[] } = { acao, avisos: [] };
 
   if (fazNota) {
@@ -68,33 +77,38 @@ export async function faturar(u: Usuario, entrada: EntradaFaturamento) {
     const vencimento = entrada.vencimento ?? calcularVencimento(hoje, tomador.vencimento_tipo, tomador.vencimento_valor);
     const valor = entrada.valorBoleto ?? (fazNota ? valorLiquido(entrada) : entrada.valor);
     if (!(valor > 0)) throw new ErroNegocio('O valor do boleto precisa ser maior que zero.');
-    const r = db.prepare(`INSERT INTO cobrancas (empresa_id, tomador_id, nota_id, descricao, valor, vencimento, criado_por) VALUES (?,?,?,?,?,?,?)`)
-      .run(entrada.empresaId, tomador.id, resultado.nota?.id ?? null, entrada.descricao, valor, vencimento, u.id);
-    resultado.cobranca = db.prepare('SELECT * FROM cobrancas WHERE id = ?').get(Number(r.lastInsertRowid));
-    resultado.avisos.push('Boleto registrado como "aguardando banco": a integração bancária ainda não está configurada, então o arquivo do boleto será gerado quando ela for ativada.');
+    resultado.cobranca = criarCobranca({ empresaId: entrada.empresaId, tomadorId: tomador.id, notaId: resultado.nota?.id ?? null, descricao: entrada.descricao, valor, vencimento, usuarioId: u.id });
+    if (resultado.cobranca.status === 'AGUARDANDO_BANCO') {
+      resultado.avisos.push(obterConta(entrada.empresaId)
+        ? (resultado.cobranca.observacao_banco ?? 'O boleto ficou pendente.')
+        : 'Boleto registrado como "aguardando banco": cadastre os dados bancários da empresa para gerar o boleto.');
+    }
   }
 
   const queroEmail = entrada.enviarEmail ?? !!tomador?.enviar_email_auto;
   if (queroEmail) {
-    if (!resultado.nota) {
-      resultado.email = { status: 'NAO_ENVIADO', erro: 'Sem nota para enviar (o e-mail do boleto será enviado quando a integração bancária estiver ativa).' };
-    } else {
-      const para = [tomador?.email, ...(tomador?.email_cobranca ?? '').split(/[,;\s]+/)].filter((x): x is string => !!x && /@/.test(x));
-      const unicos = [...new Set(para.map((e) => e.toLowerCase()))].slice(0, 5);
-      if (!unicos.length) resultado.email = { status: 'ERRO', erro: 'O cliente não tem e-mail cadastrado.' };
-      else {
-        try {
-          await enviarNotaPorEmail(resultado.nota.id, u.escritorio_id, unicos, u.id);
-          resultado.email = { status: 'ENVIADO', para: unicos.join(', ') };
-        } catch (e: any) { resultado.email = { status: 'ERRO', erro: String(e?.message ?? e) }; }
+    const para = [tomador?.email, ...(tomador?.email_cobranca ?? '').split(/[,;\s]+/)].filter((x): x is string => !!x && /@/.test(x));
+    const unicos = [...new Set(para.map((e) => e.toLowerCase()))].slice(0, 5);
+    const cob = resultado.cobranca ? obterCobranca(resultado.cobranca.id) : null;
+    const temBoleto = !!cob?.nosso_numero;
+    if (!unicos.length) resultado.email = { status: 'ERRO', erro: 'O cliente não tem e-mail cadastrado.' };
+    else if (!resultado.nota && !temBoleto) resultado.email = { status: 'NAO_ENVIADO', erro: 'O boleto ainda não foi gerado, então não há o que enviar.' };
+    else {
+      try {
+        const b = temBoleto ? await boletoPdf(cob.id) : null;
+        const extras = b ? [{ filename: b.nome, content: b.pdf, contentType: 'application/pdf' }] : [];
+        const linhasExtras = temBoleto ? ['', `Boleto: vencimento em ${cob.vencimento.split('-').reverse().join('/')}, valor R$ ${cob.valor.toFixed(2).replace('.', ',')}.`, `Linha digitável: ${cob.linha_digitavel}`, 'O boleto segue em anexo (PDF).'] : [];
+        if (resultado.nota) await enviarNotaPorEmail(resultado.nota.id, u.escritorio_id, unicos, u.id, 'emissao', { extras, linhasExtras });
+        else await enviarMensagemBoleto(u.escritorio_id, unicos, cob, tomador, extras);
+        if (cob) registrarEmailCobranca(cob.id, 'ENVIADO', unicos.join(', '));
+        resultado.email = { status: 'ENVIADO', para: unicos.join(', ') };
+      } catch (e: any) {
+        if (cob) registrarEmailCobranca(cob.id, 'ERRO', unicos.join(', '));
+        resultado.email = { status: 'ERRO', erro: String(e?.message ?? e) };
       }
     }
   }
   return resultado;
 }
 
-export function listarCobrancas(empresaId: number) {
-  return db.prepare(`SELECT c.*, t.nome AS tomador_nome, n.n_nfse FROM cobrancas c
-    JOIN tomadores t ON t.id = c.tomador_id LEFT JOIN notas n ON n.id = c.nota_id
-    WHERE c.empresa_id = ? ORDER BY c.vencimento DESC, c.id DESC LIMIT 500`).all(empresaId);
-}
+export const listarCobrancas = listar;

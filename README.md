@@ -110,3 +110,10 @@ Chave pública de licenciamento configurada: teste de 30 dias a partir do primei
 
 ## Versão 2.0.0
 Marco da versão 2: emissão de NFS-e nacional, faturamento por cliente (nota / nota + boleto / só boleto), envio por e-mail e WhatsApp, atualização automática e controle de licença por computador. A integração bancária dos boletos é a próxima etapa.
+
+## Versão 2.1.0 – Boletos Ailos (CNAB 240)
+- **Dados bancários** por empresa (agência, conta, convênio, carteira, multa e juros) e boleto em PDF no padrão Ailos 085 (nosso número, código de barras ITF e linha digitável conferidos com o exemplo do manual).
+- **Um comando:** *Nota + boleto* emite a nota, gera o boleto e envia nota (PDF/XML) e boleto por e-mail. *Somente boleto* gera e envia só o boleto.
+- **Remessa CNAB 240** (segmentos P, Q e R) gerada na tela **Cobranças**; envie o arquivo no Ailos Conta Online. **Retorno** (segmentos T e U): importe o arquivo para registrar entradas, rejeições, liquidações e baixas automaticamente.
+- Cancelar um boleto já enviado gera pedido de baixa na próxima remessa. O número do boleto e da remessa nunca retrocedem.
+- O cadastro do cliente passou a ter cidade e UF (necessários ao boleto); o sistema avisa antes de emitir a nota se faltar algum dado.
