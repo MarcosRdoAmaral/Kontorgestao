@@ -14,7 +14,8 @@
       <p class="chamada">Emissor de NFS-e. Vamos criar o primeiro acesso; seus dados ficam guardados somente neste computador.</p>
       <label>Nome do escritório <input name="escritorio" required autocomplete="organization"></label>
       <label>Seu nome <input name="nome" required autocomplete="name"></label>
-      <label>E-mail de acesso <input name="email" type="email" required autocomplete="username"></label>
+      <label>Usuário de acesso <input name="usuario" required minlength="3" maxlength="30" pattern="[A-Za-z0-9._\-]+" autocomplete="username" style="text-transform:uppercase"><span class="dica">É com ele que você entra no sistema (sem espaços nem acentos). Fica sempre em MAIÚSCULAS.</span></label>
+      <label>E-mail <input name="email" type="email" required autocomplete="email"><span class="dica">Usado para recuperar a senha.</span></label>
       <label>Senha <input name="senha" type="password" minlength="8" required autocomplete="new-password"><span class="dica">Mínimo de 8 caracteres. Anote: não há como recuperá-la.</span></label>
       <label>Repita a senha <input name="senha2" type="password" minlength="8" required autocomplete="new-password"></label>
       <p class="erro" id="erro-setup" role="alert"></p>
@@ -26,10 +27,11 @@
     <form id="form-login" class="login-caixa">
       <img class="logo" src="/logo.png" alt="Kontor Gestão">
       <p class="chamada">Emissor de NFS-e pelo Sistema Nacional.</p>
-      <label>E-mail <input name="email" type="email" required autocomplete="username"></label>
+      <label>Usuário <input name="usuario" required autocomplete="username" autocapitalize="characters" spellcheck="false" style="text-transform:uppercase"></label>
       <label>Senha <input name="senha" type="password" required autocomplete="current-password"></label>
       <p class="erro" id="erro-login" role="alert"></p>
       <button class="primario" type="submit">Entrar</button>
+      <button class="link" type="button" id="esqueci" style="justify-self:center">Esqueci minha senha</button>
     </form>
   </div>
 
@@ -43,24 +45,21 @@
       </label>
       <div id="info-empresa" class="info-empresa"></div>
       <nav id="menu">
-        <a href="#/painel">Painel do mês</a>
-        <a href="#/emitir">Emitir nota</a>
-        <a href="#/notas">Notas emitidas</a>
-        <a href="#/cobrancas">Cobranças</a>
-        <a href="#/banco" data-papel="admin operador">Dados bancários</a>
-        <a href="#/tomadores">Clientes</a>
-        <a href="#/servicos">Serviços</a>
-        <a href="#/empresas" data-papel="admin operador">Empresas</a>
-        <a href="#/usuarios" data-papel="admin">Usuários</a>
-        <a href="#/email" data-papel="admin">E-mail</a>
-        <a href="#/backup" data-papel="admin">Backup</a>
-        <a href="#/licenca">Licença</a>
+        <a href="#/painel" data-modulo="painel">Painel do mês</a>
+        <a href="#/emitir" data-modulo="emitir">Emitir nota</a>
+        <a href="#/notas" data-modulo="notas">Notas emitidas</a>
+        <a href="#/cobrancas" data-modulo="cobrancas">Cobranças</a>
+        <a href="#/banco" data-modulo="banco">Dados bancários</a>
+        <a href="#/tomadores" data-modulo="tomadores">Clientes</a>
+        <a href="#/servicos" data-modulo="servicos">Serviços</a>
+        <a href="#/empresas" data-modulo="empresas">Empresas</a>
+        <a href="#/config">Configurações</a>
       </nav>
       <div class="usuario">
         <span id="nome-usuario"></span>
         <button id="sair" class="link">Sair</button>
       </div>
-      <a class="licenca-info" id="licenca-info" href="#/licenca" hidden></a>
+      <a class="licenca-info" id="licenca-info" href="#/config/licenca" hidden></a>
       <div class="versao sutil" id="versao"></div>
     </aside>
     <main id="conteudo" tabindex="-1"></main>

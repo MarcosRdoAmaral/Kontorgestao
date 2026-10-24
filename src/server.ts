@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { ZodError } from 'zod';
 import { config } from './config.js';
 import { migrar } from './db.js';
-import { garantirAdmin } from './auth.js';
+import { garantirAdmin, garantirMaster } from './auth.js';
 import { rotas } from './rotas.js';
 import { ErroNegocio } from './servicos/emissao.js';
 import { backupAutomatico } from './servicos/backup.js';
@@ -16,6 +16,7 @@ const raiz = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 export async function criarApp() {
   migrar();
   garantirAdmin();
+  garantirMaster();
 
   const app = Fastify({ logger: { level: 'info' }, bodyLimit: 2 * 1024 * 1024 });
   await app.register(multipart, { limits: { fileSize: 1024 * 1024, files: 1 } });

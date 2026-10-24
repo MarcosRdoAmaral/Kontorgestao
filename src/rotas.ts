@@ -2,7 +2,8 @@ import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { db } from './db.js';
 import { cifrar, cifrarTexto } from './cofre.js';
-import { conferirSenha, configurarPrimeiroAcesso, empresaPermitida, exigirLogin, exigirPapel, gerarToken, hashSenha, sistemaConfigurado, type Usuario } from './auth.js';
+import { MODULOS, conferirSenha, configurarPrimeiroAcesso, empresaPermitida, exigirLogin, exigirPapel, gerarToken, modulosDoUsuario, restritoAEmpresas, sistemaConfigurado, type Usuario } from './auth.js';
+import { EdicaoUsuario, NovoUsuario, confirmarRecuperacao, criarUsuario, editarUsuario, limparFalhas, listarUsuarios, loginBloqueado, redefinirSenha, registrarFalha, solicitarRecuperacao, trocarMinhaSenha } from './servicos/usuarios.js';
 import { config } from './config.js';
 import { ConfigSmtp, ListaEmails, configPublica, enviarNotaPorEmail, historicoEmails, salvarConfig, testarConfig } from './servicos/email.js';
 import { ativarLicenca, exigirLicenca, statusLicenca } from './licenca.js';
@@ -106,6 +107,7 @@ export async function rotas(app: FastifyInstance) {
     const d = z.object({
       escritorio: z.string().min(2, 'Informe o nome do escritório'),
       nome: z.string().min(2, 'Informe seu nome'),
+      usuario: z.string().trim().regex(/^[A-Za-z0-9._-]{3,30}$/, 'Usuário: 3 a 30 letras ou números, sem espaços nem acentos').optional(),
       email: z.string().email('E-mail inválido'),
       senha: z.string().min(8, 'A senha precisa ter pelo menos 8 caracteres'),
     }).parse(req.body);
@@ -116,18 +118,42 @@ export async function rotas(app: FastifyInstance) {
 
   // ---------- Autenticação ----------
   app.post('/api/login', async (req, reply) => {
-    const { email, senha } = z.object({ email: z.string(), senha: z.string() }).parse(req.body);
-    const usr = db.prepare('SELECT * FROM usuarios WHERE email = ? AND ativo = 1').get(email.toLowerCase().trim()) as any;
-    if (!usr || !conferirSenha(senha, usr.senha_hash)) return reply.code(401).send({ erro: 'E-mail ou senha incorretos.' });
-    return { token: gerarToken(usr.id), usuario: { id: usr.id, nome: usr.nome, email: usr.email, papel: usr.papel } };
+    // "usuario" é o campo atual; "email" continua aceito (instalações e integrações antigas)
+    const c = z.object({ usuario: z.string().optional(), email: z.string().optional(), senha: z.string() }).parse(req.body);
+    const nome = (c.usuario ?? c.email ?? '').trim();
+    const chave = nome.toUpperCase();
+    if (loginBloqueado(chave)) return reply.code(429).send({ erro: 'Muitas tentativas. Aguarde alguns minutos e tente de novo.' });
+    const usr = db.prepare('SELECT * FROM usuarios WHERE (login = ? OR email = ?) AND ativo = 1').get(chave, nome.toLowerCase()) as any;
+    if (!usr || !conferirSenha(c.senha, usr.senha_hash)) { registrarFalha(chave); return reply.code(401).send({ erro: 'Usuário ou senha incorretos.' }); }
+    limparFalhas(chave);
+    return { token: gerarToken(usr.id), usuario: { id: usr.id, nome: usr.nome, login: usr.login, papel: usr.papel, tipo: usr.tipo }, trocar_senha: !!usr.trocar_senha };
+  });
+
+  // Esqueci minha senha: manda um código ao e-mail cadastrado; ao confirmá-lo a senha volta para a padrão.
+  const respostaRecuperacao = { ok: true, mensagem: 'Se este usuário tiver um e-mail cadastrado, enviamos um código de 6 dígitos (vale 15 minutos). Se não chegar, peça a um administrador para redefinir sua senha.' };
+  app.post('/api/esqueci-senha', async (req) => {
+    const { usuario } = z.object({ usuario: z.string().min(1, 'Informe o usuário') }).parse(req.body);
+    await solicitarRecuperacao(usuario);
+    return respostaRecuperacao;
+  });
+  app.post('/api/esqueci-senha/confirmar', async (req) => {
+    const d = z.object({ usuario: z.string().min(1), codigo: z.string().regex(/^\d{6}$/, 'O código tem 6 dígitos') }).parse(req.body);
+    confirmarRecuperacao(d.usuario, d.codigo);
+    return { ok: true, mensagem: 'Pronto! Sua senha agora é a senha padrão (Kontor2026). Entre com ela e o sistema pedirá que você crie uma nova.' };
   });
 
   app.register(async (api) => {
     api.addHook('preHandler', exigirLogin);
 
     api.get('/api/me', async (req) => {
-      const { senha_hash, ...resto } = db.prepare('SELECT * FROM usuarios WHERE id = ?').get(u(req).id) as any;
-      return resto;
+      const { senha_hash, permissoes, sessao_v, ...resto } = db.prepare('SELECT * FROM usuarios WHERE id = ?').get(u(req).id) as any;
+      const email = /@(sem-email|kontor)\.local$/.test(resto.email) ? '' : resto.email;
+      return { ...resto, email, modulos: modulosDoUsuario(u(req)), todosModulos: MODULOS };
+    });
+    api.put('/api/me/senha', async (req) => {
+      const d = z.object({ atual: z.string(), nova: z.string() }).parse(req.body);
+      trocarMinhaSenha(u(req), d.atual, d.nova);
+      return { ok: true, token: gerarToken(u(req).id) };
     });
     api.put('/api/me/empresa', async (req) => {
       const { id } = z.object({ id: z.number().int() }).parse(req.body);
@@ -136,28 +162,22 @@ export async function rotas(app: FastifyInstance) {
       return { ok: true };
     });
 
-    // ---------- Usuários (admin) ----------
-    api.get('/api/usuarios', { preHandler: exigirPapel('admin') }, async (req) =>
-      db.prepare(`SELECT id, nome, email, papel, ativo,
-        (SELECT group_concat(empresa_id) FROM usuario_empresas ue WHERE ue.usuario_id = usuarios.id) AS empresas
-        FROM usuarios WHERE escritorio_id = ? ORDER BY nome`).all(u(req).escritorio_id),
-    );
-    api.post('/api/usuarios', { preHandler: exigirPapel('admin') }, async (req) => {
-      const d = z.object({
-        nome: z.string().min(2), email: z.string().email(), senha: z.string().min(8),
-        papel: z.enum(['admin', 'operador', 'cliente']), empresas: z.array(z.number()).default([]),
-      }).parse(req.body);
-      const r = db.prepare('INSERT INTO usuarios (escritorio_id, nome, email, senha_hash, papel) VALUES (?,?,?,?,?)')
-        .run(u(req).escritorio_id, d.nome, d.email.toLowerCase(), hashSenha(d.senha), d.papel);
-      const ins = db.prepare('INSERT OR IGNORE INTO usuario_empresas VALUES (?,?)');
-      d.empresas.forEach((e) => empresaPermitida(u(req), e) && ins.run(r.lastInsertRowid, e));
-      return { id: Number(r.lastInsertRowid) };
+    // ---------- Usuários e acessos (somente adm) ----------
+    api.get('/api/usuarios', async (req) => listarUsuarios(u(req).escritorio_id));
+    api.post('/api/usuarios', async (req) => criarUsuario(u(req), NovoUsuario.parse(req.body)));
+    api.put('/api/usuarios/:id', async (req) => {
+      editarUsuario(u(req), Number((req.params as any).id), EdicaoUsuario.parse(req.body));
+      return { ok: true };
+    });
+    api.post('/api/usuarios/:id/redefinir-senha', async (req) => {
+      redefinirSenha(u(req), Number((req.params as any).id));
+      return { ok: true };
     });
 
     // ---------- Empresas (prestadores) ----------
     api.get('/api/empresas', async (req) => {
       const usr = u(req);
-      const linhas = usr.papel === 'cliente'
+      const linhas = restritoAEmpresas(usr)
         ? db.prepare('SELECT e.* FROM empresas e JOIN usuario_empresas ue ON ue.empresa_id = e.id WHERE ue.usuario_id = ? ORDER BY razao_social').all(usr.id)
         : db.prepare('SELECT * FROM empresas WHERE escritorio_id = ? ORDER BY razao_social').all(usr.escritorio_id);
       return linhas.map(semCert);
@@ -298,7 +318,7 @@ export async function rotas(app: FastifyInstance) {
       const usr = u(req);
       const filtros: string[] = ['e.escritorio_id = ?'];
       const params: unknown[] = [usr.escritorio_id];
-      if (usr.papel === 'cliente') { filtros.push('e.id IN (SELECT empresa_id FROM usuario_empresas WHERE usuario_id = ?)'); params.push(usr.id); }
+      if (restritoAEmpresas(usr)) { filtros.push('e.id IN (SELECT empresa_id FROM usuario_empresas WHERE usuario_id = ?)'); params.push(usr.id); }
       if (q.empresaId) { filtros.push('n.empresa_id = ?'); params.push(Number(q.empresaId)); }
       if (q.status) { filtros.push('n.status = ?'); params.push(q.status); }
       if (q.mes) { filtros.push("substr(n.competencia, 1, 7) = ?"); params.push(q.mes); }
@@ -337,7 +357,7 @@ export async function rotas(app: FastifyInstance) {
       const usr = u(req);
       const filtros: string[] = ['e.escritorio_id = ?', "n.xml_nfse IS NOT NULL"];
       const params: unknown[] = [usr.escritorio_id];
-      if (usr.papel === 'cliente') { filtros.push('e.id IN (SELECT empresa_id FROM usuario_empresas WHERE usuario_id = ?)'); params.push(usr.id); }
+      if (restritoAEmpresas(usr)) { filtros.push('e.id IN (SELECT empresa_id FROM usuario_empresas WHERE usuario_id = ?)'); params.push(usr.id); }
       if (!q.empresaId) throw new ErroNegocio('Escolha a empresa.');
       filtros.push('n.empresa_id = ?'); params.push(Number(q.empresaId));
       if (q.mes) { filtros.push('substr(n.competencia, 1, 7) = ?'); params.push(String(q.mes)); }
@@ -494,8 +514,8 @@ export async function rotas(app: FastifyInstance) {
       const q = req.query as any;
       const usr = u(req);
       const mes = q.mes ?? new Date().toISOString().slice(0, 7);
-      const filtroCliente = usr.papel === 'cliente' ? 'AND e.id IN (SELECT empresa_id FROM usuario_empresas WHERE usuario_id = ?)' : '';
-      const params: unknown[] = [mes, usr.escritorio_id, ...(usr.papel === 'cliente' ? [usr.id] : [])];
+      const filtroCliente = restritoAEmpresas(usr) ? 'AND e.id IN (SELECT empresa_id FROM usuario_empresas WHERE usuario_id = ?)' : '';
+      const params: unknown[] = [mes, usr.escritorio_id, ...(restritoAEmpresas(usr) ? [usr.id] : [])];
       return db.prepare(`SELECT e.id AS empresa_id, e.razao_social AS empresa,
           SUM(n.status = 'AUTORIZADA') AS autorizadas, SUM(n.status = 'CANCELADA') AS canceladas,
           SUM(n.status IN ('REJEITADA','ERRO_COMUNICACAO','PENDENTE')) AS pendencias,

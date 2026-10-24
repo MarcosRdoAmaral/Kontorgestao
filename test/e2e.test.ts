@@ -233,8 +233,8 @@ test('fluxo completo: cadastro, emissão, rejeição, queda de rede, DANFSe e ca
 
   // 6) isolamento: cliente só enxerga a própria empresa
   const emp2 = await call('POST', '/api/empresas', { documento: '529.982.247-25', razao_social: 'Outro MEI', cod_municipio: '4208203', op_simp_nac: 2 }, token);
-  await call('POST', '/api/usuarios', { nome: 'Cliente', email: 'c@x.com', senha: 'cliente-123', papel: 'cliente', empresas: [eid] }, token);
-  const tc = (await call('POST', '/api/login', { email: 'c@x.com', senha: 'cliente-123' })).json.token;
+  await call('POST', '/api/usuarios', { login: 'cliente', nome: 'Cliente', email: 'c@x.com', senha: 'cliente-123', tipo: 'normal', permissoes: ['painel', 'tomadores', 'cobrancas'], empresas: [eid] }, token);
+  const tc = (await call('POST', '/api/login', { usuario: 'cliente', senha: 'cliente-123' })).json.token;
   assert.deepEqual((await call('GET', '/api/empresas', undefined, tc)).json.map((e: any) => e.id), [eid]);
   assert.equal((await call('GET', `/api/empresas/${emp2.json.id}/tomadores`, undefined, tc)).status, 404);
   assert.equal((await call('POST', `/api/notas/${nota1}/cancelar`, { cMotivo: 1, xMotivo: 'x'.repeat(20) }, tc)).status, 403);

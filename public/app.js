@@ -124,7 +124,7 @@ $('#form-setup').onsubmit = async (ev) => {
   if (f.senha.value !== f.senha2.value) return ($('#erro-setup').textContent = 'As senhas não são iguais.');
   try {
     const r = await fetch('/api/setup', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ escritorio: f.escritorio.value, nome: f.nome.value, email: f.email.value, senha: f.senha.value }) });
+      body: JSON.stringify({ escritorio: f.escritorio.value, nome: f.nome.value, usuario: f.usuario.value.trim().toUpperCase(), email: f.email.value, senha: f.senha.value }) });
     const j = await r.json();
     if (!r.ok) throw Object.assign(new Error(j.erro), { campos: j.campos });
     estado.token = j.token;
@@ -138,7 +138,7 @@ $('#form-login').onsubmit = async (ev) => {
   ev.preventDefault();
   const f = ev.target;
   try {
-    const r = await fetch('/api/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email: f.email.value, senha: f.senha.value }) });
+    const r = await fetch('/api/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ usuario: f.usuario.value.trim().toUpperCase(), senha: f.senha.value }) });
     const j = await r.json();
     if (!r.ok) throw new Error(j.erro);
     estado.token = j.token;
@@ -147,6 +147,70 @@ $('#form-login').onsubmit = async (ev) => {
   } catch (e) { $('#erro-login').textContent = e.message; }
 };
 $('#sair').onclick = sair;
+
+// Esqueci minha senha: 1) informa o usuário e recebe um código por e-mail; 2) informa o código e a senha volta à padrão.
+$('#esqueci').onclick = () => abrirDialogo(`
+  <form id="form-esqueci"><h2>Esqueci minha senha</h2>
+    <p class="sutil">Enviamos um código de 6 dígitos para o e-mail cadastrado no seu usuário. Ao informá-lo, sua senha volta para a senha padrão do sistema e você cria uma nova em seguida.</p>
+    <label>Usuário <input name="usuario" required autocapitalize="characters" style="text-transform:uppercase" value="${esc($('#form-login').usuario.value.trim().toUpperCase())}"></label>
+    <p class="erro" id="erro-esqueci"></p>
+    <div class="acoes"><button class="primario" type="submit">Enviar código por e-mail</button><button type="button" data-fechar>Fechar</button></div>
+  </form>`, (d) => {
+  $('#form-esqueci').onsubmit = async (ev) => {
+    ev.preventDefault();
+    const usuario = ev.target.usuario.value.trim().toUpperCase();
+    try {
+      const r = await fetch('/api/esqueci-senha', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ usuario }) });
+      const j = await r.json();
+      if (!r.ok) throw new Error(j.erro || 'Não foi possível enviar.');
+      $('#dialogo-corpo').innerHTML = `
+        <form id="form-codigo"><h2>Digite o código</h2>
+          <p class="sutil">${esc(j.mensagem)}</p>
+          <label>Código de 6 dígitos <input name="codigo" required inputmode="numeric" pattern="[0-9]{6}" maxlength="6" autocomplete="one-time-code"></label>
+          <p class="erro" id="erro-codigo"></p>
+          <div class="acoes"><button class="primario" type="submit">Redefinir para a senha padrão</button><button type="button" data-fechar>Fechar</button></div>
+        </form>`;
+      d.querySelectorAll('[data-fechar]').forEach((b) => (b.onclick = () => d.close()));
+      $('#form-codigo').onsubmit = async (e2) => {
+        e2.preventDefault();
+        try {
+          const r2 = await fetch('/api/esqueci-senha/confirmar', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ usuario, codigo: e2.target.codigo.value.trim() }) });
+          const j2 = await r2.json();
+          if (!r2.ok) throw new Error(j2.erro || 'Código inválido.');
+          d.close(); $('#form-login').usuario.value = usuario; $('#form-login').senha.focus();
+          $('#erro-login').textContent = ''; aviso(j2.mensagem);
+        } catch (e) { $('#erro-codigo').textContent = e.message; }
+      };
+    } catch (e) { $('#erro-esqueci').textContent = e.message; }
+  };
+});
+
+/** Troca de senha. Obrigatória (sem como fechar) no primeiro acesso com senha padrão. */
+function trocarSenha({ obrigatoria = false } = {}) {
+  const d = abrirDialogo(`
+    <form id="form-senha"><h2>${obrigatoria ? 'Crie sua senha' : 'Alterar minha senha'}</h2>
+      ${obrigatoria ? '<p class="sutil">Você está usando uma senha provisória. Escolha uma senha só sua para continuar.</p>' : ''}
+      <label>Senha atual <input name="atual" type="password" required autocomplete="current-password"></label>
+      <label>Nova senha <input name="nova" type="password" minlength="8" required autocomplete="new-password"><span class="dica">Mínimo de 8 caracteres e diferente da senha padrão.</span></label>
+      <label>Repita a nova senha <input name="nova2" type="password" minlength="8" required autocomplete="new-password"></label>
+      <p class="erro" id="erro-senha"></p>
+      <div class="acoes"><button class="primario" type="submit">Salvar senha</button>${obrigatoria ? '<button type="button" id="senha-sair">Sair</button>' : '<button type="button" data-fechar>Fechar</button>'}</div>
+    </form>`, (dlg) => {
+    if (obrigatoria) { dlg.oncancel = (e) => e.preventDefault(); $('#senha-sair').onclick = () => { dlg.close(); sair(); }; }
+    $('#form-senha').onsubmit = async (ev) => {
+      ev.preventDefault();
+      const f = ev.target;
+      if (f.nova.value !== f.nova2.value) return ($('#erro-senha').textContent = 'As senhas novas não são iguais.');
+      try {
+        const r = await api('PUT', '/api/me/senha', { atual: f.atual.value, nova: f.nova.value });
+        estado.token = r.token; localStorage.setItem('token', r.token);
+        dlg.oncancel = null; dlg.close(); aviso('Senha alterada.');
+        if (obrigatoria) iniciar();
+      } catch (e) { $('#erro-senha').textContent = mensagemErro(e); }
+    };
+  });
+  return d;
+}
 
 async function carregarEmpresas() {
   estado.empresas = await api('GET', '/api/empresas');
@@ -183,22 +247,32 @@ async function iniciar() {
   if (!localStorage.getItem('empresaId') && estado.usuario.ultima_empresa_id) estado.empresaId = estado.usuario.ultima_empresa_id;
   $('#login').hidden = true;
   $('#app').hidden = false;
-  $('#nome-usuario').textContent = estado.usuario.nome;
-  document.querySelectorAll('[data-papel]').forEach((a) => (a.hidden = !a.dataset.papel.split(' ').includes(estado.usuario.papel)));
+  $('#nome-usuario').textContent = `${estado.usuario.nome} (${estado.usuario.login})`;
+  document.querySelectorAll('[data-modulo]').forEach((a) => (a.hidden = !estado.usuario.modulos.includes(a.dataset.modulo)));
+  if (estado.usuario.trocar_senha) { $('#app').hidden = true; return trocarSenha({ obrigatoria: true }); }
   await carregarEmpresas();
   atualizarLicenca();
+  if (!location.hash || !telaPermitida((location.hash.split('/')[1] || 'painel'))) location.hash = '#/' + (estado.usuario.modulos[0] ?? 'config');
   rotear();
+}
+
+/** A tela pertence a algum módulo liberado para o usuário? (o servidor confere de novo em cada chamada) */
+function telaPermitida(nome) {
+  const modulo = { painel: 'painel', emitir: 'emitir', notas: 'notas', nota: 'notas', cobrancas: 'cobrancas', banco: 'banco', tomadores: 'tomadores', servicos: 'servicos', empresas: 'empresas' }[nome];
+  return nome === 'config' || (modulo && estado.usuario.modulos.includes(modulo));
 }
 
 const rotas = {
   painel: telaPainel, emitir: telaEmitir, notas: telaNotas, nota: telaNota,
-  cobrancas: telaCobrancas, banco: telaBanco, licenca: telaLicenca, tomadores: telaTomadores, servicos: telaServicos, empresas: telaEmpresas, usuarios: telaUsuarios, email: telaEmail, backup: telaBackup,
+  cobrancas: telaCobrancas, banco: telaBanco, tomadores: telaTomadores, servicos: telaServicos, empresas: telaEmpresas, config: telaConfig,
 };
 
 function rotear() {
   const [, nome = 'painel', param] = location.hash.split('/');
   document.querySelectorAll('nav a').forEach((a) => a.classList.toggle('ativo', a.getAttribute('href') === `#/${nome}`));
-  const precisaEmpresa = !['painel', 'empresas', 'usuarios', 'nota', 'backup', 'email', 'licenca'].includes(nome);
+  if (['usuarios', 'email', 'backup', 'licenca'].includes(nome)) { location.hash = '#/config/' + nome; return; } // endereços antigos
+  if (!telaPermitida(nome)) { conteudo.innerHTML = '<div class="vazio"><p>Seu usuário não tem acesso a esta funcionalidade.</p></div>'; return; }
+  const precisaEmpresa = !['painel', 'empresas', 'nota', 'config'].includes(nome);
   if (precisaEmpresa && !empresa()) {
     conteudo.innerHTML = `<div class="vazio"><p>Cadastre a primeira empresa para começar a emitir.</p>
       ${estado.usuario.papel !== 'cliente' ? '<a href="#/empresas">Cadastrar empresa</a>' : ''}</div>`;
@@ -583,7 +657,7 @@ async function telaLicenca() {
   const s = await atualizarLicenca() ?? await api('GET', '/api/licenca');
   const admin = estado.usuario.papel === 'admin';
   const titulo = { livre: 'Sem controle de licença', teste: 'Período de teste', ativa: 'Licença ativa', vencida: 'Licença vencida', relogio: 'Data do computador incorreta' }[s.estado];
-  conteudo.innerHTML = `
+  corpoConfig().innerHTML = `
     <div class="topo"><div><h1>Licença</h1><p class="sutil">${titulo}</p></div></div>
     <div class="banner ${s.permitido && !s.aviso ? '' : 'teste'}">${esc(s.mensagem)}</div>
     ${s.cliente ? `<p>Licenciado para <strong>${esc(s.cliente)}</strong>.</p>` : ''}
@@ -1154,37 +1228,152 @@ async function telaEmpresas() {
 // Usuários
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// Configurações (usuários e acessos, e-mail, backup, licença, atualizações)
+// ---------------------------------------------------------------------------
+
+const corpoConfig = () => $('#cfg-corpo') ?? conteudo;
+
+async function telaConfig(aba) {
+  const adm = estado.usuario.tipo === 'adm';
+  const abas = [
+    ['conta', 'Minha conta', true], ['usuarios', 'Usuários e acessos', adm], ['email', 'E-mail', adm],
+    ['backup', 'Backup', adm], ['licenca', 'Licença', true], ['atualizacoes', 'Atualizações', true],
+  ].filter((x) => x[2]);
+  if (!abas.some((x) => x[0] === aba)) aba = abas[0][0];
+  conteudo.innerHTML = `
+    <div class="topo"><div><h1>Configurações</h1><p class="sutil">Ajustes gerais do sistema${adm ? '' : ' e da sua conta'}.</p></div></div>
+    <nav class="abas" aria-label="Configurações">${abas.map(([k, nome]) => `<a href="#/config/${k}" class="${k === aba ? 'ativo' : ''}">${nome}</a>`).join('')}</nav>
+    <div id="cfg-corpo"></div>`;
+  const tela = { conta: telaMinhaConta, usuarios: telaUsuarios, email: telaEmail, backup: telaBackup, licenca: telaLicenca, atualizacoes: telaAtualizacoes }[aba];
+  await tela();
+}
+
+function telaMinhaConta() {
+  const u = estado.usuario;
+  corpoConfig().innerHTML = `
+    <h2>Minha conta</h2>
+    <div class="cartao">
+      <p><strong>${esc(u.nome)}</strong> · usuário <strong>${esc(u.login)}</strong></p>
+      <p class="sutil">Perfil: ${u.tipo === 'adm' ? 'Administrador (acesso total)' : 'Normal'}${u.email ? ' · ' + esc(u.email) : ' · sem e-mail cadastrado (a recuperação de senha por e-mail não fica disponível)'}</p>
+      ${u.tipo === 'adm' ? '' : `<p class="sutil">Funcionalidades liberadas: ${u.modulos.length ? u.modulos.map((m) => esc(u.todosModulos[m])).join(', ') : 'nenhuma'}.</p>`}
+      <div class="acoes"><button class="primario" id="alterar-senha">Alterar minha senha</button></div>
+    </div>`;
+  $('#alterar-senha').onclick = () => trocarSenha();
+}
+
+async function telaAtualizacoes() {
+  const ponte = window.nfseDesktop;
+  const st = await fetch('/api/setup/status').then((r) => r.json()).catch(() => ({}));
+  const desc = (e) => {
+    if (!e || e.situacao === 'nunca') return 'Ainda não verificado nesta sessão.';
+    if (e.situacao === 'nova') return `Nova versão ${e.versao} disponível.`;
+    if (e.situacao === 'erro') return e.erro;
+    if (e.situacao === 'nao_configurado') return 'Atualização automática não configurada.';
+    return 'Você está na versão mais recente.';
+  };
+  corpoConfig().innerHTML = `
+    <h2>Atualizações</h2>
+    <div class="cartao">
+      <p>Versão instalada: <strong>${esc(st.versao ?? '')}</strong></p>
+      ${ponte?.verificarAtualizacao ? `
+        <p class="sutil">O sistema procura versões novas sozinho ao abrir, a cada hora e quando você volta à janela. Quando houver uma, aparece um aviso no topo da tela.</p>
+        <p id="atu-status" class="sutil">Consultando…</p>
+        <div class="acoes"><button class="primario" id="atu-verificar">Verificar agora</button><button id="atu-instalar" hidden>Atualizar agora</button></div>`
+        : '<p class="sutil">A busca automática de atualizações funciona no aplicativo instalado no Windows. Neste modo de uso, a atualização é feita com o instalador novo.</p>'}
+    </div>`;
+  if (!ponte?.verificarAtualizacao) return;
+  const mostrar = (e) => {
+    $('#atu-status').textContent = desc(e) + (e?.em ? ` (verificado às ${new Date(e.em).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })})` : '');
+    $('#atu-instalar').hidden = e?.situacao !== 'nova';
+  };
+  mostrar(await ponte.estadoAtualizacao().catch(() => null));
+  $('#atu-verificar').onclick = async (ev) => {
+    ev.target.disabled = true; ev.target.textContent = 'Verificando…';
+    try { mostrar(await ponte.verificarAtualizacao()); } catch { $('#atu-status').textContent = 'Não foi possível verificar agora.'; }
+    ev.target.disabled = false; ev.target.textContent = 'Verificar agora';
+  };
+  $('#atu-instalar').onclick = async (ev) => {
+    ev.target.disabled = true; ev.target.textContent = 'Baixando…';
+    const r = await ponte.instalarAtualizacao();
+    if (!r?.ok) { ev.target.disabled = false; ev.target.textContent = 'Atualizar agora'; aviso(r?.erro ?? 'Não foi possível atualizar agora.'); }
+  };
+}
+
 async function telaUsuarios() {
   const lista = await api('GET', '/api/usuarios');
-  const papeis = { admin: 'Administrador', operador: 'Operador do escritório', cliente: 'Cliente (só as próprias empresas)' };
-  conteudo.innerHTML = `
-    <div class="topo"><div><h1>Usuários</h1><p class="sutil">Equipe do escritório e, quando quiser, acesso dos próprios clientes.</p></div>
+  const nomeEmpresa = (id) => esc(estado.empresas.find((e) => e.id === Number(id))?.razao_social ?? id);
+  corpoConfig().innerHTML = `
+    <div class="topo"><div><h2>Usuários e acessos</h2>
+      <p class="sutil"><strong>Administrador</strong> tem acesso total e redefine senhas. <strong>Normal</strong> acessa só as funcionalidades marcadas para ele.</p></div>
       <button class="primario" id="novo">Adicionar usuário</button></div>
-    <div class="rolagem"><table class="tabela"><thead><tr><th>Nome</th><th>E-mail</th><th>Perfil</th><th>Empresas</th></tr></thead><tbody>
-      ${lista.map((x) => `<tr><td>${esc(x.nome)}</td><td>${esc(x.email)}</td><td>${papeis[x.papel]}</td>
-        <td>${x.papel === 'cliente' ? (x.empresas ?? '').split(',').filter(Boolean).map((id) => esc(estado.empresas.find((e) => e.id === Number(id))?.razao_social ?? id)).join(', ') : 'Todas'}</td></tr>`).join('')}
+    <div class="rolagem"><table class="tabela"><thead><tr><th>Usuário</th><th>Nome</th><th>Perfil</th><th>Acessos</th><th>Empresas</th><th></th></tr></thead><tbody>
+      ${lista.map((x) => `<tr class="${x.ativo ? '' : 'inativo'}"><td><strong>${esc(x.login)}</strong>${x.mestre ? ' <span class="sutil">(master Kontor)</span>' : ''}${x.ativo ? '' : ' <span class="sutil">(inativo)</span>'}</td>
+        <td>${esc(x.nome)}${x.email ? `<br><span class="sutil">${esc(x.email)}</span>` : ''}</td>
+        <td>${x.tipo === 'adm' ? 'Administrador' : 'Normal'}${x.trocar_senha ? '<br><span class="sutil">senha provisória</span>' : ''}</td>
+        <td>${x.tipo === 'adm' ? 'Tudo' : x.modulos.length ? x.modulos.map((m) => esc(estado.usuario.todosModulos[m])).join(', ') : '—'}</td>
+        <td>${x.tipo !== 'adm' && x.empresas ? x.empresas.split(',').map(nomeEmpresa).join(', ') : 'Todas'}</td>
+        <td class="acoes-linha">${x.mestre ? '' : `<button data-editar="${x.id}">Editar</button> <button data-reset="${x.id}">Redefinir senha</button>`}</td></tr>`).join('')}
     </tbody></table></div>`;
-  $('#novo').onclick = () => abrirDialogo(`
-    <form id="form-usuario"><h2>Novo usuário</h2>
+  $('#novo').onclick = () => formUsuario(null, lista);
+  corpoConfig().querySelectorAll('[data-editar]').forEach((b) => (b.onclick = () => formUsuario(lista.find((x) => x.id === Number(b.dataset.editar)), lista)));
+  corpoConfig().querySelectorAll('[data-reset]').forEach((b) => (b.onclick = () => {
+    const x = lista.find((y) => y.id === Number(b.dataset.reset));
+    abrirDialogo(`<form id="form-reset"><h2>Redefinir senha</h2>
+      <p>A senha de <strong>${esc(x.login)}</strong> (${esc(x.nome)}) voltará para a senha padrão <strong>Kontor2026</strong> e a pessoa terá de criar uma nova no próximo acesso. Ela será desconectada agora.</p>
+      <p class="erro" id="erro-reset"></p>
+      <div class="acoes"><button class="primario" type="submit">Redefinir</button><button type="button" data-fechar>Cancelar</button></div></form>`, (d) => {
+      $('#form-reset').onsubmit = async (ev) => {
+        ev.preventDefault();
+        try { await api('POST', `/api/usuarios/${x.id}/redefinir-senha`, {}); d.close(); aviso(`Senha de ${x.login} redefinida para a senha padrão.`); telaUsuarios(); }
+        catch (e) { $('#erro-reset').textContent = mensagemErro(e); }
+      };
+    });
+  }));
+}
+
+function formUsuario(x, lista) {
+  const novo = !x;
+  const modulos = estado.usuario.todosModulos;
+  const marcado = (m) => (x ? x.modulos.includes(m) : ['painel', 'emitir', 'notas'].includes(m));
+  const vinculadas = new Set((x?.empresas ?? '').split(',').filter(Boolean).map(Number));
+  abrirDialogo(`
+    <form id="form-usuario"><h2>${novo ? 'Novo usuário' : 'Editar usuário'}</h2>
       <div class="grade">
-        <label>Nome <input name="nome" required></label>
-        <label>E-mail <input name="email" type="email" required></label>
-        <label>Senha inicial <input name="senha" type="password" minlength="8" required></label>
-        <label>Perfil <select name="papel">${Object.entries(papeis).map(([k, v]) => `<option value="${k}">${v}</option>`).join('')}</select></label>
+        <label>Usuário (login) <input name="login" required minlength="3" maxlength="30" pattern="[A-Za-z0-9._\-]+" style="text-transform:uppercase" ${novo ? '' : 'disabled'} value="${esc(x?.login ?? '')}">
+          <span class="dica">${novo ? 'Definido agora e não muda depois. Sem espaços nem acentos; fica em MAIÚSCULAS.' : 'O usuário não pode ser alterado.'}</span></label>
+        <label>Nome <input name="nome" required value="${esc(x?.nome ?? '')}"></label>
+        <label>E-mail <input name="email" type="email" value="${esc(x?.email ?? '')}"><span class="dica">Necessário para o "esqueci minha senha".</span></label>
+        <label>Perfil <select name="tipo"><option value="normal" ${x?.tipo !== 'adm' ? 'selected' : ''}>Normal (acessos marcados abaixo)</option><option value="adm" ${x?.tipo === 'adm' ? 'selected' : ''}>Administrador (acesso total)</option></select></label>
+        ${novo ? '<label>Senha inicial <input name="senha" type="password" minlength="8" autocomplete="new-password"><span class="dica">Em branco = senha padrão Kontor2026, e a pessoa será obrigada a trocá-la no primeiro acesso.</span></label>' : `<label class="largo"><span><input type="checkbox" name="ativo" ${x.ativo ? 'checked' : ''}> Usuário ativo (desmarque para bloquear o acesso)</span></label>`}
       </div>
-      <fieldset style="margin-top:16px"><legend>Empresas que o cliente pode ver</legend>
-        ${estado.empresas.map((e) => `<label><span><input type="checkbox" name="emp" value="${e.id}"> ${esc(e.razao_social)}</span></label>`).join('')}
+      <fieldset id="grupo-modulos" style="margin-top:16px"><legend>Funcionalidades liberadas</legend>
+        ${Object.entries(modulos).map(([k, nome]) => `<label><span><input type="checkbox" name="mod" value="${k}" ${marcado(k) ? 'checked' : ''}> ${esc(nome)}</span></label>`).join('')}
+        <p class="dica">Configurações (usuários, e-mail, backup, ativação de licença) são sempre exclusivas de administradores.</p>
+      </fieldset>
+      <fieldset id="grupo-empresas" style="margin-top:12px"><legend>Empresas que este usuário pode acessar</legend>
+        ${estado.empresas.map((e) => `<label><span><input type="checkbox" name="emp" value="${e.id}" ${vinculadas.has(e.id) ? 'checked' : ''}> ${esc(e.razao_social)}</span></label>`).join('')}
+        <p class="dica">Sem nenhuma marcada, o usuário enxerga todas as empresas.</p>
       </fieldset>
       <p class="erro" id="erro-usuario"></p>
-      <div class="acoes"><button class="primario" type="submit">Adicionar usuário</button><button type="button" data-fechar>Fechar</button></div>
+      <div class="acoes"><button class="primario" type="submit">${novo ? 'Adicionar usuário' : 'Salvar'}</button><button type="button" data-fechar>Fechar</button></div>
     </form>`, (d) => {
-    $('#form-usuario').onsubmit = async (ev) => {
+    const f = $('#form-usuario');
+    const ajustar = () => { const adm = f.tipo.value === 'adm'; $('#grupo-modulos').hidden = adm; $('#grupo-empresas').hidden = adm; };
+    f.tipo.onchange = ajustar; ajustar();
+    f.onsubmit = async (ev) => {
       ev.preventDefault();
-      const f = ev.target;
+      const permissoes = [...f.querySelectorAll('[name=mod]:checked')].map((c) => c.value);
       const empresas = [...f.querySelectorAll('[name=emp]:checked')].map((c) => Number(c.value));
       try {
-        await api('POST', '/api/usuarios', { nome: f.nome.value, email: f.email.value, senha: f.senha.value, papel: f.papel.value, empresas });
-        d.close(); aviso('Usuário adicionado.'); telaUsuarios();
+        if (novo) {
+          const r = await api('POST', '/api/usuarios', { login: f.login.value.trim().toUpperCase(), nome: f.nome.value, email: f.email.value, senha: f.senha.value, tipo: f.tipo.value, permissoes, empresas });
+          aviso(r.senhaPadrao ? 'Usuário criado com a senha padrão Kontor2026 (troca obrigatória no primeiro acesso).' : 'Usuário criado.');
+        } else {
+          await api('PUT', `/api/usuarios/${x.id}`, { nome: f.nome.value, email: f.email.value, tipo: f.tipo.value, permissoes, empresas, ativo: f.ativo.checked });
+          aviso('Usuário atualizado.');
+        }
+        d.close(); telaUsuarios();
       } catch (e) { $('#erro-usuario').textContent = mensagemErro(e); }
     };
   });
@@ -1202,7 +1391,7 @@ const PROVEDORES = {
 
 async function telaEmail() {
   const c = (await api('GET', '/api/email/config')) ?? { host: '', port: 587, secure: false, usuario: '', remetente_nome: estado.usuario.nome ? '' : '', remetente_email: '' };
-  conteudo.innerHTML = `
+  corpoConfig().innerHTML = `
     <div class="topo"><div><h1>E-mail</h1><p class="sutil">Servidor usado para enviar a NFS-e (PDF e XML) ao tomador. A senha fica criptografada neste computador.</p></div></div>
     <form id="form-smtp" class="cartao">
       <div class="grade">
@@ -1254,7 +1443,7 @@ async function telaEmail() {
 async function telaBackup() {
   const b = await api('GET', '/api/backup');
   const tam = (n) => (n > 1048576 ? `${(n / 1048576).toFixed(1)} MB` : `${Math.max(1, Math.round(n / 1024))} KB`);
-  conteudo.innerHTML = `
+  corpoConfig().innerHTML = `
     <div class="topo"><div><h1>Backup</h1>
       <p class="sutil">Neste modelo, o computador é o único lugar onde as notas ficam guardadas. Faça uma cópia de tempos em tempos e guarde fora dele (pen drive, nuvem).</p></div>
       <button class="primario" id="baixar">Baixar backup agora</button></div>

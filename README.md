@@ -117,3 +117,11 @@ Marco da versão 2: emissão de NFS-e nacional, faturamento por cliente (nota / 
 - **Remessa CNAB 240** (segmentos P, Q e R) gerada na tela **Cobranças**; envie o arquivo no Ailos Conta Online. **Retorno** (segmentos T e U): importe o arquivo para registrar entradas, rejeições, liquidações e baixas automaticamente.
 - Cancelar um boleto já enviado gera pedido de baixa na próxima remessa. O número do boleto e da remessa nunca retrocedem.
 - O cadastro do cliente passou a ter cidade e UF (necessários ao boleto); o sistema avisa antes de emitir a nota se faltar algum dado.
+
+## Acesso e permissões (v2.3.0)
+
+- Login por **usuário** (sempre em maiúsculas), definido na criação. Há dois perfis: **Administrador** (acesso total, cria usuários e redefine senhas) e **Normal** (só as funcionalidades marcadas e, opcionalmente, só as empresas marcadas). As regras são aplicadas no servidor (`src/auth.ts`, lista `REGRAS`), não só no menu.
+- Usuário **master** `KONTOR`: criado após o primeiro acesso, administrador que nenhum outro usuário altera ou redefine.
+- Senha padrão `Kontor2026`: usada quando um administrador redefine a senha ou o usuário é criado sem senha; a troca é obrigatória no próximo acesso.
+- "Esqueci minha senha": envia um código de 6 dígitos (15 min) ao e-mail do usuário, usando o SMTP configurado em Configurações > E-mail; ao confirmar o código a senha volta à padrão.
+- **Configurações** reúne Minha conta, Usuários e acessos, E-mail, Backup, Licença e Atualizações (busca automática ao abrir, a cada hora e ao voltar à janela, com botão "Verificar agora").

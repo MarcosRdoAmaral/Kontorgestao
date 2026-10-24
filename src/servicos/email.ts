@@ -134,6 +134,19 @@ export function historicoEmails(notaId: number) {
   return db.prepare('SELECT id, para, status, erro, criado_em FROM emails_enviados WHERE nota_id = ? ORDER BY id DESC').all(notaId);
 }
 
+/** Código de uso único para redefinir a senha (tela de login). Silencioso se o e-mail do escritório não estiver configurado. */
+export async function enviarCodigoRecuperacao(escritorioId: number, para: string, nome: string, codigo: string): Promise<boolean> {
+  const c = lerConfig(escritorioId);
+  if (!c) return false;
+  const linhas = [`Olá, ${nome}!`, '', `Seu código para redefinir a senha do Kontor Gestão é: ${codigo}`, '',
+    'Ele vale por 15 minutos. Ao informá-lo na tela de login, sua senha volta para a senha padrão e o sistema pedirá que você crie uma nova.',
+    'Se você não pediu isso, ignore esta mensagem: nada será alterado.'];
+  try {
+    await fabrica(c).sendMail({ from: `"${c.remetente_nome}" <${c.remetente_email}>`, to: para, subject: 'Código para redefinir sua senha — Kontor Gestão', text: linhas.join('\n') });
+    return true;
+  } catch { return false; }
+}
+
 /** E-mail só com o boleto (quando o cliente não recebe nota). */
 export async function enviarMensagemBoleto(escritorioId: number, para: string[], cob: any, tomador: any, anexos: { filename: string; content: Buffer; contentType: string }[]) {
   const c = lerConfig(escritorioId);

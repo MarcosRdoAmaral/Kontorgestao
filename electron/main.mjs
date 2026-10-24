@@ -164,12 +164,24 @@ ipcMain.handle('atualizacao:instalar', async () => {
   catch (e) { return { ok: false, erro: String(e?.message ?? e) }; }
 });
 
-async function verificarAtualizacao({ manual = false } = {}) {
+let ultimaVerificacao = 0;
+let ultimoResultado = { situacao: 'nunca', atual: '' };
+
+// Verificação pela tela Configurações > Atualizações (sem janelas de diálogo): devolve o resultado.
+ipcMain.handle('atualizacao:verificar', async () => {
+  await verificarAtualizacao({ silenciosa: true });
+  return { ...ultimoResultado, atual: app.getVersion(), em: ultimaVerificacao };
+});
+ipcMain.handle('atualizacao:estado', () => ({ ...ultimoResultado, atual: app.getVersion(), em: ultimaVerificacao }));
+
+async function verificarAtualizacao({ manual = false, silenciosa = false } = {}) {
   if (verificando) return;
   verificando = true;
   try {
     const repo = repositorioAtualizacoes();
     const r = await buscarNovaVersao(repo, app.getVersion(), (u, o) => net.fetch(u, o));
+    ultimaVerificacao = Date.now();
+    ultimoResultado = { situacao: r.situacao, versao: r.versao ?? null, notas: r.notas ?? null };
     if (r.situacao === 'nao_configurado') {
       if (manual) dialog.showMessageBox(janela, { type: 'info', message: 'Atualização automática não configurada.', detail: 'Falta informar o repositório de atualizações do programa.' });
       return;
@@ -180,7 +192,7 @@ async function verificarAtualizacao({ manual = false } = {}) {
     }
     pendente_atualizacao = r;
     janela?.webContents.send('atualizacao:nova', { versao: r.versao, notas: r.notas });
-    if (!manual) return; // verificação automática: o aviso fixo na tela da interface basta
+    if (!manual) return; // verificação automática ou da tela de Configurações: o aviso fixo na interface basta
     const c = await dialog.showMessageBox(janela, {
       type: 'question', buttons: ['Atualizar agora', 'Depois'], defaultId: 0, cancelId: 1,
       message: `Nova versão ${r.versao} disponível`,
@@ -189,6 +201,8 @@ async function verificarAtualizacao({ manual = false } = {}) {
     if (c.response !== 0) return;
     await baixarEInstalar(r);
   } catch (e) {
+    ultimaVerificacao = Date.now();
+    ultimoResultado = { situacao: 'erro', erro: 'Não foi possível consultar as atualizações. Verifique a conexão com a internet.' };
     if (manual) dialog.showErrorBox('Não foi possível verificar atualizações', String(e?.message ?? e));
   } finally { verificando = false; }
 }
@@ -250,8 +264,10 @@ app.whenReady().then(async () => {
     urlLocal = await iniciarServidor();
     montarMenu();
     criarJanela();
+    // busca contínua: logo ao abrir, a cada hora e sempre que a janela volta ao foco após 30 min sem checar
     setTimeout(() => verificarAtualizacao(), 8000);
-    setInterval(() => verificarAtualizacao(), 6 * 3600e3).unref();
+    setInterval(() => verificarAtualizacao(), 3600e3).unref();
+    app.on('browser-window-focus', () => { if (Date.now() - ultimaVerificacao > 30 * 60e3) verificarAtualizacao(); });
   } catch (e) {
     dialog.showErrorBox(`${NOME} não conseguiu iniciar`, String(e?.stack ?? e));
     app.exit(1);

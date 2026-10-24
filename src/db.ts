@@ -327,6 +327,24 @@ const migracoes: string[] = [
   CREATE UNIQUE INDEX idx_cobrancas_nosso ON cobrancas(empresa_id, nosso_numero) WHERE nosso_numero IS NOT NULL;`,
   // 8: layout do arquivo de cobrança (CNAB 400 é o padrão do Ailos; CNAB 240 também suportado)
   `ALTER TABLE contas_bancarias ADD COLUMN layout TEXT NOT NULL DEFAULT 'CNAB400' CHECK (layout IN ('CNAB400','CNAB240'));`,
+  // 9: acesso por usuário (nome em maiúsculas), tipos adm/normal, permissões por módulo, troca obrigatória de senha, usuário master
+  `ALTER TABLE usuarios ADD COLUMN login TEXT;
+  ALTER TABLE usuarios ADD COLUMN tipo TEXT NOT NULL DEFAULT 'normal' CHECK (tipo IN ('adm','normal'));
+  ALTER TABLE usuarios ADD COLUMN permissoes TEXT;            -- JSON com os módulos liberados (NULL = todos os módulos de trabalho)
+  ALTER TABLE usuarios ADD COLUMN trocar_senha INTEGER NOT NULL DEFAULT 0;
+  ALTER TABLE usuarios ADD COLUMN mestre INTEGER NOT NULL DEFAULT 0;
+  ALTER TABLE usuarios ADD COLUMN sessao_v INTEGER NOT NULL DEFAULT 0;   -- muda ao trocar/redefinir a senha e encerra sessões antigas
+  UPDATE usuarios SET tipo = CASE WHEN papel = 'admin' THEN 'adm' ELSE 'normal' END;
+  UPDATE usuarios SET login = upper(substr(email, 1, instr(email || '@', '@') - 1));
+  UPDATE usuarios SET login = login || id WHERE EXISTS (SELECT 1 FROM usuarios u2 WHERE u2.login = usuarios.login AND u2.id < usuarios.id);
+  CREATE UNIQUE INDEX idx_usuarios_login ON usuarios(login);
+  CREATE TABLE recuperacao_senha (
+    usuario_id INTEGER PRIMARY KEY REFERENCES usuarios(id) ON DELETE CASCADE,
+    codigo_hash TEXT NOT NULL,
+    expira_em INTEGER NOT NULL,
+    tentativas INTEGER NOT NULL DEFAULT 0,
+    pedidos_em TEXT NOT NULL DEFAULT '[]'
+  );`,
 ];
 
 export function migrar(): void {
