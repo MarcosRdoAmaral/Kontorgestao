@@ -55,6 +55,11 @@ export async function faturar(u: Usuario, entrada: EntradaFaturamento) {
   const fazNota = acao !== 'BOLETO';
   const fazBoleto = acao !== 'NOTA';
 
+  if (fazBoleto && tomador?.desconto_valor > 0) {
+    const base = entrada.valorBoleto ?? (fazNota ? valorLiquido(entrada) : entrada.valor);
+    if (!(fazNota && (entrada.descontoIncondicionado ?? 0) >= tomador.desconto_valor) && base <= tomador.desconto_valor)
+      throw new ErroNegocio(`O desconto cadastrado para ${tomador.nome} (R$ ${tomador.desconto_valor.toFixed(2).replace('.', ',')}) é maior ou igual ao valor do boleto. Ajuste o valor ou o desconto no cadastro do cliente.`);
+  }
   // confere o cadastro antes de emitir a nota, para não deixar a nota emitida sem o boleto
   if (fazBoleto && obterConta(entrada.empresaId)) {
     const falta = pendenciasPagador(tomador);
@@ -81,7 +86,9 @@ export async function faturar(u: Usuario, entrada: EntradaFaturamento) {
     if (ajuste.aviso) resultado.avisos.push(ajuste.aviso);
     const valor = entrada.valorBoleto ?? (fazNota ? valorLiquido(entrada) : entrada.valor);
     if (!(valor > 0)) throw new ErroNegocio('O valor do boleto precisa ser maior que zero.');
-    resultado.cobranca = criarCobranca({ empresaId: entrada.empresaId, tomadorId: tomador.id, notaId: resultado.nota?.id ?? null, descricao: entrada.descricao, valor, vencimento, usuarioId: u.id });
+    // se a nota já foi emitida com desconto igual ou maior que o do cliente, o valor líquido já o contém
+    const jaNaNota = fazNota && (entrada.descontoIncondicionado ?? 0) >= (tomador.desconto_valor ?? 0);
+    resultado.cobranca = criarCobranca({ empresaId: entrada.empresaId, tomadorId: tomador.id, notaId: resultado.nota?.id ?? null, descricao: entrada.descricao, valor, vencimento, usuarioId: u.id, semDesconto: jaNaNota });
     if (resultado.cobranca.status === 'AGUARDANDO_BANCO') {
       resultado.avisos.push(obterConta(entrada.empresaId)
         ? (resultado.cobranca.observacao_banco ?? 'O boleto ficou pendente.')

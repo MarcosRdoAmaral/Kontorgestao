@@ -367,6 +367,11 @@ const migracoes: string[] = [
   // 11: modelos de mensagem de WhatsApp para cobrança (lembrete e atraso)
   `ALTER TABLE empresas ADD COLUMN wa_lembrete TEXT;
   ALTER TABLE empresas ADD COLUMN wa_atraso TEXT;`,
+  // 12: desconto fixo por cliente (motivo e valor), levado a todos os boletos dele
+  `ALTER TABLE tomadores ADD COLUMN desconto_valor REAL;
+  ALTER TABLE tomadores ADD COLUMN desconto_motivo TEXT;
+  ALTER TABLE cobrancas ADD COLUMN desconto REAL NOT NULL DEFAULT 0;
+  ALTER TABLE cobrancas ADD COLUMN desconto_motivo TEXT;`,
 ];
 
 export function migrar(): void {

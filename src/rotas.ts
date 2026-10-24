@@ -71,7 +71,11 @@ const Tomador = z.object({
   vencimento_valor: z.number().int().min(0).max(60).default(10),
   email_cobranca: z.string().nullish().refine((v) => !v || v.split(/[,;\s]+/).filter(Boolean).every((e) => /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(e)), 'E-mail de cobrança inválido'),
   enviar_email_auto: z.union([z.boolean(), z.literal(0), z.literal(1)]).default(false).transform((v) => (v ? 1 : 0)),
+  desconto_valor: z.number().min(0).max(99999999).nullish().transform((v) => (v && v > 0 ? Math.round(v * 100) / 100 : null)),
+  desconto_motivo: z.string().trim().max(80).nullish().transform((v) => v || null),
 }).refine((t) => t.modo_faturamento === 'NOTA' || t.vencimento_tipo === 'PRAZO' || (t.vencimento_valor >= 1 && t.vencimento_valor <= 31), { message: 'Dia do vencimento deve ser de 1 a 31', path: ['vencimento_valor'] })
+
+.refine((t) => !t.desconto_valor || !!t.desconto_motivo, { message: 'Informe o motivo do desconto', path: ['desconto_motivo'] })
 .refine((t) => t.tipo_doc === 'SEM' || (t.documento && documentoValido(t.documento)), { message: 'CPF/CNPJ do tomador inválido', path: ['documento'] });
 
 const Servico = z.object({
@@ -259,10 +263,10 @@ export async function rotas(app: FastifyInstance) {
       checarEmpresa(req, id);
       const d = Tomador.parse(req.body);
       const r = db.prepare(`INSERT INTO tomadores (empresa_id, tipo_doc, documento, nome, inscricao_municipal, email, fone, cep, cod_municipio, logradouro, numero, complemento, bairro,
-        modo_faturamento, vencimento_tipo, vencimento_valor, email_cobranca, enviar_email_auto, cidade, uf)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(id, d.tipo_doc, d.documento, d.nome, d.inscricao_municipal ?? null, d.email || null, d.fone, d.cep,
+        modo_faturamento, vencimento_tipo, vencimento_valor, email_cobranca, enviar_email_auto, cidade, uf, desconto_valor, desconto_motivo)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(id, d.tipo_doc, d.documento, d.nome, d.inscricao_municipal ?? null, d.email || null, d.fone, d.cep,
         d.cod_municipio ?? null, d.logradouro ?? null, d.numero ?? null, d.complemento ?? null, d.bairro ?? null,
-        d.modo_faturamento, d.vencimento_tipo, d.vencimento_valor, d.email_cobranca || null, d.enviar_email_auto, d.cidade || null, d.uf || null);
+        d.modo_faturamento, d.vencimento_tipo, d.vencimento_valor, d.email_cobranca || null, d.enviar_email_auto, d.cidade || null, d.uf || null, d.desconto_valor, d.desconto_motivo);
       return { id: Number(r.lastInsertRowid) };
     });
     api.put('/api/tomadores/:id', async (req) => {
@@ -272,10 +276,10 @@ export async function rotas(app: FastifyInstance) {
       checarEmpresa(req, t.empresa_id);
       const d = Tomador.parse(req.body);
       db.prepare(`UPDATE tomadores SET tipo_doc=?, documento=?, nome=?, inscricao_municipal=?, email=?, fone=?, cep=?, cod_municipio=?, logradouro=?, numero=?, complemento=?, bairro=?,
-        modo_faturamento=?, vencimento_tipo=?, vencimento_valor=?, email_cobranca=?, enviar_email_auto=?, cidade=?, uf=? WHERE id=?`)
+        modo_faturamento=?, vencimento_tipo=?, vencimento_valor=?, email_cobranca=?, enviar_email_auto=?, cidade=?, uf=?, desconto_valor=?, desconto_motivo=? WHERE id=?`)
         .run(d.tipo_doc, d.documento, d.nome, d.inscricao_municipal ?? null, d.email || null, d.fone, d.cep, d.cod_municipio ?? null,
           d.logradouro ?? null, d.numero ?? null, d.complemento ?? null, d.bairro ?? null,
-          d.modo_faturamento, d.vencimento_tipo, d.vencimento_valor, d.email_cobranca || null, d.enviar_email_auto, d.cidade || null, d.uf || null, id);
+          d.modo_faturamento, d.vencimento_tipo, d.vencimento_valor, d.email_cobranca || null, d.enviar_email_auto, d.cidade || null, d.uf || null, d.desconto_valor, d.desconto_motivo, id);
       return { ok: true };
     });
 

@@ -75,10 +75,18 @@ export function pendenciasPagador(t: any): string[] {
   return f;
 }
 
-export function criarCobranca(d: { empresaId: number; tomadorId: number; notaId: number | null; descricao: string; valor: number; vencimento: string; usuarioId: number }) {
-  if (d.valor > 99999999.99) throw new ErroNegocio('Valor do boleto acima do limite.');
-  const r = db.prepare(`INSERT INTO cobrancas (empresa_id, tomador_id, nota_id, descricao, valor, vencimento, emissao, criado_por) VALUES (?,?,?,?,?,?,?,?)`)
-    .run(d.empresaId, d.tomadorId, d.notaId, d.descricao, d.valor, d.vencimento, hojeBr(), d.usuarioId);
+/**
+ * `valor` é o valor ANTES do desconto do cliente. O desconto fixo cadastrado no cliente (motivo + valor) é abatido aqui,
+ * para valer em todo boleto dele; `semDesconto` evita abater duas vezes quando a nota já carrega o mesmo desconto.
+ */
+export function criarCobranca(d: { empresaId: number; tomadorId: number; notaId: number | null; descricao: string; valor: number; vencimento: string; usuarioId: number; semDesconto?: boolean }) {
+  const t = db.prepare('SELECT desconto_valor, desconto_motivo FROM tomadores WHERE id = ?').get(d.tomadorId) as { desconto_valor: number | null; desconto_motivo: string | null } | undefined;
+  const desconto = !d.semDesconto && t?.desconto_valor && t.desconto_valor > 0 ? Math.round(t.desconto_valor * 100) / 100 : 0;
+  if (desconto && desconto >= d.valor) throw new ErroNegocio(`O desconto do cliente (R$ ${desconto.toFixed(2).replace('.', ',')}) é maior ou igual ao valor do boleto. Ajuste o valor ou o desconto no cadastro do cliente.`);
+  const valor = Math.round((d.valor - desconto) * 100) / 100;
+  if (valor > 99999999.99) throw new ErroNegocio('Valor do boleto acima do limite.');
+  const r = db.prepare(`INSERT INTO cobrancas (empresa_id, tomador_id, nota_id, descricao, valor, vencimento, emissao, criado_por, desconto, desconto_motivo) VALUES (?,?,?,?,?,?,?,?,?,?)`)
+    .run(d.empresaId, d.tomadorId, d.notaId, d.descricao, valor, d.vencimento, hojeBr(), d.usuarioId, desconto, desconto ? t!.desconto_motivo : null);
   const id = Number(r.lastInsertRowid);
   if (obterConta(d.empresaId)) { try { gerarTitulo(id); } catch { /* fica pendente, com o motivo na tela */ } }
   return obterCobranca(id)!;
@@ -114,13 +122,14 @@ export function obterCobranca(id: number) {
 
 export function listarCobrancas(empresaId: number) {
   return db.prepare(`SELECT c.id, c.nota_id, c.tomador_id, c.descricao, c.valor, c.vencimento, c.status, c.nosso_numero, c.linha_digitavel, c.baixa_pendente, c.pago_em, c.valor_pago,
-      c.observacao_banco, c.email_status, c.email_para, c.criado_em, t.nome AS tomador_nome, t.fone AS tomador_fone, c.codigo_barras, n.n_nfse FROM cobrancas c
+      c.observacao_banco, c.email_status, c.email_para, c.criado_em, c.desconto, c.desconto_motivo, t.nome AS tomador_nome, t.fone AS tomador_fone, c.codigo_barras, n.n_nfse FROM cobrancas c
     JOIN tomadores t ON t.id = c.tomador_id LEFT JOIN notas n ON n.id = c.nota_id
     WHERE c.empresa_id = ? ORDER BY c.vencimento DESC, c.id DESC LIMIT 500`).all(empresaId);
 }
 
-function mensagens(conta: any): string[] {
+function mensagens(conta: any, c?: { desconto?: number; desconto_motivo?: string | null }): string[] {
   const m: string[] = [];
+  if (c?.desconto && c.desconto > 0) m.push(`DESCONTO CONCEDIDO R$ ${c.desconto.toFixed(2).replace('.', ',')} - ${c.desconto_motivo ?? ''}`.toUpperCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').slice(0, 40));
   if (conta.instrucoes) m.push(String(conta.instrucoes).slice(0, 40));
   const f = (n: number) => String(n).replace('.', ',');
   if (conta.juros_pct_mes > 0 || conta.multa_pct > 0) {
@@ -145,7 +154,7 @@ export async function boletoPdf(cobrancaId: number): Promise<{ pdf: Buffer; nome
     pagador: { nome: t.nome, documento: t.documento ?? '', endereco: `${end} - ${t.bairro ?? ''} - ${soDig(t.cep ?? '').replace(/(\d{5})(\d{3})/, '$1-$2')} ${t.cidade ?? ''}/${uf}` },
     nossoNumero: c.nosso_numero, numeroDocumento: c.nota_id ? `NFS-e ${(db.prepare('SELECT n_nfse FROM notas WHERE id = ?').get(c.nota_id) as any)?.n_nfse ?? ''}`.trim() : `COB ${c.id}`,
     vencimento: c.vencimento, valor: c.valor, emissao: c.emissao ?? c.criado_em.slice(0, 10), carteira: conta.carteira,
-    instrucoes: mensagens(conta).length ? mensagens(conta) : ['Não receber após o vencimento sem consultar o beneficiário.'],
+    instrucoes: mensagens(conta, c).length ? mensagens(conta, c) : ['Não receber após o vencimento sem consultar o beneficiário.'],
     linhaDigitavel: c.linha_digitavel, codigoBarras: c.codigo_barras,
   });
   return { pdf, nome: `Boleto_${c.nosso_numero}.pdf` };
@@ -185,11 +194,10 @@ export function gerarRemessaEmpresa(empresaId: number, usuarioId: number) {
     FROM cobrancas c JOIN tomadores t ON t.id = c.tomador_id
     WHERE c.empresa_id = ? AND ((c.status = 'A_REMETER') OR (c.baixa_pendente = 1 AND c.status IN ('REMETIDO','REGISTRADO'))) ORDER BY c.id`).all(empresaId) as any[];
   if (!linhas.length) throw new ErroNegocio('Não há boletos novos nem baixas para enviar ao banco.');
-  const msgs = mensagens(conta);
   const titulos: Titulo[] = linhas.map((c) => ({
     idInterno: c.id, nossoNumero: c.nosso_numero, numeroDocumento: c.nota_id ? `NFSE ${(db.prepare('SELECT n_nfse FROM notas WHERE id = ?').get(c.nota_id) as any)?.n_nfse ?? c.id}` : `COB ${c.id}`,
     vencimento: c.vencimento, valor: c.valor, emissao: c.emissao ?? c.criado_em.slice(0, 10),
-    multaPct: conta.multa_pct, jurosPctMes: conta.juros_pct_mes, mensagens: msgs, movimento: c.status === 'A_REMETER' ? 'ENTRADA' : 'BAIXA',
+    multaPct: conta.multa_pct, jurosPctMes: conta.juros_pct_mes, mensagens: mensagens(conta, c), movimento: c.status === 'A_REMETER' ? 'ENTRADA' : 'BAIXA',
     pagador: { documento: c.t_doc, nome: c.t_nome, endereco: [c.logradouro, c.numero].filter(Boolean).join(', ') + (c.complemento ? ` - ${c.complemento}` : ''), bairro: c.bairro ?? '', cep: c.cep ?? '', cidade: c.cidade ?? '', uf: c.uf || UF_IBGE[String(c.cod_municipio ?? '').slice(0, 2)] || '' },
   }));
   const numero = conta.proxima_remessa;
@@ -249,7 +257,7 @@ export function processarRetorno(empresaId: number, texto: string) {
 export function reemitirCobranca(usuarioId: number, id: number, vencimento: string, valor?: number | null) {
   const c = obterCobranca(id);
   if (!c) throw new ErroNegocio('Cobrança não encontrada.', 404);
-  const v = valor ?? c.valor;
+  const v = valor ?? Math.round((c.valor + (c.desconto ?? 0)) * 100) / 100; // valor antes do desconto; o do cadastro atual é aplicado de novo
   if (!(v > 0)) throw new ErroNegocio('O valor precisa ser maior que zero.');
   const extras = (db.prepare('SELECT feriados_extra FROM empresas WHERE id = ?').get(c.empresa_id) as any)?.feriados_extra;
   const ajuste = ajustarVencimento(vencimento, hojeBr(), extras);

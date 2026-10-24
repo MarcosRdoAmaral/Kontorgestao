@@ -427,13 +427,14 @@ async function telaEmitir(notaIdCorrecao) {
         <div class="acoes"><button type="button" id="novo-tomador">Cadastrar novo cliente</button></div>
       </fieldset>
 
+      <div id="aviso-desconto" class="banner teste" hidden></div>
       <fieldset id="bloco-cobranca" hidden><legend>O que emitir</legend>
         <div class="grade">
           <label class="largo">Ação
             <select name="acao"><option value="NOTA">Somente a nota fiscal</option><option value="NOTA_BOLETO">Nota fiscal + boleto</option><option value="BOLETO">Somente o boleto</option></select>
             <span class="dica" id="dica-acao"></span></label>
           <label data-boleto>Vencimento do boleto <input type="date" name="vencimento"></label>
-          <label data-boleto>Valor do boleto (R$) <input name="valorBoleto" data-num inputmode="decimal" placeholder="Valor líquido da nota"><span class="dica">Preenchido sozinho com o líquido da nota (serviço menos descontos e retenções). Você pode alterar; apague o campo para voltar ao automático.</span></label>
+          <label data-boleto>Valor do boleto (R$) <input name="valorBoleto" data-num inputmode="decimal" placeholder="Valor líquido da nota"><span class="dica">Preenchido sozinho com o líquido da nota (serviço menos descontos e retenções). Você pode alterar; apague o campo para voltar ao automático.</span><span class="dica" id="dica-boleto-desc"></span></label>
         </div>
       </fieldset>
 
@@ -567,6 +568,29 @@ async function telaEmitir(notaIdCorrecao) {
     const liquido = f.acao.value === 'BOLETO' ? (d.valor ?? 0) : Math.round((base - ret) * 100) / 100;
     f.valorBoleto.value = liquido > 0 ? liquido.toFixed(2).replace('.', ',') : '';
   };
+  // desconto fixo do cliente: lembrete na emissão e efeito no boleto
+  const atualizarDesconto = () => {
+    const t = tomadores.find((x) => x.id === Number(f.tomadorId.value));
+    const box = $('#aviso-desconto'), desc = t?.desconto_valor ?? 0;
+    if (!t || !desc || corrigindo) { box.hidden = true; $('#dica-boleto-desc')?.replaceChildren(); return; }
+    const naNota = (lerForm(f).descontoIncondicionado ?? 0) >= desc;
+    box.hidden = false;
+    // só redesenha se mudou: refazer o botão durante o clique (o campo anterior dispara "change") faria o clique se perder
+    const html = `<strong>Este cliente tem desconto cadastrado: ${brl(desc)}</strong> (${esc(t.desconto_motivo ?? '')}).<br>
+      ${f.acao.value === 'NOTA' ? '' : 'No boleto o desconto é aplicado automaticamente. '}Na NFS-e ele <u>não</u> é aplicado sozinho: ${naNota ? 'já está lançado como desconto incondicionado nesta nota.' : 'se o desconto também vale para a nota, use o botão abaixo.'}
+      ${naNota ? '' : '<br><button type="button" id="aplicar-desc-nota">Lançar como desconto na nota</button>'}`;
+    if (box.dataset.html !== html) {
+      box.innerHTML = html; box.dataset.html = html;
+      const b = $('#aplicar-desc-nota');
+      if (b) b.onclick = () => { f.descontoIncondicionado.value = String(desc).replace('.', ','); f.descontoIncondicionado.dispatchEvent(new Event('input', { bubbles: true })); };
+    }
+    const dica = $('#dica-boleto-desc');
+    if (dica) {
+      const bruto = numero(f.valorBoleto.value) ?? 0;
+      dica.textContent = naNota ? 'O desconto do cliente já está na nota, então não é abatido de novo.' : bruto > desc ? `Desconto do cliente: − ${brl(desc)} (${t.desconto_motivo}) → boleto de ${brl(bruto - desc)}.` : '';
+    }
+  };
+  f.addEventListener('input', atualizarDesconto); f.addEventListener('change', atualizarDesconto);
   f.valorBoleto?.addEventListener('input', () => { boletoManual = f.valorBoleto.value.trim() !== ''; if (!boletoManual) sugerirBoleto(); });
   f.addEventListener('input', (ev) => { if (ev.target !== f.valorBoleto) sugerirBoleto(); });
   f.addEventListener('change', (ev) => { if (ev.target !== f.valorBoleto) sugerirBoleto(); });
@@ -657,7 +681,7 @@ async function telaCobrancas() {
     ${conta ? '' : `<div class="banner teste">Os dados bancários (Ailos) desta empresa ainda não foram informados. <a href="#/banco">Informar agora</a> — os boletos pendentes são gerados automaticamente depois disso.</div>`}
     ${lista.length ? `<div class="rolagem"><table class="tabela"><thead><tr><th>Vencimento</th><th>Cliente</th><th>Nota</th><th class="num">Valor</th><th>Situação</th><th></th></tr></thead><tbody>
       ${lista.map((c) => `<tr><td>${dataBr(c.vencimento)}${c.status !== 'PAGO' && c.status !== 'CANCELADO' && c.vencimento < hoje ? ' <span class="dica erro">vencido</span>' : ''}</td>
-        <td>${esc(c.tomador_nome)}<br><span class="dica">${esc((c.descricao ?? '').slice(0, 60))}</span></td>
+        <td>${esc(c.tomador_nome)}<br><span class="dica">${esc((c.descricao ?? '').slice(0, 60))}</span>${c.desconto > 0 ? `<br><span class="dica">desconto de ${brl(c.desconto)}: ${esc(c.desconto_motivo ?? '')}</span>` : ''}</td>
         <td>${c.nota_id ? `<a href="#/nota/${c.nota_id}">${c.n_nfse ?? '—'}</a>` : '—'}</td><td class="num">${brl(c.valor)}</td>
         <td>${STATUS_COBRANCA[c.status] ?? c.status}${c.baixa_pendente ? ' <span class="dica">(baixa solicitada)</span>' : ''}${c.pago_em ? `<br><span class="dica">em ${dataBr(c.pago_em)}</span>` : ''}${c.observacao_banco ? `<br><span class="dica erro">${esc(c.observacao_banco)}</span>` : ''}</td>
         <td class="acoes-linha">${c.nosso_numero ? `<button data-boleto="${c.id}">Boleto</button>` : ''}${c.status !== 'PAGO' && c.status !== 'CANCELADO' ? `<button data-wa="${c.id}">WhatsApp</button>` : ''}${podeEditar ? `<button data-reemitir="${c.id}">Reemitir</button>` : ''}${podeEditar && !['PAGO', 'CANCELADO'].includes(c.status) ? `<button data-pago="${c.id}">Marcar pago</button><button data-cancelar="${c.id}">Cancelar</button>` : ''}</td></tr>`).join('')}
@@ -698,7 +722,7 @@ async function telaCobrancas() {
         <div class="grade">
           <label class="largo">Cliente <select name="tomadorId" required>${clientes.map((t) => `<option value="${t.id}">${esc(t.nome)}${t.modo_faturamento === 'BOLETO' ? ' — somente boleto' : ''}</option>`).join('')}</select></label>
           <label class="largo">Descrição <input name="descricao" required maxlength="2000" placeholder="ex.: Honorários contábeis — outubro/2026"></label>
-          <label>Valor (R$) <input name="valor" data-num required inputmode="decimal"></label>
+          <label>Valor antes do desconto (R$) <input name="valor" data-num required inputmode="decimal"><span class="dica" id="dica-desc-nb"></span></label>
           <label>Vencimento <input type="date" name="vencimento" required></label>
           <label class="largo"><span><input type="checkbox" name="enviarEmail"> Enviar o boleto por e-mail ao cliente</span></label>
         </div>
@@ -708,7 +732,9 @@ async function telaCobrancas() {
       const f = $('#form-nb');
       const cliente = () => clientes.find((t) => t.id === Number(f.tomadorId.value));
       const ajustar = () => { const r = ajustarVencimento(f.vencimento.value, fer); if (r.aviso) { f.vencimento.value = r.data; $('#aviso-nb').textContent = r.aviso; } else $('#aviso-nb').textContent = ''; };
-      f.tomadorId.onchange = () => { const t = cliente(); f.vencimento.value = vencDe(t); f.enviarEmail.checked = !!t.enviar_email_auto; ajustar(); };
+      const dicaDesc = () => { const t = cliente(); $('#dica-desc-nb').textContent = t.desconto_valor ? `Será abatido o desconto do cliente: ${brl(t.desconto_valor)} (${t.desconto_motivo}).` : ''; };
+      f.tomadorId.addEventListener('change', dicaDesc);
+      f.tomadorId.onchange = () => { const t = cliente(); dicaDesc(); f.vencimento.value = vencDe(t); f.enviarEmail.checked = !!t.enviar_email_auto; ajustar(); };
       f.vencimento.onchange = ajustar;
       f.tomadorId.onchange();
       f.onsubmit = async (ev) => {
@@ -785,8 +811,9 @@ async function telaCobrancas() {
         <p class="sutil">Gera uma nova cobrança para <strong>${esc(c.tomador_nome)}</strong> com a mesma descrição. Só o boleto: nenhuma nota é emitida.</p>
         <div class="grade">
           <label>Novo vencimento <input type="date" name="vencimento" required value="${sugerido}"></label>
-          <label>Valor (R$) <input name="valor" data-num required inputmode="decimal" value="${String(c.valor).replace('.', ',')}"></label>
+          <label>Valor antes do desconto (R$) <input name="valor" data-num required inputmode="decimal" value="${String(Math.round((c.valor + (c.desconto ?? 0)) * 100) / 100).replace('.', ',')}"></label>
         </div>
+        <p class="dica">${c.desconto > 0 ? `O desconto cadastrado no cliente (${esc(c.desconto_motivo ?? '')}) é abatido deste valor.` : 'Se o cliente tiver desconto cadastrado, ele é abatido deste valor.'}</p>
         <p class="dica" id="aviso-re"></p><p class="erro" id="erro-re"></p>
         <div class="acoes"><button class="primario" type="submit">Gerar boleto</button><button type="button" data-fechar>Cancelar</button></div>
       </form>`, (d) => {
@@ -1224,6 +1251,8 @@ function formTomador(t, aoSalvar) {
   t ??= { tipo_doc: 'CNPJ', modo_faturamento: 'NOTA', vencimento_tipo: 'PRAZO', vencimento_valor: 10, enviar_email_auto: 0 };
   abrirDialogo(`
     <form id="form-tomador"><h2>${t.id ? 'Editar cliente' : 'Novo cliente'}</h2>
+      <nav class="abas" id="abas-cliente"><a href="#" data-aba="cadastro" class="ativo">Cadastro</a><a href="#" data-aba="descontos">Descontos${t.desconto_valor ? ' •' : ''}</a></nav>
+      <div data-painel="cadastro">
       <fieldset class="sub"><legend>Identificação</legend><div class="grade">
         <label>Tipo <select name="tipo_doc">${['CNPJ', 'CPF', 'SEM'].map((v) => `<option value="${v}" ${t.tipo_doc === v ? 'selected' : ''}>${v === 'SEM' ? 'Sem documento' : v}</option>`).join('')}</select></label>
         <label>CNPJ / CPF <span class="linha-campo"><input name="documento" value="${esc(t.documento ?? '')}"><button type="button" data-buscar-cnpj>Buscar CNPJ</button></span><span class="dica" data-cnpj-info>Digite o CNPJ e clique em Buscar para preencher os dados.</span></label>
@@ -1257,10 +1286,23 @@ function formTomador(t, aoSalvar) {
         <label class="largo" data-cobranca>E-mails extras para cobrança <input name="email_cobranca" placeholder="financeiro@cliente.com, outro@cliente.com" value="${esc(t.email_cobranca ?? '')}"><span class="dica">Separe por vírgula. Recebem junto com o e-mail principal.</span></label>
         <label class="largo"><span><input type="checkbox" name="enviar_email_auto" ${t.enviar_email_auto ? 'checked' : ''}> Enviar por e-mail automaticamente ao emitir</span><span class="dica">Só em produção. A nota é enviada logo após ser autorizada.</span></label>
       </div><p class="dica" data-aviso-banco>O boleto ainda não está ligado a um banco: ele fica registrado como “aguardando banco” até a integração ser ativada.</p></fieldset>
+      </div>
+      <div data-painel="descontos" hidden>
+        <fieldset class="sub"><legend>Desconto fixo deste cliente</legend><div class="grade">
+          <label>Valor do desconto (R$) <input name="desconto_valor" data-num inputmode="decimal" value="${t.desconto_valor ? String(t.desconto_valor).replace('.', ',') : ''}" placeholder="0,00"></label>
+          <label class="largo">Motivo do desconto <input name="desconto_motivo" maxlength="80" value="${esc(t.desconto_motivo ?? '')}" placeholder="ex.: Desconto contratual de fidelidade"></label>
+        </div>
+        <p class="dica">O valor é abatido de <strong>todos os boletos</strong> deste cliente (emitidos com nota, só boleto ou reemitidos), e o motivo sai nas instruções do boleto. Na emissão da NFS-e o sistema lembra que o cliente tem desconto e deixa você decidir se lança também como desconto na nota. Deixe em branco para não ter desconto.</p></fieldset>
+      </div>
       <p class="erro" id="erro-tomador"></p>
       <div class="acoes"><button class="primario" type="submit">Salvar cliente</button><button type="button" data-fechar>Fechar</button></div>
     </form>`, (d) => {
     const f = $('#form-tomador');
+    f.querySelectorAll('#abas-cliente a').forEach((a) => (a.onclick = (ev) => {
+      ev.preventDefault();
+      f.querySelectorAll('#abas-cliente a').forEach((x) => x.classList.toggle('ativo', x === a));
+      f.querySelectorAll('[data-painel]').forEach((p) => (p.hidden = p.dataset.painel !== a.dataset.aba));
+    }));
     f.cep.onblur = () => buscarCep(f);
     ligarConsultaCnpj(f, 'tomador');
     const ajustar = () => {
@@ -1278,6 +1320,7 @@ function formTomador(t, aoSalvar) {
         corpo.vencimento_valor = Number(f.vencimento_valor.value || 0);
         corpo.cidade = f.cidade.value.trim() || null; corpo.uf = f.uf.value.trim().toUpperCase() || null;
         corpo.email_cobranca = f.email_cobranca.value.trim() || null;
+        corpo.desconto_valor = numero(f.desconto_valor.value) || null; corpo.desconto_motivo = f.desconto_motivo.value.trim() || null;
         const r = t.id ? await api('PUT', `/api/tomadores/${t.id}`, corpo) : await api('POST', `/api/empresas/${estado.empresaId}/tomadores`, corpo);
         d.close(); aviso('Cliente salvo.');
         aoSalvar?.(t.id ?? r.id);
@@ -1291,8 +1334,8 @@ async function telaTomadores() {
   conteudo.innerHTML = `
     <div class="topo"><div><h1>Clientes (tomadores)</h1><p class="sutil">Clientes de ${esc(empresa().razao_social)}.</p></div>
       <button class="primario" id="novo">Cadastrar cliente</button></div>
-    ${lista.length ? `<div class="rolagem"><table class="tabela"><thead><tr><th>Nome</th><th>Documento</th><th>E-mail</th><th>Faturamento</th></tr></thead><tbody>
-      ${lista.map((t, i) => `<tr class="clicavel" data-i="${i}"><td>${esc(t.nome)}</td><td>${fmtDoc(t.documento)}</td><td>${esc(t.email ?? '')}</td><td>${NOME_MODO[t.modo_faturamento] ?? 'Nota'}</td></tr>`).join('')}
+    ${lista.length ? `<div class="rolagem"><table class="tabela"><thead><tr><th>Nome</th><th>Documento</th><th>E-mail</th><th>Faturamento</th><th>Desconto</th></tr></thead><tbody>
+      ${lista.map((t, i) => `<tr class="clicavel" data-i="${i}"><td>${esc(t.nome)}</td><td>${fmtDoc(t.documento)}</td><td>${esc(t.email ?? '')}</td><td>${NOME_MODO[t.modo_faturamento] ?? 'Nota'}</td><td>${t.desconto_valor ? `${brl(t.desconto_valor)}<br><span class="dica">${esc(t.desconto_motivo ?? '')}</span>` : ''}</td></tr>`).join('')}
     </tbody></table></div>` : '<div class="vazio">Nenhum tomador cadastrado.</div>'}`;
   $('#novo').onclick = () => formTomador(null, telaTomadores);
   conteudo.querySelectorAll('tr[data-i]').forEach((tr) => (tr.onclick = () => formTomador(lista[tr.dataset.i], telaTomadores)));

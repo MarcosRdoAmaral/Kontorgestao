@@ -80,6 +80,19 @@ test('painel financeiro, despesas e balanço', async () => {
     assert.equal((await call('POST', `/api/empresas/${eid}/boleto-avulso`, { tomadorId: c3, descricao: 'x', valor: -1 }, t)).status, 400);
     assert.equal((await call('POST', `/api/empresas/${eid}/boleto-avulso`, { tomadorId: 999999, descricao: 'Honorários', valor: 10 }, t)).status, 400);
 
+    // desconto fixo do cliente: motivo obrigatório, abatido em todo boleto e registrado na cobrança
+    const tdesc = await call('POST', `/api/empresas/${eid}/tomadores`, { tipo_doc: 'CPF', documento: '11144477735', nome: 'Cliente Desconto', modo_faturamento: 'BOLETO', desconto_valor: 50 }, t);
+    assert.equal(tdesc.status, 400, 'desconto sem motivo');
+    const tok = await call('POST', `/api/empresas/${eid}/tomadores`, { tipo_doc: 'CPF', documento: '39053344705', nome: 'Cliente Desconto', modo_faturamento: 'BOLETO', desconto_valor: 50, desconto_motivo: 'Fidelidade' }, t);
+    assert.equal(tok.status, 200, JSON.stringify(tok.json));
+    const d1 = (await call('POST', `/api/empresas/${eid}/boleto-avulso`, { tomadorId: tok.json.id, descricao: 'Honorários', valor: 500, vencimento: '2027-03-10' }, t)).json.cobranca;
+    assert.equal(d1.valor, 450); assert.equal(d1.desconto, 50); assert.equal(d1.desconto_motivo, 'Fidelidade');
+    const d2 = (await call('POST', `/api/cobrancas/${d1.id}/reemitir`, { vencimento: '2027-04-09' }, t)).json.cobranca;
+    assert.equal(d2.valor, 450, 'reemitir parte do valor antes do desconto e abate de novo');
+    assert.equal((await call('POST', `/api/empresas/${eid}/boleto-avulso`, { tomadorId: tok.json.id, descricao: 'Honorários', valor: 50, vencimento: '2027-03-10' }, t)).status, 400, 'desconto >= valor');
+    assert.equal((await call('PUT', `/api/tomadores/${tok.json.id}`, { tipo_doc: 'CPF', documento: '39053344705', nome: 'Cliente Desconto', modo_faturamento: 'BOLETO' }, t)).status, 200);
+    assert.equal((await call('POST', `/api/empresas/${eid}/boleto-avulso`, { tomadorId: tok.json.id, descricao: 'Honorários', valor: 500, vencimento: '2027-03-10' }, t)).json.cobranca.valor, 500, 'sem desconto cadastrado');
+
     // modelos de WhatsApp: padrão até o usuário salvar o seu
     const m0 = (await call('GET', `/api/empresas/${eid}/modelos-whatsapp`, undefined, t)).json;
     assert.match(m0.lembrete, /\{cliente\}/); assert.equal(m0.lembrete, m0.padrao.lembrete);
