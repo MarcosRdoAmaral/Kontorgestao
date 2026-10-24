@@ -96,6 +96,14 @@ test('painel financeiro, despesas e balanço', async () => {
     // serviços padrão do cliente (serviço + valor), base para emissão recorrente
     const sv1 = (await call('POST', `/api/empresas/${eid}/servicos`, { nome: 'Honorários', descricao: 'Honorários contábeis', c_trib_nac: '171901' }, t)).json.id;
     const sv2 = (await call('POST', `/api/empresas/${eid}/servicos`, { nome: 'Folha', descricao: 'Folha de pagamento', c_trib_nac: '171901' }, t)).json.id;
+    // tributação padrão do serviço
+    const tri = { tribISSQN: 1, issRetido: 2, pPis: 0.65, pCofins: 3, pCsll: 1, pIrrf: 1.5, pCp: 11, pTotTrib: { fed: 11.33, mun: 3 }, municipioPrestacao: '4208203', infoComplementar: 'Ref. competência' };
+    assert.equal((await call('POST', `/api/empresas/${eid}/servicos`, { nome: 'Ruim', descricao: 'x', c_trib_nac: '171901', tributacao: { municipioPrestacao: '123' } }, t)).status, 400);
+    const svT = (await call('POST', `/api/empresas/${eid}/servicos`, { nome: 'Tributado', descricao: 'Serviço tributado', c_trib_nac: '171901', tributacao: tri }, t)).json.id;
+    const lidoT = (await call("GET", `/api/empresas/${eid}/servicos`, undefined, t)).json.find((x: any) => x.id === svT);
+    assert.equal(lidoT.tributacao.issRetido, 2); assert.equal(lidoT.tributacao.pIrrf, 1.5); assert.equal(lidoT.tributacao.pTotTrib.fed, 11.33);
+    assert.equal((await call('PUT', `/api/servicos/${svT}`, { nome: 'Tributado', descricao: 'Serviço tributado', c_trib_nac: '171901', tributacao: { ...tri, issRetido: 1 } }, t)).status, 200);
+    assert.equal((await call('GET', `/api/empresas/${eid}/servicos`, undefined, t)).json.find((x: any) => x.id === svT).tributacao.issRetido, 1);
     const base = { tipo_doc: 'CPF', documento: '39053344705', nome: 'Cliente Padrão', modo_faturamento: 'NOTA_BOLETO' };
     assert.equal((await call('POST', `/api/empresas/${eid}/tomadores`, { ...base, servicos_padrao: [{ servico_id: sv1, valor: 0 }] }, t)).status, 400, 'valor obrigatório');
     assert.equal((await call('POST', `/api/empresas/${eid}/tomadores`, { ...base, servicos_padrao: [{ servico_id: 999999, valor: 10 }] }, t)).status, 400, 'serviço de outra empresa');

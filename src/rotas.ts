@@ -91,6 +91,16 @@ const Servico = z.object({
   c_nbs: z.string().nullish().transform((c) => (c ? soDigitos(c) : null)),
   aliquota: z.number().min(0).max(100).nullish(),
   valor_padrao: z.number().min(0).nullish(),
+  tributacao: z.object({
+    tribISSQN: z.union([z.literal(1), z.literal(2), z.literal(3), z.literal(4)]).default(1),
+    tpImunidade: z.number().int().min(0).max(9).nullish(),
+    issRetido: z.union([z.literal(1), z.literal(2), z.literal(3)]).default(1),
+    pPis: z.number().min(0).max(100).nullish(), pCofins: z.number().min(0).max(100).nullish(),
+    pCsll: z.number().min(0).max(100).nullish(), pIrrf: z.number().min(0).max(100).nullish(), pCp: z.number().min(0).max(100).nullish(),
+    pTotTrib: z.object({ fed: z.number().min(0).max(100).nullish(), est: z.number().min(0).max(100).nullish(), mun: z.number().min(0).max(100).nullish() }).nullish(),
+    municipioPrestacao: z.string().regex(/^\d{7}$/, 'Município da prestação: código IBGE de 7 dígitos').nullish().or(z.literal('').transform(() => null)),
+    infoComplementar: z.string().max(2000).nullish(),
+  }).nullish(),
   ibscbs: z.object({
     indFinal: z.union([z.literal(0), z.literal(1)]),
     cIndOp: z.string().regex(/^\d{6}$/, 'Indicador da operação (cIndOp) precisa ter 6 dígitos'),
@@ -309,14 +319,14 @@ export async function rotas(app: FastifyInstance) {
       const id = Number((req.params as any).id);
       checarEmpresa(req, id);
       return db.prepare('SELECT * FROM servicos WHERE empresa_id = ? AND ativo = 1 ORDER BY nome').all(id)
-        .map((s: any) => ({ ...s, ibscbs: s.ibscbs_json ? JSON.parse(s.ibscbs_json) : null }));
+        .map((s: any) => ({ ...s, ibscbs: s.ibscbs_json ? JSON.parse(s.ibscbs_json) : null, tributacao: s.tributacao_json ? JSON.parse(s.tributacao_json) : null }));
     });
     api.post('/api/empresas/:id/servicos', async (req) => {
       const id = Number((req.params as any).id);
       checarEmpresa(req, id);
       const d = Servico.parse(req.body);
-      const r = db.prepare(`INSERT INTO servicos (empresa_id, nome, descricao, c_trib_nac, c_trib_mun, c_nbs, aliquota, valor_padrao, ibscbs_json) VALUES (?,?,?,?,?,?,?,?,?)`)
-        .run(id, d.nome, d.descricao, d.c_trib_nac, d.c_trib_mun || null, d.c_nbs, d.aliquota ?? null, d.valor_padrao ?? null, d.ibscbs ? JSON.stringify(d.ibscbs) : null);
+      const r = db.prepare(`INSERT INTO servicos (empresa_id, nome, descricao, c_trib_nac, c_trib_mun, c_nbs, aliquota, valor_padrao, ibscbs_json, tributacao_json) VALUES (?,?,?,?,?,?,?,?,?,?)`)
+        .run(id, d.nome, d.descricao, d.c_trib_nac, d.c_trib_mun || null, d.c_nbs, d.aliquota ?? null, d.valor_padrao ?? null, d.ibscbs ? JSON.stringify(d.ibscbs) : null, d.tributacao ? JSON.stringify(d.tributacao) : null);
       return { id: Number(r.lastInsertRowid) };
     });
     api.put('/api/servicos/:id', async (req) => {
@@ -325,8 +335,8 @@ export async function rotas(app: FastifyInstance) {
       if (!s) throw new ErroNegocio('Serviço não encontrado.', 404);
       checarEmpresa(req, s.empresa_id);
       const d = Servico.parse(req.body);
-      db.prepare(`UPDATE servicos SET nome=?, descricao=?, c_trib_nac=?, c_trib_mun=?, c_nbs=?, aliquota=?, valor_padrao=?, ibscbs_json=? WHERE id=?`)
-        .run(d.nome, d.descricao, d.c_trib_nac, d.c_trib_mun || null, d.c_nbs, d.aliquota ?? null, d.valor_padrao ?? null, d.ibscbs ? JSON.stringify(d.ibscbs) : null, id);
+      db.prepare(`UPDATE servicos SET nome=?, descricao=?, c_trib_nac=?, c_trib_mun=?, c_nbs=?, aliquota=?, valor_padrao=?, ibscbs_json=?, tributacao_json=? WHERE id=?`)
+        .run(d.nome, d.descricao, d.c_trib_nac, d.c_trib_mun || null, d.c_nbs, d.aliquota ?? null, d.valor_padrao ?? null, d.ibscbs ? JSON.stringify(d.ibscbs) : null, d.tributacao ? JSON.stringify(d.tributacao) : null, id);
       return { ok: true };
     });
     api.delete('/api/servicos/:id', async (req) => {

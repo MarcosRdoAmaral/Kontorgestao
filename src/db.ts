@@ -383,6 +383,8 @@ const migracoes: string[] = [
     UNIQUE (tomador_id, servico_id)
   );
   CREATE INDEX ix_tomador_servicos ON tomador_servicos(tomador_id);`,
+  // 14: tributação padrão do serviço (ISSQN, retenções, totais de tributos, município, informações complementares)
+  `ALTER TABLE servicos ADD COLUMN tributacao_json TEXT;`,
 ];
 
 export function migrar(): void {

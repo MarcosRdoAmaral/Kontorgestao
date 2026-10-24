@@ -503,6 +503,7 @@ async function telaEmitir(notaIdCorrecao) {
   if (p.tribISSQN) f.tribISSQN.value = p.tribISSQN;
   if (p.issRetido) f.issRetido.value = p.issRetido;
 
+  let pCpServico = null, tpImunidadeServico = null;
   f.servicoId.onchange = () => {
     const s = servicos.find((x) => x.id === Number(f.servicoId.value));
     if (!s) return;
@@ -510,6 +511,20 @@ async function telaEmitir(notaIdCorrecao) {
     if (s.aliquota != null) f.aliquota.value = s.aliquota;
     if (s.valor_padrao) f.valor.value = s.valor_padrao;
     f.cTribNac.value = '';
+    // tributação padrão cadastrada no serviço
+    const t = s.tributacao;
+    const fmt = (n) => (n == null ? '' : String(n).replace('.', ','));
+    if (t) {
+      f.tribISSQN.value = String(t.tribISSQN ?? 1);
+      f.issRetido.value = String(t.issRetido ?? 1);
+      for (const k of ['pPis', 'pCofins', 'pCsll', 'pIrrf']) f.elements[k].value = fmt(t[k]);
+      if (t.municipioPrestacao) f.municipioPrestacao.value = t.municipioPrestacao;
+      if (t.infoComplementar) f.infoComplementar.value = t.infoComplementar;
+      if (f.tFed) { f.tFed.value = fmt(t.pTotTrib?.fed); f.tEst.value = fmt(t.pTotTrib?.est); f.tMun.value = fmt(t.pTotTrib?.mun); }
+      pCpServico = t.pCp ?? null; tpImunidadeServico = t.tpImunidade ?? null;
+      recalcular();
+      sugerirBoleto?.();
+    } else { pCpServico = null; tpImunidadeServico = null; }
   };
   $('#novo-tomador').onclick = () => formTomador(null, async (id) => { telaEmitir.prefTomador = id; await telaEmitir(notaIdCorrecao); $('#form-emitir').tomadorId.value = id; });
 
@@ -621,14 +636,19 @@ async function telaEmitir(notaIdCorrecao) {
   f.addEventListener('change', (ev) => { if (ev.target !== f.valorBoleto) sugerirBoleto(); });
   if (f.tomadorId.value) f.tomadorId.dispatchEvent(new Event('change'));
 
-  const recalcular = () => {
+  function recalcular() {
     const base = (lerForm(f).valor ?? 0) - (lerForm(f).descontoIncondicionado ?? 0);
+    if (pCpServico != null) f.elements.cp.value = pCpServico ? (Math.round(base * pCpServico) / 100).toFixed(2).replace('.', ',') : '';
     const preencher = (aliq, campo) => {
       const pc = lerForm(f)[aliq];
       f.elements[campo].value = pc ? (Math.round(base * pc) / 100).toFixed(2).replace('.', ',') : '';
     };
     preencher('pPis', 'pis'); preencher('pCofins', 'cofins'); preencher('pCsll', 'csll'); preencher('pIrrf', 'irrf');
-  };
+  }
+  // com percentuais preenchidos, os valores retidos acompanham o valor do serviço
+  ['valor', 'descontoIncondicionado'].forEach((n) => f.elements[n].addEventListener('input', () => {
+    if (['pPis', 'pCofins', 'pCsll', 'pIrrf'].some((k) => lerForm(f)[k]) || pCpServico) recalcular();
+  }));
   ['pPis', 'pCofins', 'pCsll', 'pIrrf'].forEach((n) => f.elements[n].addEventListener('input', recalcular));
   $('#ret-padrao').onclick = () => {
     const pad = { pPis: '0,65', pCofins: '3,00', pCsll: '1,00', pIrrf: '1,50' };
@@ -644,7 +664,7 @@ async function telaEmitir(notaIdCorrecao) {
       servicoId: d.servicoId ? Number(d.servicoId) : null,
       competencia: d.competencia, descricao: d.descricao, valor: d.valor,
       descontoIncondicionado: d.descontoIncondicionado, cTribNac: d.cTribNac, municipioPrestacao: d.municipioPrestacao,
-      aliquota: d.aliquota, tribISSQN: Number(d.tribISSQN), issRetido: Number(d.issRetido),
+      aliquota: d.aliquota, tribISSQN: Number(d.tribISSQN), issRetido: Number(d.issRetido), tpImunidade: Number(d.tribISSQN) === 2 ? tpImunidadeServico : null,
       retencoes: { irrf: d.irrf, cp: d.cp, csll: d.csll, pis: d.pis, cofins: d.cofins, pPis: d.pPis, pCofins: d.pCofins }, infoComplementar: d.infoComplementar,
       pTotTrib: empresa()?.op_simp_nac === 1 ? { fed: d.tFed, est: d.tEst, mun: d.tMun } : undefined,
     };
@@ -1469,6 +1489,7 @@ function ligarBuscaNbs(f) {
 function formServico(s) {
   s ??= {};
   const ib = s.ibscbs ?? {};
+  const tr = s.tributacao ?? {};
   abrirDialogo(`
     <form id="form-servico"><h2>${s.id ? 'Editar serviço' : 'Novo serviço'}</h2>
       <div class="busca-servico">
@@ -1488,6 +1509,36 @@ function formServico(s) {
         <label>Alíquota ISSQN (%) <input name="aliquota" data-num value="${s.aliquota ?? ''}"></label>
         <label>Valor padrão (R$) <input name="valor_padrao" data-num value="${s.valor_padrao ?? ''}"></label>
       </div>
+      <fieldset style="margin-top:16px"><legend>Tributação padrão do serviço</legend>
+        <p class="dica">Estes dados vêm preenchidos na emissão sempre que o serviço for escolhido; você ainda pode alterar na nota.</p>
+        <div class="grade">
+          <label>ISSQN
+            <select name="tribISSQN">${[[1, 'Operação tributável'], [2, 'Imunidade'], [3, 'Exportação de serviço'], [4, 'Não incidência']].map(([v, n]) => `<option value="${v}" ${(tr.tribISSQN ?? 1) === v ? 'selected' : ''}>${n}</option>`).join('')}</select></label>
+          <label>Retenção do ISSQN
+            <select name="issRetido">${[[1, 'Não retido'], [2, 'Retido pelo tomador'], [3, 'Retido pelo intermediário']].map(([v, n]) => `<option value="${v}" ${(tr.issRetido ?? 1) === v ? 'selected' : ''}>${n}</option>`).join('')}</select></label>
+          <label>Tipo de imunidade <select name="tpImunidade"><option value="">—</option>${[[0, 'Imunidade não informada'], [1, 'Patrimônio, renda ou serviços (art. 150, VI, a)'], [2, 'Templos de qualquer culto'], [3, 'Partidos, sindicatos, educação e assistência social'], [4, 'Livros, jornais e periódicos'], [5, 'Fonogramas e videofonogramas musicais']].map(([v, n]) => `<option value="${v}" ${tr.tpImunidade === v ? 'selected' : ''}>${n}</option>`).join('')}</select><span class="dica">Só quando o ISSQN for “Imunidade”</span></label>
+          <label>Município da prestação (IBGE) <input name="municipioPrestacao" maxlength="7" placeholder="Vazio = município da empresa" value="${esc(tr.municipioPrestacao ?? '')}"></label>
+          <fieldset class="largo retencoes"><legend>Retenções federais padrão (%)</legend>
+            <p class="dica">Percentuais que o tomador costuma reter. Na emissão eles calculam os valores sozinhos. Deixe em branco o que não se aplica.</p>
+            <div class="grade">
+              <label>PIS (%) <input name="pPis" data-num inputmode="decimal" value="${tr.pPis ?? ''}"></label>
+              <label>COFINS (%) <input name="pCofins" data-num inputmode="decimal" value="${tr.pCofins ?? ''}"></label>
+              <label>CSLL (%) <input name="pCsll" data-num inputmode="decimal" value="${tr.pCsll ?? ''}"></label>
+              <label>IRRF (%) <input name="pIrrf" data-num inputmode="decimal" value="${tr.pIrrf ?? ''}"></label>
+              <label>INSS / CP (%) <input name="pCp" data-num inputmode="decimal" value="${tr.pCp ?? ''}"></label>
+              <label><span>&nbsp;</span><button type="button" id="ret-padrao-serv">Sugerir retenções usuais</button></label>
+            </div>
+          </fieldset>
+          <fieldset class="largo retencoes"><legend>Totais aproximados de tributos (Lei 12.741) — % </legend>
+            <div class="grade">
+              <label>Federais <input name="tFed" data-num inputmode="decimal" value="${tr.pTotTrib?.fed ?? ''}"></label>
+              <label>Estaduais <input name="tEst" data-num inputmode="decimal" value="${tr.pTotTrib?.est ?? ''}"></label>
+              <label>Municipais <input name="tMun" data-num inputmode="decimal" value="${tr.pTotTrib?.mun ?? ''}"></label>
+            </div>
+          </fieldset>
+          <label class="largo">Informações complementares padrão <textarea name="infoComplementar" maxlength="2000">${esc(tr.infoComplementar ?? '')}</textarea></label>
+        </div>
+      </fieldset>
       <fieldset style="margin-top:16px"><legend>IBS/CBS (regime regular)</legend>
         <p class="dica">Preencha apenas para empresas fora do Simples Nacional, conforme a tabela de classificação tributária vigente.</p>
         <div class="grade">
@@ -1506,6 +1557,7 @@ function formServico(s) {
     const f = $('#form-servico');
     ligarBuscaServicos(f);
     ligarBuscaNbs(f);
+    $('#ret-padrao-serv').onclick = () => { ({ pPis: '0,65', pCofins: '3,00', pCsll: '1,00', pIrrf: '1,50' }, Object.entries({ pPis: '0,65', pCofins: '3,00', pCsll: '1,00', pIrrf: '1,50' }).forEach(([k, v]) => (f.elements[k].value = v))); };
     $('#excluir') && ($('#excluir').onclick = async () => { await api('DELETE', `/api/servicos/${s.id}`); d.close(); telaServicos(); });
     f.onsubmit = async (ev) => {
       ev.preventDefault();
@@ -1513,6 +1565,12 @@ function formServico(s) {
       const corpo = {
         nome: x.nome, descricao: x.descricao, c_trib_nac: x.c_trib_nac, c_trib_mun: x.c_trib_mun, c_nbs: x.c_nbs,
         aliquota: x.aliquota, valor_padrao: x.valor_padrao,
+        tributacao: {
+          tribISSQN: Number(x.tribISSQN), issRetido: Number(x.issRetido), tpImunidade: x.tpImunidade === '' || x.tpImunidade == null ? null : Number(x.tpImunidade),
+          pPis: x.pPis, pCofins: x.pCofins, pCsll: x.pCsll, pIrrf: x.pIrrf, pCp: x.pCp,
+          pTotTrib: { fed: x.tFed, est: x.tEst, mun: x.tMun },
+          municipioPrestacao: x.municipioPrestacao || null, infoComplementar: x.infoComplementar || null,
+        },
         ibscbs: x.usaIbs ? { cIndOp: x.cIndOp, cst: x.cst, cClassTrib: x.cClassTrib, indFinal: Number(x.indFinal), indDest: Number(x.indDest) } : null,
       };
       try {
@@ -1523,13 +1581,23 @@ function formServico(s) {
   });
 }
 
+function resumoTributacao(s) {
+  const t = s.tributacao ?? {}, p = [];
+  p.push({ 1: 'Tributável', 2: 'Imunidade', 3: 'Exportação', 4: 'Não incidência' }[t.tribISSQN ?? 1]);
+  if ((t.issRetido ?? 1) !== 1) p.push('ISS retido');
+  const r = [['PIS', t.pPis], ['COFINS', t.pCofins], ['CSLL', t.pCsll], ['IRRF', t.pIrrf], ['CP', t.pCp]].filter(([, v]) => v);
+  if (r.length) p.push('Ret.: ' + r.map(([n]) => n).join('/'));
+  if (s.ibscbs) p.push('IBS/CBS ' + s.ibscbs.cClassTrib);
+  return esc(p.join(' · '));
+}
+
 async function telaServicos() {
   const lista = await api('GET', `/api/empresas/${estado.empresaId}/servicos`);
   conteudo.innerHTML = `
     <div class="topo"><div><h1>Serviços</h1><p class="sutil">Modelos com código de tributação e alíquota, para emitir em poucos cliques.</p></div>
       <button class="primario" id="novo">Cadastrar serviço</button></div>
-    ${lista.length ? `<div class="rolagem"><table class="tabela"><thead><tr><th>Nome</th><th>Código nacional</th><th>NBS</th><th class="num">Alíquota</th><th class="num">Valor padrão</th></tr></thead><tbody>
-      ${lista.map((s, i) => `<tr class="clicavel" data-i="${i}"><td>${esc(s.nome)}</td><td>${s.c_trib_nac}${s.c_trib_mun ? ' / ' + s.c_trib_mun : ''}</td><td>${s.c_nbs ?? ''}</td>
+    ${lista.length ? `<div class="rolagem"><table class="tabela"><thead><tr><th>Nome</th><th>Código nacional</th><th>NBS</th><th>Tributação</th><th class="num">Alíquota</th><th class="num">Valor padrão</th></tr></thead><tbody>
+      ${lista.map((s, i) => `<tr class="clicavel" data-i="${i}"><td>${esc(s.nome)}</td><td>${s.c_trib_nac}${s.c_trib_mun ? ' / ' + s.c_trib_mun : ''}</td><td>${s.c_nbs ?? ''}</td><td>${resumoTributacao(s)}</td>
         <td class="num">${s.aliquota != null ? s.aliquota + '%' : '—'}</td><td class="num">${s.valor_padrao ? brl(s.valor_padrao) : '—'}</td></tr>`).join('')}
     </tbody></table></div>` : '<div class="vazio">Cadastre os serviços que esta empresa presta.</div>'}`;
   $('#novo').onclick = () => formServico();
