@@ -104,3 +104,6 @@ Observação: o instalador não é assinado digitalmente; o Windows SmartScreen 
 1. Abra `ferramentas/gerador-de-licencas.html` no navegador (offline) e clique em *Gerar chaves*. Guarde a **chave privada**; nunca a compartilhe.
 2. Coloque a **chave pública** em `src/licenca-chave.ts` e publique uma nova versão. Enquanto estiver vazia, o controle fica desligado.
 3. Para cada renovação: o cliente envia o código do computador; você informa nome e validade (padrão 3 meses) e envia o código `KG1.…` gerado.
+
+## Versão 1.0.14 – Controle de licença ativado
+Chave pública de licenciamento configurada: teste de 30 dias a partir do primeiro uso após a atualização e, depois, código de ativação por computador.

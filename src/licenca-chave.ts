@@ -4,4 +4,4 @@
  * Enquanto estiver vazia, o controle de licença fica desligado ("modo livre").
  * NUNCA coloque a chave privada aqui.
  */
-export const CHAVE_PUBLICA = '';
+export const CHAVE_PUBLICA = 'koSMJ7OYyldxeMDkJVi3dIhkLwsvnPMq6EfPVOseknc';
