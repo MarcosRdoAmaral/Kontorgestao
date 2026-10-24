@@ -427,6 +427,7 @@ async function telaEmitir(notaIdCorrecao) {
         <div class="acoes"><button type="button" id="novo-tomador">Cadastrar novo cliente</button></div>
       </fieldset>
 
+      <div id="serv-padrao" class="banner" hidden></div>
       <div id="aviso-desconto" class="banner teste" hidden></div>
       <fieldset id="bloco-cobranca" hidden><legend>O que emitir</legend>
         <div class="grade">
@@ -568,6 +569,30 @@ async function telaEmitir(notaIdCorrecao) {
     const liquido = f.acao.value === 'BOLETO' ? (d.valor ?? 0) : Math.round((base - ret) * 100) / 100;
     f.valorBoleto.value = liquido > 0 ? liquido.toFixed(2).replace('.', ',') : '';
   };
+  // serviço padrão do cliente: preenche serviço, texto e valor (nota e boleto)
+  const aplicarServicoPadrao = (sp, t) => {
+    const sv = servicos.find((x) => x.id === sp.servico_id);
+    if (!sv) return;
+    f.servicoId.value = String(sv.id);
+    f.servicoId.onchange();
+    if (sp.descricao) f.descricao.value = sp.descricao;
+    f.valor.value = String(sp.valor).replace('.', ',');
+    boletoManual = false;
+    f.valor.dispatchEvent(new Event('input', { bubbles: true }));
+  };
+  const mostrarServicoPadrao = () => {
+    const box = $('#serv-padrao');
+    const t = tomadores.find((x) => x.id === Number(f.tomadorId.value));
+    const lista = (t?.servicos_padrao ?? []).filter((x) => servicos.some((sv) => sv.id === x.servico_id));
+    if (!t || corrigindo || !lista.length) { box.hidden = true; box.innerHTML = ''; return; }
+    box.hidden = false;
+    box.innerHTML = `<label>Serviço padrão de ${esc(t.nome)} ${lista.length > 1 ? `<select id="sel-serv-padrao">${lista.map((x, i) => `<option value="${i}">${esc(servicos.find((sv) => sv.id === x.servico_id).nome)} — ${brl(x.valor)}${x.padrao ? ' (principal)' : ''}</option>`).join('')}</select>` : `<strong>${esc(servicos.find((sv) => sv.id === lista[0].servico_id).nome)} — ${brl(lista[0].valor)}</strong>`}</label>
+      <span class="dica">Já preenchido abaixo; você pode alterar o que precisar antes de emitir.</span>`;
+    const sel = $('#sel-serv-padrao');
+    if (sel) sel.onchange = () => aplicarServicoPadrao(lista[Number(sel.value)], t);
+    aplicarServicoPadrao(lista[0], t);
+  };
+  f.tomadorId.addEventListener('change', mostrarServicoPadrao);
   // desconto fixo do cliente: lembrete na emissão e efeito no boleto
   const atualizarDesconto = () => {
     const t = tomadores.find((x) => x.id === Number(f.tomadorId.value));
@@ -1247,11 +1272,12 @@ function ligarConsultaCnpj(form, modo) {
 // ---------------------------------------------------------------------------
 
 const NOME_MODO = { NOTA: 'Nota', NOTA_BOLETO: 'Nota + boleto', BOLETO: 'Só boleto' };
-function formTomador(t, aoSalvar) {
+async function formTomador(t, aoSalvar) {
+  const servicosEmpresa = await api('GET', `/api/empresas/${estado.empresaId}/servicos`).catch(() => []);
   t ??= { tipo_doc: 'CNPJ', modo_faturamento: 'NOTA', vencimento_tipo: 'PRAZO', vencimento_valor: 10, enviar_email_auto: 0 };
   abrirDialogo(`
     <form id="form-tomador"><h2>${t.id ? 'Editar cliente' : 'Novo cliente'}</h2>
-      <nav class="abas" id="abas-cliente"><a href="#" data-aba="cadastro" class="ativo">Cadastro</a><a href="#" data-aba="descontos">Descontos${t.desconto_valor ? ' •' : ''}</a></nav>
+      <nav class="abas" id="abas-cliente"><a href="#" data-aba="cadastro" class="ativo">Cadastro</a><a href="#" data-aba="servicos">Serviços padrão${t.servicos_padrao?.length ? ' •' : ''}</a><a href="#" data-aba="descontos">Descontos${t.desconto_valor ? ' •' : ''}</a></nav>
       <div data-painel="cadastro">
       <fieldset class="sub"><legend>Identificação</legend><div class="grade">
         <label>Tipo <select name="tipo_doc">${['CNPJ', 'CPF', 'SEM'].map((v) => `<option value="${v}" ${t.tipo_doc === v ? 'selected' : ''}>${v === 'SEM' ? 'Sem documento' : v}</option>`).join('')}</select></label>
@@ -1287,6 +1313,14 @@ function formTomador(t, aoSalvar) {
         <label class="largo"><span><input type="checkbox" name="enviar_email_auto" ${t.enviar_email_auto ? 'checked' : ''}> Enviar por e-mail automaticamente ao emitir</span><span class="dica">Só em produção. A nota é enviada logo após ser autorizada.</span></label>
       </div><p class="dica" data-aviso-banco>O boleto ainda não está ligado a um banco: ele fica registrado como “aguardando banco” até a integração ser ativada.</p></fieldset>
       </div>
+      <div data-painel="servicos" hidden>
+        <fieldset class="sub"><legend>Serviços que sempre são cobrados deste cliente</legend>
+          <p class="dica">Escolha os serviços e o valor de cada um. Ao selecionar este cliente na emissão, o serviço principal e o valor já vêm preenchidos para a nota e para o boleto. Esses dados também serão a base da emissão agendada.</p>
+          <div id="lista-serv-padrao"></div>
+          <div class="acoes"><button type="button" id="add-serv-padrao" ${servicosEmpresa.length ? '' : 'disabled'}>Adicionar serviço</button></div>
+          ${servicosEmpresa.length ? '' : '<p class="dica">Cadastre antes os serviços da empresa em Serviços.</p>'}
+        </fieldset>
+      </div>
       <div data-painel="descontos" hidden>
         <fieldset class="sub"><legend>Desconto fixo deste cliente</legend><div class="grade">
           <label>Valor do desconto (R$) <input name="desconto_valor" data-num inputmode="decimal" value="${t.desconto_valor ? String(t.desconto_valor).replace('.', ',') : ''}" placeholder="0,00"></label>
@@ -1303,6 +1337,30 @@ function formTomador(t, aoSalvar) {
       f.querySelectorAll('#abas-cliente a').forEach((x) => x.classList.toggle('ativo', x === a));
       f.querySelectorAll('[data-painel]').forEach((p) => (p.hidden = p.dataset.painel !== a.dataset.aba));
     }));
+    // serviços padrão do cliente
+    let padroes = (t.servicos_padrao ?? []).map((x) => ({ ...x }));
+    const desenharPadroes = () => {
+      const box = $('#lista-serv-padrao');
+      box.innerHTML = padroes.length ? padroes.map((x, i) => `
+        <div class="linha-serv">
+          <label>Serviço <select data-sp="servico_id" data-i="${i}">${servicosEmpresa.some((sv) => sv.id === x.servico_id) ? '' : `<option value="${x.servico_id}">(serviço removido)</option>`}${servicosEmpresa.map((sv) => `<option value="${sv.id}" ${sv.id === x.servico_id ? 'selected' : ''}>${esc(sv.nome)}</option>`).join('')}</select></label>
+          <label>Valor (R$) <input data-sp="valor" data-i="${i}" inputmode="decimal" value="${x.valor ? String(x.valor).replace('.', ',') : ''}"></label>
+          <label class="largo">Texto na nota (opcional) <input data-sp="descricao" data-i="${i}" maxlength="2000" value="${esc(x.descricao ?? '')}" placeholder="vazio = descrição padrão do serviço"></label>
+          <label><span><input type="radio" name="sp_principal" data-i="${i}" ${x.padrao ? 'checked' : ''}> Principal</span></label>
+          <button type="button" data-sp-del="${i}">Remover</button>
+        </div>`).join('') : '<p class="sutil">Nenhum serviço padrão cadastrado.</p>';
+      box.querySelectorAll('[data-sp]').forEach((el) => (el.oninput = el.onchange = () => {
+        const x = padroes[Number(el.dataset.i)], k = el.dataset.sp;
+        x[k] = k === 'servico_id' ? Number(el.value) : k === 'valor' ? (numero(el.value) ?? 0) : el.value;
+      }));
+      box.querySelectorAll('[name=sp_principal]').forEach((r) => (r.onchange = () => padroes.forEach((x, j) => (x.padrao = j === Number(r.dataset.i)))));
+      box.querySelectorAll('[data-sp-del]').forEach((b) => (b.onclick = () => { padroes.splice(Number(b.dataset.spDel), 1); if (padroes.length && !padroes.some((x) => x.padrao)) padroes[0].padrao = true; desenharPadroes(); }));
+    };
+    $('#add-serv-padrao').onclick = () => {
+      const livre = servicosEmpresa.find((sv) => !padroes.some((x) => x.servico_id === sv.id)) ?? servicosEmpresa[0];
+      padroes.push({ servico_id: livre.id, valor: livre.valor_padrao ?? 0, descricao: '', padrao: !padroes.length }); desenharPadroes();
+    };
+    desenharPadroes();
     f.cep.onblur = () => buscarCep(f);
     ligarConsultaCnpj(f, 'tomador');
     const ajustar = () => {
@@ -1320,6 +1378,8 @@ function formTomador(t, aoSalvar) {
         corpo.vencimento_valor = Number(f.vencimento_valor.value || 0);
         corpo.cidade = f.cidade.value.trim() || null; corpo.uf = f.uf.value.trim().toUpperCase() || null;
         corpo.email_cobranca = f.email_cobranca.value.trim() || null;
+        if (padroes.some((x) => !(x.valor > 0))) throw new Error('Informe o valor de cada serviço padrão (aba Serviços padrão).');
+        corpo.servicos_padrao = padroes.map((x) => ({ servico_id: x.servico_id, valor: x.valor, descricao: (x.descricao || '').trim() || null, padrao: !!x.padrao }));
         corpo.desconto_valor = numero(f.desconto_valor.value) || null; corpo.desconto_motivo = f.desconto_motivo.value.trim() || null;
         const r = t.id ? await api('PUT', `/api/tomadores/${t.id}`, corpo) : await api('POST', `/api/empresas/${estado.empresaId}/tomadores`, corpo);
         d.close(); aviso('Cliente salvo.');

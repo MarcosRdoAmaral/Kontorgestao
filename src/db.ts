@@ -372,6 +372,17 @@ const migracoes: string[] = [
   ALTER TABLE tomadores ADD COLUMN desconto_motivo TEXT;
   ALTER TABLE cobrancas ADD COLUMN desconto REAL NOT NULL DEFAULT 0;
   ALTER TABLE cobrancas ADD COLUMN desconto_motivo TEXT;`,
+  // 13: serviços padrão por cliente (serviço + valor), base para emissão recorrente/agendada
+  `CREATE TABLE tomador_servicos (
+    id INTEGER PRIMARY KEY,
+    tomador_id INTEGER NOT NULL REFERENCES tomadores(id) ON DELETE CASCADE,
+    servico_id INTEGER NOT NULL REFERENCES servicos(id),
+    valor REAL NOT NULL CHECK (valor > 0),
+    descricao TEXT,                           -- texto da nota (vazio = descrição padrão do serviço)
+    padrao INTEGER NOT NULL DEFAULT 0,        -- 1 = o principal, escolhido ao selecionar o cliente
+    UNIQUE (tomador_id, servico_id)
+  );
+  CREATE INDEX ix_tomador_servicos ON tomador_servicos(tomador_id);`,
 ];
 
 export function migrar(): void {

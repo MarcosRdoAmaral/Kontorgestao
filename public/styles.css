@@ -175,3 +175,6 @@ tr.inativo td { opacity: .55; }
 .novidades summary { cursor: pointer; margin-top: 4px; text-decoration: underline; }
 .novidades div { margin-top: 6px; font-size: .9rem; line-height: 1.45; max-width: 760px; }
 .novidades-caixa { background: rgba(251,146,61,.08); border: 1px solid var(--laranja-forte, #fb923d); border-radius: 10px; padding: 12px 14px; margin: 10px 0; line-height: 1.5; }
+
+.linha-serv { display: grid; grid-template-columns: 2fr 1fr 3fr auto auto; gap: 10px; align-items: end; padding: 10px 0; border-bottom: 1px solid var(--linha); }
+@media (max-width: 900px) { .linha-serv { grid-template-columns: 1fr 1fr; } }

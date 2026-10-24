@@ -73,6 +73,11 @@ const Tomador = z.object({
   enviar_email_auto: z.union([z.boolean(), z.literal(0), z.literal(1)]).default(false).transform((v) => (v ? 1 : 0)),
   desconto_valor: z.number().min(0).max(99999999).nullish().transform((v) => (v && v > 0 ? Math.round(v * 100) / 100 : null)),
   desconto_motivo: z.string().trim().max(80).nullish().transform((v) => v || null),
+  /** Serviços que o sistema sempre usa com este cliente, com o valor de cada um. */
+  servicos_padrao: z.array(z.object({
+    servico_id: z.number().int(), valor: z.number().positive('Informe o valor do serviço'),
+    descricao: z.string().trim().max(2000).nullish().transform((v) => v || null), padrao: z.boolean().nullish(),
+  })).max(20).default([]).refine((l) => new Set(l.map((x) => x.servico_id)).size === l.length, 'O mesmo serviço foi escolhido duas vezes'),
 }).refine((t) => t.modo_faturamento === 'NOTA' || t.vencimento_tipo === 'PRAZO' || (t.vencimento_valor >= 1 && t.vencimento_valor <= 31), { message: 'Dia do vencimento deve ser de 1 a 31', path: ['vencimento_valor'] })
 
 .refine((t) => !t.desconto_valor || !!t.desconto_motivo, { message: 'Informe o motivo do desconto', path: ['desconto_motivo'] })
@@ -252,21 +257,35 @@ export async function rotas(app: FastifyInstance) {
     });
 
     // ---------- Tomadores ----------
+    type ServicoPadrao = { servico_id: number; valor: number; descricao: string | null; padrao?: boolean | null };
+    const conferirServicosPadrao = (empresaId: number, l: ServicoPadrao[]) => {
+      for (const s of l) if (!db.prepare('SELECT 1 FROM servicos WHERE id = ? AND empresa_id = ? AND ativo = 1').get(s.servico_id, empresaId)) throw new ErroNegocio('Serviço padrão não encontrado nesta empresa.');
+    };
+    const salvarServicosPadrao = (empresaId: number, tomadorId: number, l: ServicoPadrao[]) => {
+      db.prepare('DELETE FROM tomador_servicos WHERE tomador_id = ?').run(tomadorId);
+      const principal = l.findIndex((s) => s.padrao);
+      const ins = db.prepare('INSERT INTO tomador_servicos (tomador_id, servico_id, valor, descricao, padrao) VALUES (?,?,?,?,?)');
+      l.forEach((s, i) => ins.run(tomadorId, s.servico_id, s.valor, s.descricao, i === (principal >= 0 ? principal : 0) ? 1 : 0));
+    };
     api.get('/api/empresas/:id/tomadores', async (req) => {
       const id = Number((req.params as any).id);
       checarEmpresa(req, id);
       const q = `%${((req.query as any).q ?? '').trim()}%`;
-      return db.prepare('SELECT * FROM tomadores WHERE empresa_id = ? AND (nome LIKE ? OR documento LIKE ?) ORDER BY nome LIMIT 200').all(id, q, q);
+      const linhas = db.prepare('SELECT * FROM tomadores WHERE empresa_id = ? AND (nome LIKE ? OR documento LIKE ?) ORDER BY nome LIMIT 200').all(id, q, q) as any[];
+      const sp = db.prepare('SELECT servico_id, valor, descricao, padrao FROM tomador_servicos WHERE tomador_id = ? ORDER BY padrao DESC, id');
+      return linhas.map((t) => ({ ...t, servicos_padrao: (sp.all(t.id) as any[]).map((x) => ({ ...x, padrao: !!x.padrao })) }));
     });
     api.post('/api/empresas/:id/tomadores', async (req) => {
       const id = Number((req.params as any).id);
       checarEmpresa(req, id);
       const d = Tomador.parse(req.body);
+      conferirServicosPadrao(id, d.servicos_padrao);
       const r = db.prepare(`INSERT INTO tomadores (empresa_id, tipo_doc, documento, nome, inscricao_municipal, email, fone, cep, cod_municipio, logradouro, numero, complemento, bairro,
         modo_faturamento, vencimento_tipo, vencimento_valor, email_cobranca, enviar_email_auto, cidade, uf, desconto_valor, desconto_motivo)
         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(id, d.tipo_doc, d.documento, d.nome, d.inscricao_municipal ?? null, d.email || null, d.fone, d.cep,
         d.cod_municipio ?? null, d.logradouro ?? null, d.numero ?? null, d.complemento ?? null, d.bairro ?? null,
         d.modo_faturamento, d.vencimento_tipo, d.vencimento_valor, d.email_cobranca || null, d.enviar_email_auto, d.cidade || null, d.uf || null, d.desconto_valor, d.desconto_motivo);
+      salvarServicosPadrao(id, Number(r.lastInsertRowid), d.servicos_padrao);
       return { id: Number(r.lastInsertRowid) };
     });
     api.put('/api/tomadores/:id', async (req) => {
@@ -275,11 +294,13 @@ export async function rotas(app: FastifyInstance) {
       if (!t) throw new ErroNegocio('Tomador não encontrado.', 404);
       checarEmpresa(req, t.empresa_id);
       const d = Tomador.parse(req.body);
+      conferirServicosPadrao(t.empresa_id, d.servicos_padrao);
       db.prepare(`UPDATE tomadores SET tipo_doc=?, documento=?, nome=?, inscricao_municipal=?, email=?, fone=?, cep=?, cod_municipio=?, logradouro=?, numero=?, complemento=?, bairro=?,
         modo_faturamento=?, vencimento_tipo=?, vencimento_valor=?, email_cobranca=?, enviar_email_auto=?, cidade=?, uf=?, desconto_valor=?, desconto_motivo=? WHERE id=?`)
         .run(d.tipo_doc, d.documento, d.nome, d.inscricao_municipal ?? null, d.email || null, d.fone, d.cep, d.cod_municipio ?? null,
           d.logradouro ?? null, d.numero ?? null, d.complemento ?? null, d.bairro ?? null,
           d.modo_faturamento, d.vencimento_tipo, d.vencimento_valor, d.email_cobranca || null, d.enviar_email_auto, d.cidade || null, d.uf || null, d.desconto_valor, d.desconto_motivo, id);
+      salvarServicosPadrao(t.empresa_id, id, d.servicos_padrao);
       return { ok: true };
     });
 

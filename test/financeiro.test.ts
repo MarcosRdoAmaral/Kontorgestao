@@ -93,6 +93,21 @@ test('painel financeiro, despesas e balanço', async () => {
     assert.equal((await call('PUT', `/api/tomadores/${tok.json.id}`, { tipo_doc: 'CPF', documento: '39053344705', nome: 'Cliente Desconto', modo_faturamento: 'BOLETO' }, t)).status, 200);
     assert.equal((await call('POST', `/api/empresas/${eid}/boleto-avulso`, { tomadorId: tok.json.id, descricao: 'Honorários', valor: 500, vencimento: '2027-03-10' }, t)).json.cobranca.valor, 500, 'sem desconto cadastrado');
 
+    // serviços padrão do cliente (serviço + valor), base para emissão recorrente
+    const sv1 = (await call('POST', `/api/empresas/${eid}/servicos`, { nome: 'Honorários', descricao: 'Honorários contábeis', c_trib_nac: '171901' }, t)).json.id;
+    const sv2 = (await call('POST', `/api/empresas/${eid}/servicos`, { nome: 'Folha', descricao: 'Folha de pagamento', c_trib_nac: '171901' }, t)).json.id;
+    const base = { tipo_doc: 'CPF', documento: '39053344705', nome: 'Cliente Padrão', modo_faturamento: 'NOTA_BOLETO' };
+    assert.equal((await call('POST', `/api/empresas/${eid}/tomadores`, { ...base, servicos_padrao: [{ servico_id: sv1, valor: 0 }] }, t)).status, 400, 'valor obrigatório');
+    assert.equal((await call('POST', `/api/empresas/${eid}/tomadores`, { ...base, servicos_padrao: [{ servico_id: 999999, valor: 10 }] }, t)).status, 400, 'serviço de outra empresa');
+    assert.equal((await call('POST', `/api/empresas/${eid}/tomadores`, { ...base, servicos_padrao: [{ servico_id: sv1, valor: 10 }, { servico_id: sv1, valor: 20 }] }, t)).status, 400, 'repetido');
+    const tp = await call('POST', `/api/empresas/${eid}/tomadores`, { ...base, servicos_padrao: [{ servico_id: sv1, valor: 800 }, { servico_id: sv2, valor: 150.5, descricao: 'Folha de {mes}', padrao: true }] }, t);
+    assert.equal(tp.status, 200, JSON.stringify(tp.json));
+    const lido = (await call('GET', `/api/empresas/${eid}/tomadores`, undefined, t)).json.find((x: any) => x.id === tp.json.id);
+    assert.deepEqual(lido.servicos_padrao.map((x: any) => [x.servico_id, x.valor, x.padrao]), [[sv2, 150.5, true], [sv1, 800, false]]);
+    assert.equal((await call('PUT', `/api/tomadores/${tp.json.id}`, { ...base, servicos_padrao: [{ servico_id: sv1, valor: 900 }] }, t)).status, 200);
+    const lido2 = (await call('GET', `/api/empresas/${eid}/tomadores`, undefined, t)).json.find((x: any) => x.id === tp.json.id);
+    assert.deepEqual(lido2.servicos_padrao.map((x: any) => [x.servico_id, x.valor, x.padrao]), [[sv1, 900, true]], 'sem principal marcado, o primeiro vira principal');
+
     // modelos de WhatsApp: padrão até o usuário salvar o seu
     const m0 = (await call('GET', `/api/empresas/${eid}/modelos-whatsapp`, undefined, t)).json;
     assert.match(m0.lembrete, /\{cliente\}/); assert.equal(m0.lembrete, m0.padrao.lembrete);
