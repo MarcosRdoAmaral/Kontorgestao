@@ -72,6 +72,14 @@ test('painel financeiro, despesas e balanço', async () => {
     assert.match(re.json.aviso, /antecipado/); assert.equal(re.json.cobranca.nota_id, null);
     assert.equal((await call('POST', `/api/cobrancas/${origem}/reemitir`, { vencimento: 'x' }, t)).status, 400);
 
+    // boleto avulso (sem nota), a partir da tela de Cobranças
+    const av = await call('POST', `/api/empresas/${eid}/boleto-avulso`, { tomadorId: c3, descricao: 'Honorários', valor: 450, vencimento: '2027-02-14' }, t); // domingo
+    assert.equal(av.status, 200, JSON.stringify(av.json));
+    assert.equal(av.json.acao, 'BOLETO'); assert.equal(av.json.nota, undefined); assert.equal(av.json.cobranca.valor, 450);
+    assert.equal(av.json.cobranca.vencimento, '2027-02-12'); assert.equal(av.json.cobranca.nota_id, null);
+    assert.equal((await call('POST', `/api/empresas/${eid}/boleto-avulso`, { tomadorId: c3, descricao: 'x', valor: -1 }, t)).status, 400);
+    assert.equal((await call('POST', `/api/empresas/${eid}/boleto-avulso`, { tomadorId: 999999, descricao: 'Honorários', valor: 10 }, t)).status, 400);
+
     // modelos de WhatsApp: padrão até o usuário salvar o seu
     const m0 = (await call('GET', `/api/empresas/${eid}/modelos-whatsapp`, undefined, t)).json;
     assert.match(m0.lembrete, /\{cliente\}/); assert.equal(m0.lembrete, m0.padrao.lembrete);

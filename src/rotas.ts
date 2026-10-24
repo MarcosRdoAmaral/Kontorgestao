@@ -7,7 +7,7 @@ import { EdicaoUsuario, NovoUsuario, confirmarRecuperacao, criarUsuario, editarU
 import { config } from './config.js';
 import { ConfigSmtp, ListaEmails, configPublica, enviarNotaPorEmail, historicoEmails, salvarConfig, testarConfig } from './servicos/email.js';
 import { ativarLicenca, exigirLicenca, statusLicenca } from './licenca.js';
-import { EntradaFaturamento, faturar, listarCobrancas } from './servicos/faturamento.js';
+import { BoletoAvulso, EntradaFaturamento, faturar, gerarBoletoAvulso, listarCobrancas } from './servicos/faturamento.js';
 import { ContaBancaria, obterModelosWhatsapp, reemitirCobranca, salvarModelosWhatsapp, boletoPdf, cancelarCobranca, gerarRemessaEmpresa, listarRemessas, marcarPago, obterCobranca, obterConta, obterRemessa, processarRetorno, salvarConta } from './servicos/cobranca.js';
 import { Despesa, criarDespesa, editarDespesa, excluirDespesa, listarCategorias, listarDespesas, painelFinanceiro, salvarCategorias } from './servicos/financeiro.js';
 import { criarBackup, listarBackups } from './servicos/backup.js';
@@ -399,6 +399,10 @@ export async function rotas(app: FastifyInstance) {
       return faturar(u(req), entrada);
     });
 
+    api.post('/api/empresas/:id/boleto-avulso', { preHandler: exigirPapel('admin', 'operador') }, async (req) => {
+      const id = Number((req.params as any).id); checarEmpresa(req, id);
+      return gerarBoletoAvulso(u(req), id, BoletoAvulso.parse(req.body));
+    });
     api.get('/api/empresas/:id/cobrancas', async (req) => {
       const id = Number((req.params as any).id);
       checarEmpresa(req, id);

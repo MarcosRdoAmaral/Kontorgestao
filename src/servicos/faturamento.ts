@@ -115,4 +115,16 @@ export async function faturar(u: Usuario, entrada: EntradaFaturamento) {
   return resultado;
 }
 
+/** Só o boleto, a partir da tela de Cobranças (sem nota fiscal): mesmas regras e e-mail do faturamento. */
+export const BoletoAvulso = z.object({
+  tomadorId: z.number().int(),
+  descricao: z.string().trim().min(2, 'Informe a descrição do boleto').max(2000),
+  valor: z.number().positive('O valor precisa ser maior que zero'),
+  vencimento: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullish(),
+  enviarEmail: z.boolean().nullish(),
+});
+export function gerarBoletoAvulso(u: Usuario, empresaId: number, d: z.infer<typeof BoletoAvulso>) {
+  return faturar(u, { acao: 'BOLETO', empresaId, tomadorId: d.tomadorId, descricao: d.descricao, valor: d.valor, vencimento: d.vencimento, enviarEmail: d.enviarEmail } as EntradaFaturamento);
+}
+
 export const listarCobrancas = listar;

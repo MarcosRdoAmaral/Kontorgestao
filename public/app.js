@@ -651,6 +651,7 @@ async function telaCobrancas() {
   conteudo.innerHTML = `
     <div class="topo"><div><h1>Cobranças</h1><p class="sutil">${lista.length} registros · ${brl(aberto)} em aberto</p></div>
       ${podeEditar ? `<div class="acoes"><button id="gerar-remessa" class="primario" ${conta && aRemeter ? '' : 'disabled'}>Gerar remessa${aRemeter ? ` (${aRemeter})` : ''}</button>
+        <button id="novo-boleto" class="primario">Novo boleto</button>
         <button id="modelo-wa">Mensagem do WhatsApp</button>
         <button id="ler-retorno" ${conta ? '' : 'disabled'}>Importar retorno</button><input type="file" id="arq-retorno" accept=".ret,.RET,.txt,.TXT,.rem,.REM,*/*" hidden></div>` : ''}</div>
     ${conta ? '' : `<div class="banner teste">Os dados bancários (Ailos) desta empresa ainda não foram informados. <a href="#/banco">Informar agora</a> — os boletos pendentes são gerados automaticamente depois disso.</div>`}
@@ -674,6 +675,58 @@ async function telaCobrancas() {
     if (!confirm('Cancelar este boleto? Se ele já foi enviado ao banco, a baixa vai na próxima remessa.')) return;
     try { const r = await api('POST', `/api/cobrancas/${b.dataset.cancelar}/cancelar`, {}); aviso(r.baixaNoBanco ? 'Baixa solicitada: gere uma nova remessa para o banco.' : 'Boleto cancelado.'); telaCobrancas(); } catch (e) { aviso(mensagemErro(e)); }
   }));
+  // ---- Novo boleto (sem nota fiscal) ----
+  const nb = $('#novo-boleto');
+  if (nb) nb.onclick = async () => {
+    const [clientes, fer] = await Promise.all([
+      api('GET', `/api/empresas/${estado.empresaId}/tomadores`),
+      api('GET', `/api/empresas/${estado.empresaId}/feriados`).then((r) => r.feriados_extra).catch(() => ''),
+    ]);
+    if (!clientes.length) { aviso('Cadastre um cliente antes de gerar boletos.'); return; }
+    clientes.sort((a, b) => (b.modo_faturamento === 'BOLETO') - (a.modo_faturamento === 'BOLETO') || a.nome.localeCompare(b.nome, 'pt-BR'));
+    const vencDe = (t) => {
+      const base = new Date(Date.now() - 3 * 3600e3);
+      if (t.vencimento_tipo !== 'DIA_FIXO') return new Date(base.getTime() + (t.vencimento_valor ?? 10) * 86400e3).toISOString().slice(0, 10);
+      const ult = (a, m) => new Date(Date.UTC(a, m + 1, 0)).getUTCDate();
+      let a = base.getUTCFullYear(), m = base.getUTCMonth(), dia = Math.min(t.vencimento_valor, ult(a, m));
+      if (dia <= base.getUTCDate()) { m += 1; if (m > 11) { m = 0; a += 1; } dia = Math.min(t.vencimento_valor, ult(a, m)); }
+      return new Date(Date.UTC(a, m, dia)).toISOString().slice(0, 10);
+    };
+    abrirDialogo(`
+      <form id="form-nb"><h2>Novo boleto</h2>
+        <p class="sutil">Gera só o boleto, sem emitir nota fiscal. Os clientes marcados como “Somente boleto” aparecem primeiro.</p>
+        <div class="grade">
+          <label class="largo">Cliente <select name="tomadorId" required>${clientes.map((t) => `<option value="${t.id}">${esc(t.nome)}${t.modo_faturamento === 'BOLETO' ? ' — somente boleto' : ''}</option>`).join('')}</select></label>
+          <label class="largo">Descrição <input name="descricao" required maxlength="2000" placeholder="ex.: Honorários contábeis — outubro/2026"></label>
+          <label>Valor (R$) <input name="valor" data-num required inputmode="decimal"></label>
+          <label>Vencimento <input type="date" name="vencimento" required></label>
+          <label class="largo"><span><input type="checkbox" name="enviarEmail"> Enviar o boleto por e-mail ao cliente</span></label>
+        </div>
+        <p class="dica" id="aviso-nb"></p><p class="erro" id="erro-nb"></p>
+        <div class="acoes"><button class="primario" type="submit">Gerar boleto</button><button type="button" data-fechar>Cancelar</button></div>
+      </form>`, (d) => {
+      const f = $('#form-nb');
+      const cliente = () => clientes.find((t) => t.id === Number(f.tomadorId.value));
+      const ajustar = () => { const r = ajustarVencimento(f.vencimento.value, fer); if (r.aviso) { f.vencimento.value = r.data; $('#aviso-nb').textContent = r.aviso; } else $('#aviso-nb').textContent = ''; };
+      f.tomadorId.onchange = () => { const t = cliente(); f.vencimento.value = vencDe(t); f.enviarEmail.checked = !!t.enviar_email_auto; ajustar(); };
+      f.vencimento.onchange = ajustar;
+      f.tomadorId.onchange();
+      f.onsubmit = async (ev) => {
+        ev.preventDefault();
+        const v = lerForm(f);
+        const botao = f.querySelector('[type=submit]'); botao.disabled = true; botao.textContent = 'Gerando…';
+        try {
+          const r = await api('POST', `/api/empresas/${estado.empresaId}/boleto-avulso`, { tomadorId: Number(v.tomadorId), descricao: v.descricao, valor: v.valor, vencimento: v.vencimento, enviarEmail: !!v.enviarEmail });
+          d.close();
+          const partes = [`Boleto de ${brl(r.cobranca.valor)} (venc. ${dataBr(r.cobranca.vencimento)})`];
+          if (r.email?.status === 'ENVIADO') partes.push(`e-mail enviado para ${r.email.para}`);
+          if (r.email?.status === 'ERRO') partes.push(`e-mail não enviado: ${r.email.erro}`);
+          aviso(partes.join(' · ') + '.' + (r.avisos?.length ? ' ' + r.avisos.join(' ') : '')); telaCobrancas();
+        } catch (e) { $('#erro-nb').textContent = mensagemErro(e); botao.disabled = false; botao.textContent = 'Gerar boleto'; }
+      };
+    });
+  };
+
   // ---- WhatsApp de cobrança com modelo editável ----
   const aplicarModelo = (modelo, c) => modelo
     .replace(/\{cliente\}/g, c.tomador_nome).replace(/\{valor\}/g, brl(c.valor)).replace(/\{vencimento\}/g, dataBr(c.vencimento))
@@ -1552,6 +1605,7 @@ async function telaAtualizacoes() {
       ${ponte?.verificarAtualizacao ? `
         <p class="sutil">O sistema procura versões novas sozinho ao abrir, a cada hora e quando você volta à janela. Quando houver uma, aparece um aviso no topo da tela.</p>
         <p id="atu-status" class="sutil">Consultando…</p>
+        <div id="atu-notas" class="novidades-caixa" hidden></div>
         <div class="acoes"><button class="primario" id="atu-verificar">Verificar agora</button><button id="atu-instalar" hidden>Atualizar agora</button></div>`
         : '<p class="sutil">A busca automática de atualizações funciona no aplicativo instalado no Windows. Neste modo de uso, a atualização é feita com o instalador novo.</p>'}
     </div>`;
@@ -1559,6 +1613,8 @@ async function telaAtualizacoes() {
   const mostrar = (e) => {
     $('#atu-status').textContent = desc(e) + (e?.em ? ` (verificado às ${new Date(e.em).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })})` : '');
     $('#atu-instalar').hidden = e?.situacao !== 'nova';
+    const n = $('#atu-notas'); n.hidden = !(e?.situacao === 'nova' && e.notas);
+    if (!n.hidden) n.innerHTML = `<strong>Novidades da versão ${esc(e.versao)}</strong><br>${esc(e.notas).replace(/\n/g, '<br>')}`;
   };
   mostrar(await ponte.estadoAtualizacao().catch(() => null));
   $('#atu-verificar').onclick = async (ev) => {
@@ -1751,7 +1807,8 @@ async function telaBackup() {
   let dispensado = false;
   const mostrar = (info) => {
     if (!info || dispensado) return;
-    faixa.innerHTML = `<span><strong>Nova versão ${esc(info.versao)} disponível.</strong> Seus dados são preservados e uma cópia de segurança é feita antes de atualizar.</span>
+    faixa.innerHTML = `<span><strong>Nova versão ${esc(info.versao)} disponível.</strong> Seus dados são preservados e uma cópia de segurança é feita antes de atualizar.
+      ${info.notas ? `<details class="novidades"><summary>Ver novidades</summary><div>${esc(info.notas).replace(/\n/g, '<br>')}</div></details>` : ''}</span>
       <span class="acoes-faixa"><button class="primario" id="av-atualizar">Atualizar agora</button><button id="av-depois">Depois</button></span>`;
     faixa.hidden = false;
     document.body.classList.add('com-aviso-versao');
