@@ -1,0 +1,41 @@
+name: Publicar versão
+
+# Para publicar uma versão: suba o número em package.json, faça o commit e crie a tag, por exemplo:
+#   git tag v1.0.6 && git push origin v1.0.6
+# O fluxo testa, gera o instalador do Windows e cria a release com o .exe e o .sha256,
+# que os aplicativos instalados usam para avisar/baixar a atualização.
+
+on:
+  workflow_dispatch:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  publicar:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: A tag precisa bater com a versão do package.json
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: test "v$(node -p "require('./package.json').version")" = "${GITHUB_REF_NAME}"
+      - run: npm test
+      - run: npm run dist
+      - name: Checksum
+        run: cd release && sha256sum Kontor-Gestao-Instalador-*.exe > "$(ls Kontor-Gestao-Instalador-*.exe).sha256"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Kontor-Gestao-Instalador
+          path: release/Kontor-Gestao-Instalador-*
+      - name: Criar release
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "${GITHUB_REF_NAME}" release/Kontor-Gestao-Instalador-* --title "Kontor Gestão ${GITHUB_REF_NAME#v}" --generate-notes
