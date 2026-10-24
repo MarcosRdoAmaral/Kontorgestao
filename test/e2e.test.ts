@@ -221,6 +221,16 @@ test('fluxo completo: cadastro, emissão, rejeição, queda de rede, DANFSe e ca
   assert.equal(r.json.status, 'CANCELADA', JSON.stringify(r.json));
   assert.equal((await call('POST', `/api/notas/${nota1}/cancelar`, { cMotivo: 1, xMotivo: 'Erro no valor do serviço informado' }, token)).status, 400);
 
+  // 5b) aviso de cancelamento por e-mail (PDF + XML da nota + XML do cancelamento)
+  assert.equal((await call('POST', `/api/notas/${nota1}/email`, { para: ['cliente@x.com'], tipo: 'cancelamento' }, token)).status, 400, 'nota de teste não é enviada');
+  bancoEmail.prepare('UPDATE notas SET ambiente = 1 WHERE id = ?').run(nota1);
+  assert.equal((await call('POST', `/api/notas/${nota1}/email`, { para: ['cliente@x.com'], tipo: 'cancelamento' }, token)).status, 200);
+  const canc = enviadosEmail.at(-1);
+  assert.match(canc.subject, /CANCELADA/);
+  assert.match(canc.text, /Erro no valor do serviço informado/);
+  assert.ok(canc.attachments.some((a: any) => /^Cancelamento_NFSe_.*\.xml$/.test(a.filename)));
+  bancoEmail.prepare('UPDATE notas SET ambiente = 2 WHERE id = ?').run(nota1);
+
   // 6) isolamento: cliente só enxerga a própria empresa
   const emp2 = await call('POST', '/api/empresas', { documento: '529.982.247-25', razao_social: 'Outro MEI', cod_municipio: '4208203', op_simp_nac: 2 }, token);
   await call('POST', '/api/usuarios', { nome: 'Cliente', email: 'c@x.com', senha: 'cliente-123', papel: 'cliente', empresas: [eid] }, token);

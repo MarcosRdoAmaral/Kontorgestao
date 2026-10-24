@@ -69,7 +69,7 @@ const esc = (s: string) => s.replace(/[&<>"]/g, (ch) => ({ '&': '&amp;', '<': '&
 const brl = (n: number) => n.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 
 /** Envia a NFS-e (DANFSe em PDF + XML) para os destinatários e registra o resultado. */
-export async function enviarNotaPorEmail(notaId: number, escritorioId: number, para: string[], usuarioId: number) {
+export async function enviarNotaPorEmail(notaId: number, escritorioId: number, para: string[], usuarioId: number, tipo: 'emissao' | 'cancelamento' = 'emissao') {
   const nota = db.prepare(`SELECT n.*, e.razao_social, e.nome_fantasia, e.email AS empresa_email, e.escritorio_id
     FROM notas n JOIN empresas e ON e.id = n.empresa_id WHERE n.id = ?`).get(notaId) as any;
   if (!nota || nota.escritorio_id !== escritorioId) throw new ErroNegocio('Nota não encontrada.', 404);
@@ -78,10 +78,23 @@ export async function enviarNotaPorEmail(notaId: number, escritorioId: number, p
   const c = lerConfig(escritorioId);
   if (!c) throw new ErroNegocio('Configure o e-mail do escritório em E-mail antes de enviar.');
 
+  if (tipo === 'cancelamento' && nota.status !== 'CANCELADA') throw new ErroNegocio('Esta nota não está cancelada.');
+  const ev = tipo === 'cancelamento'
+    ? (db.prepare(`SELECT motivo, xml_pedido FROM eventos WHERE nota_id = ? AND tipo = 'CANCELAMENTO' AND status NOT IN ('REJEITADO') ORDER BY id DESC LIMIT 1`).get(notaId) as { motivo: string | null; xml_pedido: string | null } | undefined)
+    : undefined;
   const pdf = await danfse(notaId);
   const empresa = nota.nome_fantasia || nota.razao_social;
-  const assunto = `NFS-e nº ${nota.n_nfse} — ${empresa}`;
-  const linhas = [
+  const assunto = tipo === 'cancelamento' ? `NFS-e nº ${nota.n_nfse} CANCELADA — ${empresa}` : `NFS-e nº ${nota.n_nfse} — ${empresa}`;
+  const linhas = tipo === 'cancelamento' ? [
+    `Olá${nota.tomador_nome ? ', ' + nota.tomador_nome : ''}!`, '',
+    `Informamos que a NFS-e nº ${nota.n_nfse}, emitida por ${nota.razao_social}, foi CANCELADA e não tem mais validade fiscal.`, '',
+    `Valor da nota: ${brl(nota.valor_servico)}`, `Competência: ${nota.competencia.split('-').reverse().join('/')}`,
+    ...(ev?.motivo ? [`Motivo: ${ev.motivo}`] : []),
+    `Chave de acesso: ${nota.chave_acesso}`, '',
+    'Em anexo: o PDF (DANFSe, marcado como cancelado) e os XMLs da nota e do cancelamento.',
+    'Desconsidere o documento anterior. Se uma nova nota for emitida, você a receberá em seguida.',
+    `Consulta: https://www.nfse.gov.br/ConsultaPublica/?tpc=1&chave=${nota.chave_acesso}`,
+  ] : [
     `Olá${nota.tomador_nome ? ', ' + nota.tomador_nome : ''}!`, '',
     `Segue a Nota Fiscal de Serviço eletrônica (NFS-e) nº ${nota.n_nfse}, emitida por ${nota.razao_social}.`, '',
     `Valor do serviço: ${brl(nota.valor_servico)}`, `Competência: ${nota.competencia.split('-').reverse().join('/')}`,
@@ -103,6 +116,7 @@ export async function enviarNotaPorEmail(notaId: number, escritorioId: number, p
       attachments: [
         { filename: `DANFSe_${nota.n_nfse}.pdf`, content: pdf, contentType: 'application/pdf' },
         { filename: `NFSe_${nota.n_nfse}.xml`, content: nota.xml_nfse, contentType: 'application/xml; charset=utf-8' },
+        ...(ev?.xml_pedido ? [{ filename: `Cancelamento_NFSe_${nota.n_nfse}.xml`, content: ev.xml_pedido, contentType: 'application/xml; charset=utf-8' }] : []),
       ],
     });
   } catch (e) {

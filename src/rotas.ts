@@ -306,8 +306,8 @@ export async function rotas(app: FastifyInstance) {
     api.post('/api/notas/:id/email', { preHandler: exigirPapel('admin', 'operador') }, async (req) => {
       const id = Number((req.params as any).id);
       notaDoUsuario(req, id);
-      const { para } = z.object({ para: ListaEmails }).parse(req.body);
-      return enviarNotaPorEmail(id, u(req).escritorio_id, para, u(req).id);
+      const { para, tipo } = z.object({ para: ListaEmails, tipo: z.enum(['emissao', 'cancelamento']).default('emissao') }).parse(req.body);
+      return enviarNotaPorEmail(id, u(req).escritorio_id, para, u(req).id, tipo);
     });
     api.get('/api/notas/:id/emails', async (req) => {
       const id = Number((req.params as any).id);

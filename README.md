@@ -86,3 +86,8 @@ Observação: o instalador não é assinado digitalmente; o Windows SmartScreen 
 - Na nota (Produção): **Enviar por e-mail** manda o PDF (DANFSe) e o XML. Na emissão, a caixa "Enviar por e-mail ao tomador"
   envia automaticamente quando autorizar. O histórico de envios aparece na nota.
 - Quando sai uma versão nova, uma faixa fixa no topo da tela avisa ("Atualizar agora" / "Depois").
+
+## Cancelamento por e-mail e WhatsApp (1.0.12)
+
+- Ao cancelar, a caixa "Avisar o tomador por e-mail" envia o PDF (marcado CANCELADA) e os XMLs da nota e do cancelamento.
+- **Enviar por WhatsApp** abre o WhatsApp com a mensagem pronta e o link da nota no portal nacional (o PDF pode ser baixado e anexado à conversa).

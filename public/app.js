@@ -454,7 +454,7 @@ async function telaNota(id) {
     ${n.erros.length ? `<h2>Motivo${n.erros.length > 1 ? 's' : ''} da recusa</h2><ul class="lista-erros">${n.erros.map((e) => `<li><strong>${esc(e.codigo)}</strong> ${esc(e.descricao)}${e.complemento ? ` <span class="dica">${esc(e.complemento)}</span>` : ''}</li>`).join('')}</ul>` : ''}
     ${n.alertas.length ? `<h2>Alertas da Sefin</h2><ul>${n.alertas.map((a) => `<li>${esc(a.Descricao ?? a.descricao ?? JSON.stringify(a))}</li>`).join('')}</ul>` : ''}
     <div class="acoes">
-      ${n.chave_acesso ? `<button class="primario" id="b-pdf">Abrir DANFSe</button><button id="b-xml">Baixar XML</button><button id="b-portal">Consultar no portal nacional</button>${estado.usuario.papel !== 'cliente' && n.ambiente === 1 ? '<button id="b-email">Enviar por e-mail</button>' : ''}` : ''}
+      ${n.chave_acesso ? `<button class="primario" id="b-pdf">Abrir DANFSe</button><button id="b-xml">Baixar XML</button><button id="b-portal">Consultar no portal nacional</button>${estado.usuario.papel !== 'cliente' && n.ambiente === 1 ? `<button id="b-email">Enviar por e-mail${n.status === 'CANCELADA' ? ' (aviso de cancelamento)' : ''}</button><button id="b-whats">Enviar por WhatsApp</button>` : ''}` : ''}
       ${['REJEITADA', 'ERRO_COMUNICACAO', 'PENDENTE'].includes(n.status) ? `<a href="#/emitir/${n.id}"><button type="button">Corrigir e reenviar</button></a><button id="b-reenviar">Reenviar sem alterar</button>` : ''}
       ${n.status === 'ERRO_COMUNICACAO' ? '<button id="b-consultar">Consultar na Sefin</button>' : ''}
       ${podeCancelar ? '<button class="perigo" id="b-cancelar">Cancelar nota</button>' : ''}
@@ -477,8 +477,8 @@ async function telaNota(id) {
 
   $('#b-pdf') && ($('#b-pdf').onclick = () => baixar(`/api/notas/${id}/danfse`, `DANFSe_${n.n_nfse}.pdf`, true));
   $('#b-email') && ($('#b-email').onclick = () => abrirDialogo(`
-    <form id="form-email"><h2>Enviar NFS-e nº ${n.n_nfse} por e-mail</h2>
-      <p class="sutil">Segue o PDF (DANFSe) e o XML em anexo. Separe vários e-mails com vírgula (até 5).</p>
+    <form id="form-email"><h2>${n.status === 'CANCELADA' ? 'Avisar o cancelamento da' : 'Enviar'} NFS-e nº ${n.n_nfse} por e-mail</h2>
+      <p class="sutil">Vão em anexo o PDF (DANFSe) e o XML${n.status === 'CANCELADA' ? ' (nota e cancelamento)' : ''}. Separe vários e-mails com vírgula (até 5).</p>
       <label>Para <input name="para" required placeholder="cliente@empresa.com.br" value="${esc(n.tomador_email ?? '')}"></label>
       <p class="erro" id="erro-email"></p>
       <div class="acoes"><button class="primario" type="submit">Enviar</button><button type="button" data-fechar>Fechar</button></div>
@@ -488,11 +488,38 @@ async function telaNota(id) {
       const botao = ev.target.querySelector('[type=submit]');
       botao.disabled = true; botao.textContent = 'Enviando…';
       try {
-        await api('POST', `/api/notas/${id}/email`, { para: ev.target.para.value.split(/[,;\s]+/).filter(Boolean) });
+        await api('POST', `/api/notas/${id}/email`, { para: ev.target.para.value.split(/[,;\s]+/).filter(Boolean), tipo: n.status === 'CANCELADA' ? 'cancelamento' : 'emissao' });
         d.close(); aviso('E-mail enviado.'); telaNota(id);
       } catch (er) { $('#erro-email').textContent = mensagemErro(er); botao.disabled = false; botao.textContent = 'Enviar'; }
     };
   }));
+  $('#b-whats') && ($('#b-whats').onclick = () => {
+    const link = `https://www.nfse.gov.br/ConsultaPublica/?tpc=1&chave=${n.chave_acesso}`;
+    const nome = n.empresa_nome?.nome_fantasia || n.empresa_nome?.razao_social || '';
+    const texto = n.status === 'CANCELADA'
+      ? `Olá${n.tomador_nome ? ', ' + n.tomador_nome : ''}! A NFS-e nº ${n.n_nfse} emitida por ${nome} (${brl(n.valor_servico)}) foi *cancelada* e não tem mais validade. Consulta: ${link}`
+      : `Olá${n.tomador_nome ? ', ' + n.tomador_nome : ''}! Segue a NFS-e nº ${n.n_nfse} emitida por ${nome} (${brl(n.valor_servico)}, competência ${dataBr(n.competencia)}). Para ver e baixar o PDF e o XML: ${link}`;
+    abrirDialogo(`
+      <form id="form-whats"><h2>Enviar NFS-e nº ${n.n_nfse} por WhatsApp</h2>
+        <p class="sutil">O WhatsApp abre com a mensagem pronta; você só confirma o envio. O link leva o cliente à nota no portal nacional (PDF e XML). Para mandar o PDF como anexo, baixe-o aqui e anexe na conversa.</p>
+        <div class="grade">
+          <label>Celular do cliente (com DDD) <input name="fone" required inputmode="tel" placeholder="(47) 99999-9999" value="${esc(n.tomador_fone ?? '')}"></label>
+          <label class="largo">Mensagem <textarea name="texto" rows="5">${esc(texto)}</textarea></label>
+        </div>
+        <p class="erro" id="erro-whats"></p>
+        <div class="acoes"><button class="primario" type="submit">Abrir WhatsApp</button><button type="button" id="w-pdf">Baixar PDF para anexar</button><button type="button" data-fechar>Fechar</button></div>
+      </form>`, (d) => {
+      $('#w-pdf').onclick = () => baixar(`/api/notas/${id}/danfse`, `DANFSe_${n.n_nfse}.pdf`);
+      $('#form-whats').onsubmit = (ev) => {
+        ev.preventDefault();
+        let num = ev.target.fone.value.replace(/\D/g, '');
+        if (num.startsWith('0')) num = num.replace(/^0+/, '');
+        if (!(num.startsWith('55') && num.length >= 12)) num = '55' + num;
+        if (num.length < 12 || num.length > 13) { $('#erro-whats').textContent = 'Número inválido. Informe DDD + número, por exemplo (47) 99999-9999.'; return; }
+        window.open(`https://wa.me/${num}?text=${encodeURIComponent(ev.target.texto.value)}`, '_blank');
+      };
+    });
+  });
   $('#b-portal') && ($('#b-portal').onclick = () => window.open(`https://www.nfse.gov.br/ConsultaPublica/?tpc=1&chave=${n.chave_acesso}`, '_blank'));
   $('#b-xml') && ($('#b-xml').onclick = () => baixar(`/api/notas/${id}/xml`, `NFSe_${n.n_nfse}.xml`));
   const acao = (sel, url, ok) => $(sel) && ($(sel).onclick = async (ev) => {
@@ -507,6 +534,7 @@ async function telaNota(id) {
       <div class="grade">
         <label>Motivo <select name="cMotivo"><option value="1">Erro na emissão</option><option value="2">Serviço não prestado</option><option value="9">Outros</option></select></label>
         <label class="largo">Justificativa <textarea name="xMotivo" required minlength="15" maxlength="255"></textarea></label>
+        ${n.tomador_email && n.ambiente === 1 ? `<label class="largo"><span><input type="checkbox" name="avisar" checked> Avisar o tomador por e-mail (${esc(n.tomador_email)})</span></label>` : ''}
       </div>
       <p class="erro" id="erro-cancelar"></p>
       <div class="acoes"><button class="perigo" type="submit">Cancelar nota</button><button type="button" data-fechar>Voltar</button></div>
@@ -514,7 +542,16 @@ async function telaNota(id) {
     $('#form-cancelar').onsubmit = async (ev) => {
       ev.preventDefault();
       const f = ev.target;
-      try { await api('POST', `/api/notas/${id}/cancelar`, { cMotivo: Number(f.cMotivo.value), xMotivo: f.xMotivo.value }); d.close(); aviso('Nota cancelada.'); telaNota(id); }
+      try {
+        await api('POST', `/api/notas/${id}/cancelar`, { cMotivo: Number(f.cMotivo.value), xMotivo: f.xMotivo.value });
+        d.close();
+        let msg = 'Nota cancelada.';
+        if (f.avisar?.checked) {
+          try { await api('POST', `/api/notas/${id}/email`, { para: [n.tomador_email], tipo: 'cancelamento' }); msg += ` Aviso enviado para ${n.tomador_email}.`; }
+          catch (e2) { msg += ` O e-mail de aviso não foi enviado: ${mensagemErro(e2)}`; }
+        }
+        aviso(msg); telaNota(id);
+      }
       catch (e) { $('#erro-cancelar').textContent = mensagemErro(e); }
     };
   }));
@@ -952,14 +989,22 @@ async function telaEmail() {
       aviso('Configuração de e-mail salva.'); telaEmail();
     } catch (e) { $('#erro-smtp').textContent = mensagemErro(e); }
   };
-  $('#testar').onclick = async (ev) => {
-    const para = prompt('Enviar e-mail de teste para qual endereço?', estado.usuario.email);
-    if (!para) return;
-    ev.target.disabled = true; ev.target.textContent = 'Enviando…';
-    try { await api('POST', '/api/email/testar', { para }); aviso('E-mail de teste enviado. Confira a caixa de entrada.'); }
-    catch (e) { $('#erro-smtp').textContent = mensagemErro(e); }
-    ev.target.disabled = false; ev.target.textContent = 'Enviar e-mail de teste';
-  };
+  // window.prompt() não existe no aplicativo instalado (Electron): usa uma janela própria
+  $('#testar').onclick = () => abrirDialogo(`
+    <form id="form-teste"><h2>E-mail de teste</h2>
+      <p class="sutil">Envia uma mensagem simples com a configuração salva para conferir se está tudo certo.</p>
+      <label>Enviar para <input name="para" type="email" required value="${esc(estado.usuario.email ?? '')}"></label>
+      <p class="erro" id="erro-teste"></p>
+      <div class="acoes"><button class="primario" type="submit">Enviar teste</button><button type="button" data-fechar>Fechar</button></div>
+    </form>`, (d) => {
+    $('#form-teste').onsubmit = async (ev) => {
+      ev.preventDefault();
+      const botao = ev.target.querySelector('[type=submit]');
+      botao.disabled = true; botao.textContent = 'Enviando…';
+      try { await api('POST', '/api/email/testar', { para: ev.target.para.value }); d.close(); aviso('E-mail de teste enviado. Confira a caixa de entrada (e o spam).'); }
+      catch (e) { $('#erro-teste').textContent = mensagemErro(e); botao.disabled = false; botao.textContent = 'Enviar teste'; }
+    };
+  });
 }
 
 async function telaBackup() {
