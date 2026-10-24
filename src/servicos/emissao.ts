@@ -198,12 +198,30 @@ function reservarNumero(empresaId: number, ambiente: number, serie: string): num
 // ---------- Fluxo principal ----------
 
 /**
+ * Retenções padrão do serviço cadastrado: quando a emissão chega sem nenhuma retenção
+ * (ex.: emissão automática ou agendada), aplica os percentuais do cadastro do serviço.
+ */
+export function comRetencoesDoServico<T extends EntradaEmissao>(e: T): T {
+  if (!e.servicoId) return e;
+  const r = e.retencoes;
+  if (r && Object.values(r).some((v) => v != null)) return e; // o usuário já definiu as retenções na nota
+  const sv = db.prepare('SELECT tributacao_json FROM servicos WHERE id = ? AND empresa_id = ?').get(e.servicoId, e.empresaId) as any;
+  const t = sv?.tributacao_json ? JSON.parse(sv.tributacao_json) : null;
+  if (!t) return e;
+  const base = e.valor - (e.descontoIncondicionado ?? 0);
+  const v = (pc?: number | null) => (pc ? Math.round(base * pc) / 100 : null);
+  const ret = { pis: v(t.pPis), cofins: v(t.pCofins), csll: v(t.pCsll), irrf: v(t.pIrrf), cp: v(t.pCp), pPis: t.pPis ?? null, pCofins: t.pCofins ?? null };
+  return Object.values(ret).some((x) => x != null) ? { ...e, retencoes: ret } : e;
+}
+
+/**
  * 1. Reserva o nº da DPS e grava a nota como PENDENTE (antes de qualquer chamada HTTP).
  * 2. Monta, assina e envia.
  * 3. Atualiza status. Se a conexão cair, a nota fica ERRO_COMUNICACAO e pode ser
  *    reconciliada pelo Id da DPS — assim nunca se emite duas notas para a mesma cobrança.
  */
 export async function emitir(u: Usuario, entrada: EntradaEmissao) {
+  entrada = comRetencoesDoServico(entrada);
   const empresa = db.prepare('SELECT * FROM empresas WHERE id = ? AND ativo = 1').get(entrada.empresaId) as any;
   if (!empresa) throw new ErroNegocio('Empresa não encontrada.', 404);
   certificadoDaEmpresa(empresa); // falha cedo se o certificado estiver ausente ou vencido

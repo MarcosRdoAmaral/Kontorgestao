@@ -2,7 +2,7 @@ import { z } from 'zod';
 import { db } from '../db.js';
 import type { Usuario } from '../auth.js';
 import { ajustarVencimento } from './diautil.js';
-import { EntradaEmissao, ErroNegocio, emitir } from './emissao.js';
+import { EntradaEmissao, ErroNegocio, comRetencoesDoServico, emitir } from './emissao.js';
 import { enviarMensagemBoleto, enviarNotaPorEmail } from './email.js';
 import { exigirLicenca } from '../licenca.js';
 import { boletoPdf, criarCobranca, listarCobrancas as listar, obterConta, obterCobranca, pendenciasPagador, registrarEmailCobranca } from './cobranca.js';
@@ -46,6 +46,7 @@ export function valorLiquido(e: Pick<EntradaEmissao, 'valor' | 'descontoIncondic
 
 export async function faturar(u: Usuario, entrada: EntradaFaturamento) {
   exigirLicenca();
+  entrada = comRetencoesDoServico(entrada);
   const tomador = entrada.tomadorId
     ? (db.prepare('SELECT * FROM tomadores WHERE id = ? AND empresa_id = ?').get(entrada.tomadorId, entrada.empresaId) as any)
     : null;
