@@ -170,12 +170,18 @@ let ultimoResultado = { situacao: 'nunca', atual: '' };
 // Verificação pela tela Configurações > Atualizações (sem janelas de diálogo): devolve o resultado.
 ipcMain.handle('atualizacao:verificar', async () => {
   await verificarAtualizacao({ silenciosa: true });
+  if (emAndamento) await emAndamento; // já havia uma consulta em curso: espera o resultado dela
   return { ...ultimoResultado, atual: app.getVersion(), em: ultimaVerificacao };
 });
 ipcMain.handle('atualizacao:estado', () => ({ ...ultimoResultado, atual: app.getVersion(), em: ultimaVerificacao }));
 
-async function verificarAtualizacao({ manual = false, silenciosa = false } = {}) {
-  if (verificando) return;
+let emAndamento = null;
+function verificarAtualizacao(opcoes = {}) {
+  if (!emAndamento) emAndamento = executarVerificacao(opcoes).finally(() => { emAndamento = null; });
+  return emAndamento;
+}
+
+async function executarVerificacao({ manual = false } = {}) {
   verificando = true;
   try {
     const repo = repositorioAtualizacoes();
@@ -202,7 +208,7 @@ async function verificarAtualizacao({ manual = false, silenciosa = false } = {})
     await baixarEInstalar(r);
   } catch (e) {
     ultimaVerificacao = Date.now();
-    ultimoResultado = { situacao: 'erro', erro: 'Não foi possível consultar as atualizações. Verifique a conexão com a internet.' };
+    ultimoResultado = { situacao: 'erro', erro: `Não foi possível consultar as atualizações (${String(e?.message ?? e).slice(0, 120)}). Verifique a conexão com a internet.` };
     if (manual) dialog.showErrorBox('Não foi possível verificar atualizações', String(e?.message ?? e));
   } finally { verificando = false; }
 }

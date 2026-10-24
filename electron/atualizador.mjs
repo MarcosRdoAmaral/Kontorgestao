@@ -28,8 +28,12 @@ export async function buscarNovaVersao(repo, versaoAtual, buscar = fetch) {
     headers: { Accept: 'application/vnd.github+json', 'User-Agent': 'Kontor-Gestao' },
   });
   if (r.status === 404) return { situacao: 'sem_release' };
-  if (!r.ok) throw new Error(`GitHub respondeu ${r.status}`);
-  const rel = await r.json();
+  let rel;
+  if (!r.ok) {
+    // API com limite de consultas (403/429) ou fora do ar: descobre a última versão pelo redirecionamento da página da release
+    rel = await releasePelaPagina(repo, buscar).catch(() => null);
+    if (!rel) throw new Error(`GitHub respondeu ${r.status}`);
+  } else rel = await r.json();
   const versao = String(rel.tag_name ?? '').replace(/^v/i, '');
   if (!versao || compararVersoes(versao, versaoAtual) <= 0) return { situacao: 'atualizado', versao: versaoAtual };
   const assets = escolherAssets(rel);
@@ -43,4 +47,13 @@ export function urlPermitida(url) {
     const u = new URL(url);
     return u.protocol === 'https:' && (u.hostname === 'github.com' || u.hostname.endsWith('.githubusercontent.com'));
   } catch { return false; }
+}
+
+/** Plano B sem a API: /releases/latest redireciona para /releases/tag/vX; o instalador tem nome previsível. */
+async function releasePelaPagina(repo, buscar) {
+  const r = await buscar(`https://github.com/${repo}/releases/latest`, { headers: { 'User-Agent': 'Kontor-Gestao' } });
+  const m = /\/releases\/tag\/v?([\d.]+)\/?$/.exec(new URL(r.url).pathname + '');
+  if (!r.ok || !m) return null;
+  const base = `https://github.com/${repo}/releases/download/v${m[1]}/Kontor-Gestao-Instalador-${m[1]}.exe`;
+  return { tag_name: `v${m[1]}`, body: '', assets: [{ name: `Kontor-Gestao-Instalador-${m[1]}.exe`, browser_download_url: base }, { name: `Kontor-Gestao-Instalador-${m[1]}.exe.sha256`, browser_download_url: base + '.sha256' }] };
 }

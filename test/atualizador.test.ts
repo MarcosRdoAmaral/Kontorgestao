@@ -31,3 +31,13 @@ test('só baixa de github.com', () => {
   assert.ok(!urlPermitida('https://evil.com/github.com/a'));
   assert.ok(!urlPermitida('https://github.com.evil.com/a'));
 });
+
+test('plano B quando a API do GitHub recusa (limite de consultas)', async () => {
+  const buscar = async (url: string) => url.includes('api.github.com')
+    ? { status: 403, ok: false, url, json: async () => ({}) }
+    : { status: 200, ok: true, url: 'https://github.com/o/r/releases/tag/v9.9.9', json: async () => ({}) };
+  const r: any = await buscarNovaVersao('o/r', '1.0.0', buscar as any);
+  assert.equal(r.situacao, 'nova'); assert.equal(r.versao, '9.9.9');
+  assert.equal(r.exe.browser_download_url, 'https://github.com/o/r/releases/download/v9.9.9/Kontor-Gestao-Instalador-9.9.9.exe');
+  assert.ok(urlPermitida(r.exe.browser_download_url));
+});

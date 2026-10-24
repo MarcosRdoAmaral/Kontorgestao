@@ -1284,6 +1284,8 @@ async function telaAtualizacoes() {
     if (e.situacao === 'nova') return `Nova versão ${e.versao} disponível.`;
     if (e.situacao === 'erro') return e.erro;
     if (e.situacao === 'nao_configurado') return 'Atualização automática não configurada.';
+    if (e.situacao === 'sem_release') return 'Nenhuma versão publicada ainda.';
+    if (e.situacao === 'sem_instalador') return `A versão ${e.versao} foi publicada, mas o instalador ainda não está disponível. Tente de novo em alguns minutos.`;
     return 'Você está na versão mais recente.';
   };
   corpoConfig().innerHTML = `
