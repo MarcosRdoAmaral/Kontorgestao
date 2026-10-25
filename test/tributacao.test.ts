@@ -60,6 +60,18 @@ test('tributação: perfis, tipos de documento, retenções do perfil e apuraç�
   const ret = comRetencoesDoServico({ empresaId: 1, servicoId: sv, valor: 1000, competencia: '2026-10-01', descricao: 'x' } as any);
   assert.equal(ret.retencoes?.pis, 6.5);
 
+  // tipo escolhido na própria nota prevalece sobre o do serviço; o perfil completa alíquota, ISSQN e IBS/CBS
+  const pIbs = T.criarPerfil(1, { nome: 'Com IBS/CBS', trib_issqn: 1, municipio_prestacao: '4208203', itens: [
+    { imposto_codigo: 'ISS', aliquota: 2, reducao_base: 0, retido: false },
+    { imposto_codigo: 'CBS', aliquota: 0.9, reducao_base: 0, retido: false, cst: '000', c_class_trib: '000001' }] });
+  const tIbs = T.criarTipo(1, { nome: 'Serviço IBS', sentido: 'SAIDA', modelo: 'NFSE', perfil_id: pIbs.id, ind_op: '100301', ind_final: 0, ind_dest: 0, gera_credito: false, destino: 'RECEITA', padrao: false });
+  const e2 = comRetencoesDoServico({ empresaId: 1, servicoId: sv, tipoDocumentoId: tIbs.id, valor: 1000, competencia: '2026-10-01', descricao: 'x', tribISSQN: 1, issRetido: 1 } as any);
+  assert.equal(e2.tipoDocumentoId, tIbs.id);
+  assert.equal(e2.aliquota, 2);
+  assert.equal(e2.municipioPrestacao, '4208203');
+  assert.deepEqual(e2.ibscbs, { indFinal: 0, cIndOp: '100301', indDest: 0, cst: '000', cClassTrib: '000001' });
+  assert.equal(e2.retencoes?.pis, undefined, 'o perfil escolhido não retém PIS');
+
   // nota autorizada do mês + compra importada
   db.prepare(`INSERT INTO notas (empresa_id, servico_id, ambiente, serie, n_dps, id_dps, status, competencia, valor_servico, descricao, payload_json, n_nfse, tomador_nome)
     VALUES (1, ?, 2, '1', 1, 'DPS1', 'AUTORIZADA', '2026-10-01', 1000, 'x', '{}', '77', 'Cliente X')`).run(sv);
@@ -94,6 +106,9 @@ test('tributação: perfis, tipos de documento, retenções do perfil e apuraç�
   const g = T.gerarPerfisDosServicos(1);
   assert.equal(g.perfisCriados, 1);
   assert.ok(db.prepare('SELECT tipo_documento_id AS t FROM servicos WHERE id = ?').get(sv2)!.t);
-  assert.equal(T.tributacaoDoPerfil(sv2)!.issRetido, 2);
+  const tipo2 = db.prepare('SELECT tipo_documento_id AS t FROM servicos WHERE id = ?').get(sv2)!.t as number;
+  assert.equal(T.tributacaoEfetiva(tipo2)!.issRetido, 2);
+  assert.equal(T.tributacaoEfetiva(tipo2)!.aliquota, 3);
+  assert.equal(T.tributacaoCompletaDoServico(db.prepare('SELECT * FROM servicos WHERE id = ?').get(sv2)).tributacao.pPis, 0.65);
   assert.equal(T.gerarPerfisDosServicos(1).perfisCriados, 0, 'idempotente');
 });

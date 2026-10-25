@@ -8,6 +8,7 @@ import { config } from './config.js';
 import { migrar } from './db.js';
 import { garantirAdmin, garantirMaster } from './auth.js';
 import { rotas } from './rotas.js';
+import { migrarServicosLegados } from './servicos/tributacao.js';
 import { ErroNegocio } from './servicos/emissao.js';
 import { backupAutomatico } from './servicos/backup.js';
 
@@ -15,6 +16,7 @@ const raiz = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
 export async function criarApp() {
   migrar();
+  migrarServicosLegados();
   garantirAdmin();
   garantirMaster();
 

@@ -490,10 +490,12 @@ async function telaPainel() {
 
 async function telaEmitir(notaIdCorrecao) {
   const e = empresa();
-  const [tomadores, servicos] = await Promise.all([
+  const [tomadores, servicos, tiposResp] = await Promise.all([
     api('GET', `/api/empresas/${e.id}/tomadores`),
     api('GET', `/api/empresas/${e.id}/servicos`),
+    api('GET', `/api/empresas/${e.id}/tributacao/tipos`).catch(() => ({ tipos: [] })),
   ]);
+  const tiposSaida = (tiposResp.tipos ?? []).filter((t) => t.sentido === 'SAIDA');
   const corrigindo = notaIdCorrecao ? await api('GET', `/api/notas/${notaIdCorrecao}`) : null;
   const p = corrigindo?.payload ?? {};
 
@@ -537,6 +539,11 @@ async function telaEmitir(notaIdCorrecao) {
               ${servicos.map((s) => `<option value="${s.id}" ${p.servicoId === s.id ? 'selected' : ''}>${esc(s.nome)} (${s.c_trib_nac})</option>`).join('')}
             </select>
           </label>
+          <label class="largo">Tipo de documento
+            <select name="tipoDocumentoId"><option value="">Padrão / do serviço</option>
+              ${tiposSaida.map((t) => `<option value="${t.id}" ${p.tipoDocumentoId === t.id ? 'selected' : ''}>${esc(t.nome)}${t.padrao ? ' (padrão)' : ''}</option>`).join('')}
+            </select>
+            <span class="dica">Ao escolher, alíquota, retenções, ISSQN e demais dados tributários vêm do tipo; ainda dá para ajustar abaixo.</span></label>
           <label class="largo">Descrição que sai na nota <textarea name="descricao" required maxlength="2000">${esc(p.descricao ?? '')}</textarea></label>
           <label>Competência <input type="date" name="competencia" required value="${p.competencia ?? hoje()}"></label>
           <label>Valor do serviço (R$) <input name="valor" data-num required inputmode="decimal" value="${p.valor ?? ''}"></label>
@@ -603,21 +610,31 @@ async function telaEmitir(notaIdCorrecao) {
     if (s.aliquota != null) f.aliquota.value = s.aliquota;
     if (s.valor_padrao) f.valor.value = s.valor_padrao;
     f.cTribNac.value = '';
-    // tributação padrão cadastrada no serviço
-    const t = s.tributacao;
-    const fmt = (n) => (n == null ? '' : String(n).replace('.', ','));
-    if (t) {
+    // o serviço aponta para um tipo de documento; a tributação vem dele
+    const tid = s.tipo_documento_id ?? tiposSaida.find((t) => t.padrao)?.id ?? '';
+    f.tipoDocumentoId.value = String(tid);
+    aplicarTipo();
+  };
+  const fmt = (n) => (n == null ? '' : String(n).replace('.', ','));
+  async function aplicarTipo() {
+    const tid = f.tipoDocumentoId.value;
+    if (!tid) { pCpServico = null; tpImunidadeServico = null; return; }
+    try {
+      const t = await api('GET', `/api/empresas/${e.id}/tributacao/tipos/${tid}/efetiva?data=${f.competencia.value || hoje()}`);
+      if (t.aliquota != null) f.aliquota.value = fmt(t.aliquota);
       f.tribISSQN.value = String(t.tribISSQN ?? 1);
       f.issRetido.value = String(t.issRetido ?? 1);
       for (const k of ['pPis', 'pCofins', 'pCsll', 'pIrrf']) f.elements[k].value = fmt(t[k]);
-      if (t.municipioPrestacao) f.municipioPrestacao.value = t.municipioPrestacao;
+      f.municipioPrestacao.value = t.municipioPrestacao ?? '';
       if (t.infoComplementar) f.infoComplementar.value = t.infoComplementar;
       if (f.tFed) { f.tFed.value = fmt(t.pTotTrib?.fed); f.tEst.value = fmt(t.pTotTrib?.est); f.tMun.value = fmt(t.pTotTrib?.mun); }
       pCpServico = t.pCp ?? null; tpImunidadeServico = t.tpImunidade ?? null;
       recalcular();
       sugerirBoleto?.();
-    } else { pCpServico = null; tpImunidadeServico = null; }
-  };
+    } catch (err) { $('#erro-emitir').textContent = mensagemErro(err); }
+  }
+  f.tipoDocumentoId.onchange = aplicarTipo;
+  f.competencia.addEventListener('change', () => f.tipoDocumentoId.value && aplicarTipo());
   habilitarConsultaF2($('#form-emitir'), $('#form-emitir').tomadorId, tomadores);
   ligarBuscaCliente($('#form-emitir').tomadorId, tomadores);
   $('#novo-tomador').onclick = () => formTomador(null, async (id) => { telaEmitir.prefTomador = id; await telaEmitir(notaIdCorrecao); $('#form-emitir').tomadorId.value = id; });
@@ -757,6 +774,7 @@ async function telaEmitir(notaIdCorrecao) {
       empresaId: e.id,
       tomadorId: d.tomadorId ? Number(d.tomadorId) : null,
       servicoId: d.servicoId ? Number(d.servicoId) : null,
+      tipoDocumentoId: d.tipoDocumentoId ? Number(d.tipoDocumentoId) : null,
       competencia: d.competencia, descricao: d.descricao, valor: d.valor,
       descontoIncondicionado: d.descontoIncondicionado, cTribNac: d.cTribNac, municipioPrestacao: d.municipioPrestacao,
       aliquota: d.aliquota, tribISSQN: Number(d.tribISSQN), issRetido: Number(d.issRetido), tpImunidade: Number(d.tribISSQN) === 2 ? tpImunidadeServico : null,
@@ -1112,6 +1130,8 @@ async function abaTipos() {
         <label>Perfil de tributação <select name="perfil_id"><option value="">Sem perfil</option>${perfis.map((p) => `<option value="${p.id}" ${t.perfil_id === p.id ? 'selected' : ''}>${esc(p.nome)}</option>`).join('')}</select></label>
         <label>Código de tributação nacional / CFOP padrão <input name="codigo" maxlength="6" value="${esc(t.sentido === 'ENTRADA' ? (t.cfop ?? '') : (t.c_trib_nac ?? ''))}"></label>
         <label>Indicador da operação (cIndOp) <input name="ind_op" maxlength="6" value="${esc(t.ind_op ?? '')}"></label>
+        <label>Consumidor final (indFinal) <select name="ind_final"><option value="0" ${(t.ind_final ?? 0) === 0 ? 'selected' : ''}>Não</option><option value="1" ${t.ind_final === 1 ? 'selected' : ''}>Sim</option></select></label>
+        <label>Destinatário do IBS/CBS (indDest) <select name="ind_dest"><option value="0" ${t.ind_dest === 0 ? 'selected' : ''}>O próprio tomador</option><option value="1" ${(t.ind_dest ?? 0) === 1 ? "selected" : ""}>Outro destinatário</option></select></label>
         <label>Destino financeiro <select name="destino">${Object.entries(DESTINOS).map(([k, n]) => `<option value="${k}" ${t.destino === k ? 'selected' : ''}>${n}</option>`).join('')}</select></label>
       </div>
       <label class="check"><input type="checkbox" name="gera_credito" ${t.gera_credito ? 'checked' : ''}> Gera crédito de impostos (entradas)</label>
@@ -1122,7 +1142,7 @@ async function abaTipos() {
         ev.preventDefault(); const f = ev.target; const x = lerForm(f);
         const entrada = x.sentido === 'ENTRADA';
         const corpo = { nome: x.nome, sentido: x.sentido, modelo: x.modelo, natureza: x.natureza || null, perfil_id: x.perfil_id ? Number(x.perfil_id) : null,
-          c_trib_nac: entrada ? null : (x.codigo || null), cfop: entrada ? (x.codigo || null) : null, ind_op: x.ind_op || null, gera_credito: f.gera_credito.checked, destino: x.destino, padrao: f.padrao.checked };
+          c_trib_nac: entrada ? null : (x.codigo || null), cfop: entrada ? (x.codigo || null) : null, ind_op: x.ind_op || null, ind_final: Number(x.ind_final), ind_dest: Number(x.ind_dest), gera_credito: f.gera_credito.checked, destino: x.destino, padrao: f.padrao.checked };
         try { t.id ? await api('PUT', `${base_trib()}/tipos/${t.id}`, corpo) : await api('POST', `${base_trib()}/tipos`, corpo); dlg.close(); aviso('Tipo salvo.'); abaTipos(); }
         catch (e) { $('#erro-tipo').textContent = mensagemErro(e); }
       };
@@ -1165,6 +1185,15 @@ async function abaPerfis() {
     abrirDialogo(`<form id="form-perfil" class="dialogo-largo"><h2>${p.id ? 'Editar perfil' : 'Novo perfil de tributação'}</h2>
       <label>Nome <input name="nome" required maxlength="80" value="${esc(p.nome ?? '')}" placeholder="Ex.: Serviço com retenção federal"></label>
       <label>Descrição <input name="descricao" maxlength="300" value="${esc(p.descricao ?? '')}"></label>
+      <fieldset><legend>Dados da nota (serviços)</legend><div class="grade">
+        <label>ISSQN <select name="trib_issqn">${[[1, 'Operação tributável'], [2, 'Imunidade'], [3, 'Exportação de serviço'], [4, 'Não incidência']].map(([v, n]) => `<option value="${v}" ${(p.trib_issqn ?? 1) === v ? 'selected' : ''}>${n}</option>`).join('')}</select></label>
+        <label>Tipo de imunidade <select name="tp_imunidade"><option value="">—</option>${[[0, 'Imunidade não informada'], [1, 'Patrimônio, renda ou serviços'], [2, 'Templos de qualquer culto'], [3, 'Partidos, sindicatos, educação e assistência'], [4, 'Livros, jornais e periódicos'], [5, 'Fonogramas e videofonogramas musicais']].map(([v, n]) => `<option value="${v}" ${p.tp_imunidade === v ? 'selected' : ''}>${v} — ${n}</option>`).join('')}</select></label>
+        <label>Tributos aprox. federal % <input name="p_tot_fed" data-num size="5" value="${String(p.p_tot_fed ?? '').replace('.', ',')}"></label>
+        <label>estadual % <input name="p_tot_est" data-num size="5" value="${String(p.p_tot_est ?? '').replace('.', ',')}"></label>
+        <label>municipal % <input name="p_tot_mun" data-num size="5" value="${String(p.p_tot_mun ?? '').replace('.', ',')}"></label>
+        <label>Município da prestação (IBGE) <input name="municipio_prestacao" maxlength="7" value="${esc(p.municipio_prestacao ?? '')}"></label>
+        <label class="largo">Informações complementares <textarea name="info_complementar" maxlength="2000">${esc(p.info_complementar ?? '')}</textarea></label>
+      </div></fieldset>
       <div class="rolagem"><table class="tabela"><thead><tr><th>Imposto</th><th>Alíquota %</th><th>Redução base %</th><th>Retido</th><th>CST / cClassTrib</th><th>Vigência (de / até)</th><th></th></tr></thead><tbody id="itens-perfil">${p.itens.map(linha).join('')}</tbody></table></div>
       <div class="acoes"><button type="button" id="add-item">Adicionar imposto</button></div>
       <p class="dica">Vigência em branco = vale sempre. Para o mesmo imposto em períodos diferentes, crie uma linha por período.</p>
@@ -1181,7 +1210,11 @@ async function abaPerfis() {
           imposto_codigo: tr.querySelector('[name=imposto]').value, aliquota: num(tr.querySelector('[name=aliquota]').value), reducao_base: num(tr.querySelector('[name=reducao]').value),
           retido: tr.querySelector('[name=retido]').checked, cst: tr.querySelector('[name=cst]').value.trim() || null, c_class_trib: tr.querySelector('[name=cclass]').value.trim() || null,
           vigencia_ini: tr.querySelector('[name=vini]').value || null, vigencia_fim: tr.querySelector('[name=vfim]').value || null }));
-        const dados = { nome: f.nome.value, descricao: f.descricao.value || null, itens };
+        const opt = (v) => (String(v).trim() === '' ? null : num(v));
+        const dados = { nome: f.nome.value, descricao: f.descricao.value || null, itens,
+          trib_issqn: Number(f.trib_issqn.value), tp_imunidade: Number(f.trib_issqn.value) === 2 && f.tp_imunidade.value !== '' ? Number(f.tp_imunidade.value) : null,
+          p_tot_fed: opt(f.p_tot_fed.value), p_tot_est: opt(f.p_tot_est.value), p_tot_mun: opt(f.p_tot_mun.value),
+          municipio_prestacao: f.municipio_prestacao.value.trim() || null, info_complementar: f.info_complementar.value.trim() || null };
         try { p.id ? await api('PUT', `${base_trib()}/perfis/${p.id}`, dados) : await api('POST', `${base_trib()}/perfis`, dados); dlg.close(); aviso('Perfil salvo. Use "Recalcular" na apuração para refazer meses já calculados.'); abaPerfis(); }
         catch (e) { $('#erro-perfil').textContent = mensagemErro(e); }
       };
@@ -2104,8 +2137,6 @@ function ligarBuscaNbs(f) {
 
 function formServico(s) {
   s ??= {};
-  const ib = s.ibscbs ?? {};
-  const tr = s.tributacao ?? {};
   abrirDialogo(`
     <form id="form-servico"><h2>${s.id ? 'Editar serviço' : 'Novo serviço'}</h2>
       <div class="busca-servico">
@@ -2122,53 +2153,11 @@ function formServico(s) {
         <label class="largo">Buscar NBS (lista oficial) <input id="busca-nbs" type="search" autocomplete="off" placeholder="Digite parte da descrição: asseio, limpeza, contabilidade…"></label>
         <ul id="res-nbs" class="res-serv largo" hidden></ul>
         <label>Código NBS <input name="c_nbs" maxlength="9" pattern="\\d{9}" placeholder="9 dígitos" value="${esc(s.c_nbs ?? '')}"><span class="dica">Obrigatório quando informar IBS/CBS</span></label>
-        <label>Alíquota ISSQN (%) <input name="aliquota" data-num value="${s.aliquota ?? ''}"></label>
         <label>Valor padrão (R$) <input name="valor_padrao" data-num value="${s.valor_padrao ?? ''}"></label>
       </div>
-      <fieldset style="margin-top:16px"><legend>Tributação padrão do serviço</legend>
-        <p class="dica">Estes dados vêm preenchidos na emissão sempre que o serviço for escolhido; você ainda pode alterar na nota.</p>
-        <div class="grade">
-          <label>ISSQN
-            <select name="tribISSQN">${[[1, 'Operação tributável'], [2, 'Imunidade'], [3, 'Exportação de serviço'], [4, 'Não incidência']].map(([v, n]) => `<option value="${v}" ${(tr.tribISSQN ?? 1) === v ? 'selected' : ''}>${n}</option>`).join('')}</select></label>
-          <label>Retenção do ISSQN
-            <select name="issRetido">${[[1, 'Não retido'], [2, 'Retido pelo tomador'], [3, 'Retido pelo intermediário']].map(([v, n]) => `<option value="${v}" ${(tr.issRetido ?? 1) === v ? 'selected' : ''}>${n}</option>`).join('')}</select></label>
-          <label>Tipo de imunidade <select name="tpImunidade"><option value="">—</option>${[[0, 'Imunidade não informada'], [1, 'Patrimônio, renda ou serviços (art. 150, VI, a)'], [2, 'Templos de qualquer culto'], [3, 'Partidos, sindicatos, educação e assistência social'], [4, 'Livros, jornais e periódicos'], [5, 'Fonogramas e videofonogramas musicais']].map(([v, n]) => `<option value="${v}" ${tr.tpImunidade === v ? 'selected' : ''}>${n}</option>`).join('')}</select><span class="dica">Só quando o ISSQN for “Imunidade”</span></label>
-          <label>Município da prestação (IBGE) <input name="municipioPrestacao" maxlength="7" placeholder="Vazio = município da empresa" value="${esc(tr.municipioPrestacao ?? '')}"></label>
-          <fieldset class="largo retencoes"><legend>Retenções federais padrão (%)</legend>
-            <p class="dica">Percentuais que o tomador costuma reter. Na emissão eles calculam os valores sozinhos. Deixe em branco o que não se aplica.</p>
-            <div class="grade">
-              <label>PIS (%) <input name="pPis" data-num inputmode="decimal" value="${tr.pPis ?? ''}"></label>
-              <label>COFINS (%) <input name="pCofins" data-num inputmode="decimal" value="${tr.pCofins ?? ''}"></label>
-              <label>CSLL (%) <input name="pCsll" data-num inputmode="decimal" value="${tr.pCsll ?? ''}"></label>
-              <label>IRRF (%) <input name="pIrrf" data-num inputmode="decimal" value="${tr.pIrrf ?? ''}"></label>
-              <label>INSS / CP (%) <input name="pCp" data-num inputmode="decimal" value="${tr.pCp ?? ''}"></label>
-              <label><span>&nbsp;</span><button type="button" id="ret-padrao-serv">Sugerir retenções usuais</button></label>
-            </div>
-          </fieldset>
-          <fieldset class="largo retencoes"><legend>Totais aproximados de tributos (Lei 12.741) — % </legend>
-            <div class="grade">
-              <label>Federais <input name="tFed" data-num inputmode="decimal" value="${tr.pTotTrib?.fed ?? ''}"></label>
-              <label>Estaduais <input name="tEst" data-num inputmode="decimal" value="${tr.pTotTrib?.est ?? ''}"></label>
-              <label>Municipais <input name="tMun" data-num inputmode="decimal" value="${tr.pTotTrib?.mun ?? ''}"></label>
-            </div>
-          </fieldset>
-          <label class="largo">Informações complementares padrão <textarea name="infoComplementar" maxlength="2000">${esc(tr.infoComplementar ?? '')}</textarea></label>
-        </div>
-      </fieldset>
-      <fieldset style="margin-top:16px"><legend>IBS/CBS (regime regular)</legend>
-        <p class="dica">Preencha apenas para empresas fora do Simples Nacional, conforme a tabela de classificação tributária vigente.</p>
-        <div class="grade">
-          <label><span><input type="checkbox" name="usaIbs" ${s.ibscbs ? 'checked' : ''}> Informar grupo IBS/CBS</span></label>
-          <label>Indicador da operação (cIndOp) <input name="cIndOp" maxlength="6" value="${esc(ib.cIndOp ?? '')}"></label>
-          <label>CST <input name="cst" maxlength="3" pattern="\\d{3}" placeholder="000" value="${esc(ib.cst ?? '')}"><span class="dica">3 dígitos (000 = tributação integral)</span></label>
-          <label>Classificação (cClassTrib) <input name="cClassTrib" maxlength="6" pattern="\\d{6}" placeholder="000001" value="${esc(ib.cClassTrib ?? '')}"><span class="dica">6 dígitos</span></label>
-          <label>Consumidor final <select name="indFinal"><option value="0">Não</option><option value="1" ${ib.indFinal === 1 ? 'selected' : ''}>Sim</option></select></label>
-          <label>Destinatário <select name="indDest"><option value="0">O próprio tomador</option><option value="1" ${ib.indDest === 1 ? 'selected' : ''}>Outro</option></select></label>
-        </div>
-      </fieldset>
-      <fieldset><legend>Tipo de documento</legend>
-        <label>Tributação deste serviço <select name="tipo_documento_id"><option value="">Sem tipo — usa a tributação preenchida acima</option></select></label>
-        <p class="dica">Escolhendo um tipo de saída (cadastrado em Tributação), as <strong>retenções e o ISS retido</strong> passam a vir do perfil dele, e o serviço entra na apuração assistida.</p>
+      <fieldset style="margin-top:16px"><legend>Tributação</legend>
+        <label>Tipo de documento <select name="tipo_documento_id"><option value="">Padrão da empresa</option></select></label>
+        <p class="dica">A tributação (alíquota do ISS, retenções, ISSQN, imunidade, IBS/CBS) fica em <a href="#/tributacao/tipos">Tributação</a>: aqui só se escolhe o tipo de documento. Ao emitir, tudo vem dele e ainda pode ser trocado na nota.</p>
       </fieldset>
       <p class="erro" id="erro-servico"></p>
       <div class="acoes"><button class="primario" type="submit">Salvar serviço</button>
@@ -2180,21 +2169,13 @@ function formServico(s) {
     api('GET', `/api/empresas/${estado.empresaId}/tributacao/tipos`).then((r) => {
       f.tipo_documento_id.insertAdjacentHTML('beforeend', r.tipos.filter((t) => t.sentido === 'SAIDA').map((t) => `<option value="${t.id}" ${s.tipo_documento_id === t.id ? 'selected' : ''}>${esc(t.nome)}${t.perfil_nome && t.perfil_nome !== t.nome ? ' — ' + esc(t.perfil_nome) : ''}</option>`).join(''));
     }).catch(() => { f.tipo_documento_id.closest('fieldset').hidden = true; });
-    $('#ret-padrao-serv').onclick = () => { ({ pPis: '0,65', pCofins: '3,00', pCsll: '1,00', pIrrf: '1,50' }, Object.entries({ pPis: '0,65', pCofins: '3,00', pCsll: '1,00', pIrrf: '1,50' }).forEach(([k, v]) => (f.elements[k].value = v))); };
     $('#excluir') && ($('#excluir').onclick = async () => { await api('DELETE', `/api/servicos/${s.id}`); d.close(); telaServicos(); });
     f.onsubmit = async (ev) => {
       ev.preventDefault();
       const x = lerForm(f);
       const corpo = {
         nome: x.nome, descricao: x.descricao, c_trib_nac: x.c_trib_nac, c_trib_mun: x.c_trib_mun, c_nbs: x.c_nbs,
-        aliquota: x.aliquota, valor_padrao: x.valor_padrao, tipo_documento_id: x.tipo_documento_id ? Number(x.tipo_documento_id) : null,
-        tributacao: {
-          tribISSQN: Number(x.tribISSQN), issRetido: Number(x.issRetido), tpImunidade: x.tpImunidade === '' || x.tpImunidade == null ? null : Number(x.tpImunidade),
-          pPis: x.pPis, pCofins: x.pCofins, pCsll: x.pCsll, pIrrf: x.pIrrf, pCp: x.pCp,
-          pTotTrib: { fed: x.tFed, est: x.tEst, mun: x.tMun },
-          municipioPrestacao: x.municipioPrestacao || null, infoComplementar: x.infoComplementar || null,
-        },
-        ibscbs: x.usaIbs ? { cIndOp: x.cIndOp, cst: x.cst, cClassTrib: x.cClassTrib, indFinal: Number(x.indFinal), indDest: Number(x.indDest) } : null,
+        valor_padrao: x.valor_padrao, tipo_documento_id: x.tipo_documento_id ? Number(x.tipo_documento_id) : null,
       };
       try {
         s.id ? await api('PUT', `/api/servicos/${s.id}`, corpo) : await api('POST', `/api/empresas/${estado.empresaId}/servicos`, corpo);

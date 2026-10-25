@@ -1,3 +1,4 @@
+import { tributacaoCompletaDoServico } from './tributacao.js';
 import { db } from '../db.js';
 import type { Usuario } from '../auth.js';
 import { motivoNaoUtil } from './diautil.js';
@@ -62,13 +63,14 @@ const registrar = (empresaId: number, tomadorId: number, servicoId: number, mes:
 
 /** Monta a entrada de faturamento a partir do serviço padrão do cliente e da tributação do serviço. */
 function entradaDoItem(empresa: any, tomador: any, ts: any, serv: any, mes: string, hoje: string): EntradaFaturamento {
-  const t = serv.tributacao_json ? JSON.parse(serv.tributacao_json) : {};
+  const comp = tributacaoCompletaDoServico(serv);
+  const t = comp.tributacao ?? {};
   const competencia = hoje.slice(0, 7) === mes ? hoje : `${mes}-${String(Math.min(new Date(Date.UTC(+mes.slice(0, 4), +mes.slice(5), 0)).getUTCDate(), tomador.agenda_dia ?? 1)).padStart(2, '0')}`;
   const pt = t.pTotTrib;
   return EntradaFaturamento.parse({
     empresaId: empresa.id, tomadorId: tomador.id, servicoId: serv.id, competencia,
     descricao: ts.descricao || serv.descricao, valor: ts.valor,
-    aliquota: serv.aliquota ?? undefined, tribISSQN: t.tribISSQN ?? 1, issRetido: t.issRetido ?? 1, tpImunidade: t.tribISSQN === 2 ? t.tpImunidade ?? undefined : undefined,
+    aliquota: comp.aliquota ?? undefined, tribISSQN: t.tribISSQN ?? 1, issRetido: t.issRetido ?? 1, tpImunidade: t.tribISSQN === 2 ? t.tpImunidade ?? undefined : undefined,
     municipioPrestacao: t.municipioPrestacao || undefined, infoComplementar: t.infoComplementar || undefined,
     pTotTrib: empresa.op_simp_nac === 1 && pt ? { fed: pt.fed ?? 0, est: pt.est ?? 0, mun: pt.mun ?? 0 } : undefined,
     acao: empresa.modo_emissao === 'PORTAL' ? 'BOLETO' : tomador.modo_faturamento,

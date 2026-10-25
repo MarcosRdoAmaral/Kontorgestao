@@ -13,7 +13,7 @@ import { Despesa, criarDespesa, editarDespesa, excluirDespesa, listarCategorias,
 import { Classificacao, balancoExtrato, candidatosBoleto, classificar, conciliar, excluirImportacao, extratoDoMes, importarExtrato } from './servicos/extrato.js';
 import { catalogo, gerarRelatorio, relatorioCsv, relatorioPdf } from './servicos/relatorios.js';
 import { configurarAgenda, executarItem, executarProntas, listarAgenda, pularItem, resumoAgenda } from './servicos/agenda.js';
-import { EdicaoImposto, Perfil, TipoDocumento, apuracaoAssistida, conferirTipoDoVinculo, criarPerfil, criarTipo, editarImposto, editarPerfil, editarTipo, excluirPerfil, excluirTipo, gerarPerfisDosServicos, listarImpostos, listarPerfis, listarTipos, tributacaoDoPerfil, NATUREZAS } from './servicos/tributacao.js';
+import { EdicaoImposto, Perfil, TipoDocumento, apuracaoAssistida, conferirTipoDoVinculo, criarPerfil, criarTipo, editarImposto, editarPerfil, editarTipo, excluirPerfil, excluirTipo, gerarPerfisDosServicos, listarImpostos, listarPerfis, listarTipos, tributacaoCompletaDoServico, tributacaoEfetiva, NATUREZAS } from './servicos/tributacao.js';
 import { CompraManual, OpcoesImportacao, criarCompraManual, excluirCompra, importarCompraXml, listarCompras, obterCompra, xmlDaCompra } from './servicos/compras.js';
 import { pacoteContabilidade } from './servicos/contabilidade.js';
 import { criarBackup, listarBackups } from './servicos/backup.js';
@@ -335,7 +335,7 @@ export async function rotas(app: FastifyInstance) {
       const id = Number((req.params as any).id);
       checarEmpresa(req, id);
       return db.prepare('SELECT * FROM servicos WHERE empresa_id = ? AND ativo = 1 ORDER BY nome').all(id)
-        .map((s: any) => ({ ...s, ibscbs: s.ibscbs_json ? JSON.parse(s.ibscbs_json) : null, tributacao: (s.tributacao_json || s.tipo_documento_id) ? { ...(s.tributacao_json ? JSON.parse(s.tributacao_json) : {}), ...(tributacaoDoPerfil(s.id) ?? {}) } : null }));
+        .map((s: any) => { const c = tributacaoCompletaDoServico(s); return { ...s, aliquota: c.aliquota, ibscbs: c.ibscbs, tributacao: c.tributacao }; });
     });
     api.post('/api/empresas/:id/servicos', async (req) => {
       const id = Number((req.params as any).id);
@@ -347,12 +347,15 @@ export async function rotas(app: FastifyInstance) {
     });
     api.put('/api/servicos/:id', async (req) => {
       const id = Number((req.params as any).id);
-      const s = db.prepare('SELECT empresa_id FROM servicos WHERE id = ?').get(id) as any;
+      const s = db.prepare('SELECT * FROM servicos WHERE id = ?').get(id) as any;
       if (!s) throw new ErroNegocio('Serviço não encontrado.', 404);
       checarEmpresa(req, s.empresa_id);
       const d = Servico.parse(req.body);
+      // a tributação agora vem do tipo de documento; o que está gravado no serviço só é trocado se a chamada trouxer
+      const json = (novo: unknown, atual: string | null) => (novo === undefined ? atual : novo ? JSON.stringify(novo) : null);
+      const tipo = d.tipo_documento_id === undefined ? s.tipo_documento_id : conferirTipoDoVinculo(s.empresa_id, d.tipo_documento_id, 'SAIDA');
       db.prepare(`UPDATE servicos SET nome=?, descricao=?, c_trib_nac=?, c_trib_mun=?, c_nbs=?, aliquota=?, valor_padrao=?, ibscbs_json=?, tributacao_json=?, tipo_documento_id=? WHERE id=?`)
-        .run(d.nome, d.descricao, d.c_trib_nac, d.c_trib_mun || null, d.c_nbs, d.aliquota ?? null, d.valor_padrao ?? null, d.ibscbs ? JSON.stringify(d.ibscbs) : null, d.tributacao ? JSON.stringify(d.tributacao) : null, conferirTipoDoVinculo(s.empresa_id, d.tipo_documento_id, 'SAIDA'), id);
+        .run(d.nome, d.descricao, d.c_trib_nac, d.c_trib_mun || null, d.c_nbs, d.aliquota === undefined ? s.aliquota : d.aliquota ?? null, d.valor_padrao ?? null, json(d.ibscbs, s.ibscbs_json), json(d.tributacao, s.tributacao_json), tipo, id);
       return { ok: true };
     });
     api.delete('/api/servicos/:id', async (req) => {
@@ -732,6 +735,14 @@ export async function rotas(app: FastifyInstance) {
     api.post('/api/empresas/:id/tributacao/perfis', async (req) => { const id = Number((req.params as any).id); checarEmpresa(req, id); return criarPerfil(id, Perfil.parse(req.body)); });
     api.put('/api/empresas/:id/tributacao/perfis/:pid', async (req) => { const p = req.params as any; checarEmpresa(req, Number(p.id)); editarPerfil(Number(p.id), Number(p.pid), Perfil.parse(req.body)); return { ok: true }; });
     api.delete('/api/empresas/:id/tributacao/perfis/:pid', async (req) => { const p = req.params as any; checarEmpresa(req, Number(p.id)); excluirPerfil(Number(p.id), Number(p.pid)); return { ok: true }; });
+    api.get('/api/empresas/:id/tributacao/tipos/:tid/efetiva', async (req) => {
+      const p = req.params as any; checarEmpresa(req, Number(p.id));
+      const { data } = z.object({ data: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional() }).parse(req.query);
+      const ef = tributacaoEfetiva(Number(p.tid), data);
+      const t = db.prepare('SELECT empresa_id FROM tipos_documento WHERE id = ?').get(Number(p.tid)) as any;
+      if (!ef || t.empresa_id !== Number(p.id)) throw new ErroNegocio('Tipo de documento não encontrado.', 404);
+      return ef;
+    });
     api.get('/api/empresas/:id/tributacao/tipos', async (req) => { const id = Number((req.params as any).id); checarEmpresa(req, id); return { tipos: listarTipos(id), naturezas: NATUREZAS }; });
     api.post('/api/empresas/:id/tributacao/tipos', async (req) => { const id = Number((req.params as any).id); checarEmpresa(req, id); return criarTipo(id, TipoDocumento.parse(req.body)); });
     api.put('/api/empresas/:id/tributacao/tipos/:tid', async (req) => { const p = req.params as any; checarEmpresa(req, Number(p.id)); editarTipo(Number(p.id), Number(p.tid), TipoDocumento.parse(req.body)); return { ok: true }; });

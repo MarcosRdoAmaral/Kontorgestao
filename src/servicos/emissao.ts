@@ -6,7 +6,7 @@ import { db } from '../db.js';
 import { decifrar, decifrarTexto } from '../cofre.js';
 import type { Usuario } from '../auth.js';
 import { lerPfx, type CertificadoA1 } from '../nfse/certificado.js';
-import { tributacaoDoPerfil } from './tributacao.js';
+import { tipoDoServico, tributacaoEfetiva } from './tributacao.js';
 import { montarDps, type DadosDPS } from '../nfse/dps.js';
 import { assinarXml } from '../nfse/assinatura.js';
 import { montarCancelamento } from '../nfse/evento.js';
@@ -85,6 +85,9 @@ export const EntradaEmissao = z.object({
     pPis: z.number().min(0).max(100).nullish(), pCofins: z.number().min(0).max(100).nullish(),
   }).nullish(),
   infoComplementar: z.string().max(2000).nullish(),
+  /** Tipo de documento (tributação) usado nesta nota; em branco vale o do serviço ou o padrão da empresa. */
+  tipoDocumentoId: z.number().int().nullish(),
+  ibscbs: z.object({ indFinal: z.union([z.literal(0), z.literal(1)]), cIndOp: z.string(), indDest: z.union([z.literal(0), z.literal(1)]), cst: z.string(), cClassTrib: z.string() }).nullish(),
   /** Totais aproximados de tributos (Lei 12.741) — usado por empresas não optantes do Simples. */
   pTotTrib: z.object({ fed: z.number().min(0).max(100).nullish(), est: z.number().min(0).max(100).nullish(), mun: z.number().min(0).max(100).nullish() }).nullish(),
 });
@@ -120,7 +123,7 @@ function montarDadosDps(empresa: any, e: EntradaEmissao, nDPS: number, ambiente:
 
   const cTribNac = e.cTribNac ?? servico?.c_trib_nac;
   if (!cTribNac) throw new ErroNegocio('Informe o código de tributação nacional (cTribNac) ou escolha um serviço cadastrado.');
-  const ibscbs = servico?.ibscbs_json ? JSON.parse(servico.ibscbs_json) : undefined;
+  const ibscbs = e.ibscbs ?? (servico?.ibscbs_json ? JSON.parse(servico.ibscbs_json) : undefined);
   if (ibscbs && !(e.cNBS ?? servico?.c_nbs)) {
     throw new ErroNegocio('Com IBS/CBS a Sefin exige o código NBS do serviço (E0322). Edite o serviço em Serviços e escolha o NBS na busca.');
   }
@@ -203,18 +206,27 @@ function reservarNumero(empresaId: number, ambiente: number, serie: string): num
  * (ex.: emissão automática ou agendada), aplica os percentuais do cadastro do serviço.
  */
 export function comRetencoesDoServico<T extends EntradaEmissao>(e: T): T {
-  if (!e.servicoId) return e;
-  const r = e.retencoes;
-  if (r && Object.values(r).some((v) => v != null)) return e; // o usuário já definiu as retenções na nota
-  const sv = db.prepare('SELECT tributacao_json FROM servicos WHERE id = ? AND empresa_id = ?').get(e.servicoId, e.empresaId) as any;
+  // tipo de documento: o escolhido na nota, senão o do serviço, senão o padrão de saída da empresa
+  const sv = e.servicoId ? (db.prepare('SELECT tributacao_json, tipo_documento_id FROM servicos WHERE id = ? AND empresa_id = ?').get(e.servicoId, e.empresaId) as any) : null;
+  const tipoId = e.tipoDocumentoId ?? tipoDoServico(e.servicoId, e.empresaId);
+  const ef = tipoId ? tributacaoEfetiva(tipoId, e.competencia) : null;
+  let out: T = tipoId ? { ...e, tipoDocumentoId: tipoId } : e;
   let t = sv?.tributacao_json ? JSON.parse(sv.tributacao_json) : null;
-  const doPerfil = tributacaoDoPerfil(e.servicoId); // serviço ligado a um tipo de documento: o perfil define as retenções
-  if (doPerfil) t = { ...(t ?? {}), ...doPerfil };
-  if (!t) return e;
-  const base = e.valor - (e.descontoIncondicionado ?? 0);
+  if (ef?.temPerfil) {
+    // o perfil completa o que a nota não trouxe; o grupo IBS/CBS vem sempre do tipo
+    out = { ...out, aliquota: out.aliquota ?? ef.aliquota ?? undefined, municipioPrestacao: out.municipioPrestacao ?? ef.municipioPrestacao ?? undefined,
+      infoComplementar: out.infoComplementar ?? ef.infoComplementar ?? undefined, ibscbs: out.ibscbs ?? ef.ibscbs ?? undefined,
+      pTotTrib: out.pTotTrib ?? (ef.pTotTrib ? { fed: ef.pTotTrib.fed, est: ef.pTotTrib.est, mun: ef.pTotTrib.mun } : undefined) };
+    t = { ...(t ?? {}), pPis: ef.pPis, pCofins: ef.pCofins, pCsll: ef.pCsll, pIrrf: ef.pIrrf, pCp: ef.pCp };
+  }
+  if (!e.servicoId && !ef?.temPerfil) return out;
+  const r = out.retencoes;
+  if (r && Object.values(r).some((v) => v != null)) return out; // o usuário já definiu as retenções na nota
+  if (!t) return out;
+  const base = out.valor - (out.descontoIncondicionado ?? 0);
   const v = (pc?: number | null) => (pc ? Math.round(base * pc) / 100 : null);
-  const ret = { pis: v(t.pPis), cofins: v(t.pCofins), csll: v(t.pCsll), irrf: v(t.pIrrf), cp: v(t.pCp), pPis: t.pPis ?? null, pCofins: t.pCofins ?? null };
-  return Object.values(ret).some((x) => x != null) ? { ...e, retencoes: ret } : e;
+  const ret = { pis: v(t.pPis), cofins: v(t.pCofins), csll: v(t.pCsll), irrf: v(t.irrf ?? t.pIrrf), cp: v(t.pCp), pPis: t.pPis ?? null, pCofins: t.pCofins ?? null };
+  return Object.values(ret).some((x) => x != null) ? { ...out, retencoes: ret } : out;
 }
 
 /**
@@ -237,12 +249,12 @@ export async function emitir(u: Usuario, entrada: EntradaEmissao) {
     const r = db
       .prepare(
         `INSERT INTO notas (empresa_id, tomador_id, servico_id, ambiente, serie, n_dps, id_dps, status, competencia, valor_servico, descricao,
-          tomador_nome, tomador_documento, payload_json, criado_por) VALUES (?,?,?,?,?,?,?,'PENDENTE',?,?,?,?,?,?,?)`,
+          tomador_nome, tomador_documento, payload_json, criado_por, tipo_documento_id) VALUES (?,?,?,?,?,?,?,'PENDENTE',?,?,?,?,?,?,?,?)`,
       )
       .run(
         empresa.id, entrada.tomadorId ?? null, entrada.servicoId ?? null, empresa.ambiente, empresa.serie, nDPS, id,
         entrada.competencia, entrada.valor, entrada.descricao, dados.tomador?.nome ?? null, dados.tomador?.documento ?? null,
-        JSON.stringify(entrada), u.id,
+        JSON.stringify(entrada), u.id, entrada.tipoDocumentoId ?? null,
       );
     return Number(r.lastInsertRowid);
   })();

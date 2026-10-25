@@ -32,11 +32,19 @@ export const ItemPerfil = z.object({
   c_class_trib: z.string().regex(/^\d{6}$/, 'cClassTrib tem 6 dígitos').nullish().or(z.literal('').transform(() => null)),
   vigencia_ini: Data, vigencia_fim: Data,
 }).refine((i) => !i.vigencia_ini || !i.vigencia_fim || i.vigencia_ini <= i.vigencia_fim, { message: 'A vigência inicial é maior que a final', path: ['vigencia_fim'] });
+const Pct = z.number().min(0).max(100).nullish();
 export const Perfil = z.object({
   nome: z.string().trim().min(2, 'Informe o nome do perfil').max(80),
   descricao: z.string().trim().max(300).nullish(),
+  // dados da DPS que acompanham o perfil
+  trib_issqn: z.union([z.literal(1), z.literal(2), z.literal(3), z.literal(4)]).default(1),
+  tp_imunidade: z.number().int().min(0).max(9).nullish(),
+  p_tot_fed: Pct, p_tot_est: Pct, p_tot_mun: Pct,
+  municipio_prestacao: z.string().regex(/^\d{7}$/, 'Município da prestação: código IBGE de 7 dígitos').nullish().or(z.literal('').transform(() => null)),
+  info_complementar: z.string().max(2000).nullish(),
   itens: z.array(ItemPerfil).max(40).default([]),
 });
+const colunasPerfil = (d: z.infer<typeof Perfil>) => [d.nome, d.descricao ?? null, d.trib_issqn ?? 1, d.trib_issqn === 2 ? d.tp_imunidade ?? null : null, d.p_tot_fed ?? null, d.p_tot_est ?? null, d.p_tot_mun ?? null, d.municipio_prestacao || null, d.info_complementar || null];
 
 function conferirImpostos(itens: z.infer<typeof ItemPerfil>[]) {
   const validos = new Set(listarImpostos().map((i) => i.codigo));
@@ -50,21 +58,21 @@ function gravarItens(perfilId: number, itens: z.infer<typeof ItemPerfil>[]) {
 }
 
 export function listarPerfis(empresaId: number) {
-  const perfis = db.prepare('SELECT id, nome, descricao FROM perfis_tributacao WHERE empresa_id = ? AND ativo = 1 ORDER BY nome').all(empresaId) as any[];
+  const perfis = db.prepare('SELECT id, nome, descricao, trib_issqn, tp_imunidade, p_tot_fed, p_tot_est, p_tot_mun, municipio_prestacao, info_complementar FROM perfis_tributacao WHERE empresa_id = ? AND ativo = 1 ORDER BY nome').all(empresaId) as any[];
   const itens = db.prepare('SELECT * FROM perfil_itens WHERE perfil_id = ? ORDER BY imposto_codigo, vigencia_ini');
   return perfis.map((p) => ({ ...p, itens: (itens.all(p.id) as any[]).map((i) => ({ ...i, retido: !!i.retido })),
     usos: (db.prepare('SELECT COUNT(*) AS n FROM tipos_documento WHERE perfil_id = ? AND ativo = 1').get(p.id) as any).n }));
 }
 export function criarPerfil(empresaId: number, d: z.infer<typeof Perfil>) {
   return db.transaction(() => {
-    const id = Number(db.prepare('INSERT INTO perfis_tributacao (empresa_id, nome, descricao) VALUES (?,?,?)').run(empresaId, d.nome, d.descricao ?? null).lastInsertRowid);
+    const id = Number(db.prepare('INSERT INTO perfis_tributacao (empresa_id, nome, descricao, trib_issqn, tp_imunidade, p_tot_fed, p_tot_est, p_tot_mun, municipio_prestacao, info_complementar) VALUES (?,?,?,?,?,?,?,?,?,?)').run(empresaId, ...colunasPerfil(d)).lastInsertRowid);
     gravarItens(id, d.itens);
     return { id };
   })();
 }
 export function editarPerfil(empresaId: number, id: number, d: z.infer<typeof Perfil>) {
   db.transaction(() => {
-    if (!db.prepare('UPDATE perfis_tributacao SET nome = ?, descricao = ? WHERE id = ? AND empresa_id = ? AND ativo = 1').run(d.nome, d.descricao ?? null, id, empresaId).changes) throw new ErroNegocio('Perfil não encontrado.', 404);
+    if (!db.prepare('UPDATE perfis_tributacao SET nome = ?, descricao = ?, trib_issqn = ?, tp_imunidade = ?, p_tot_fed = ?, p_tot_est = ?, p_tot_mun = ?, municipio_prestacao = ?, info_complementar = ? WHERE id = ? AND empresa_id = ? AND ativo = 1').run(...colunasPerfil(d), id, empresaId).changes) throw new ErroNegocio('Perfil não encontrado.', 404);
     gravarItens(id, d.itens);
   })();
 }
@@ -106,6 +114,8 @@ export const TipoDocumento = z.object({
   c_trib_nac: z.string().trim().max(6).nullish(),
   cfop: z.string().trim().max(4).nullish(),
   ind_op: z.string().trim().max(6).nullish(),
+  ind_final: z.union([z.literal(0), z.literal(1)]).default(0),
+  ind_dest: z.union([z.literal(0), z.literal(1)]).default(0),
   gera_credito: z.boolean().default(false),
   destino: z.enum(['RECEITA', 'DESPESA', 'NENHUM']).default('NENHUM'),
   padrao: z.boolean().default(false),
@@ -125,8 +135,8 @@ export const listarTipos = (empresaId: number) =>
 export function criarTipo(empresaId: number, d: z.infer<typeof TipoDocumento>) {
   conferirTipo(empresaId, d);
   return db.transaction(() => {
-    const id = Number(db.prepare(`INSERT INTO tipos_documento (empresa_id, nome, sentido, modelo, natureza, perfil_id, c_trib_nac, cfop, ind_op, gera_credito, destino, padrao)
-      VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`).run(empresaId, d.nome, d.sentido, d.modelo, d.natureza ?? null, d.perfil_id ?? null, d.c_trib_nac || null, d.cfop || null, d.ind_op || null, d.gera_credito ? 1 : 0, d.destino, d.padrao ? 1 : 0).lastInsertRowid);
+    const id = Number(db.prepare(`INSERT INTO tipos_documento (empresa_id, nome, sentido, modelo, natureza, perfil_id, c_trib_nac, cfop, ind_op, ind_final, ind_dest, gera_credito, destino, padrao)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(empresaId, d.nome, d.sentido, d.modelo, d.natureza ?? null, d.perfil_id ?? null, d.c_trib_nac || null, d.cfop || null, d.ind_op || null, d.ind_final ?? 0, d.ind_dest ?? 0, d.gera_credito ? 1 : 0, d.destino, d.padrao ? 1 : 0).lastInsertRowid);
     exclusivoPadrao(empresaId, id, d);
     return { id };
   })();
@@ -134,8 +144,8 @@ export function criarTipo(empresaId: number, d: z.infer<typeof TipoDocumento>) {
 export function editarTipo(empresaId: number, id: number, d: z.infer<typeof TipoDocumento>) {
   conferirTipo(empresaId, d);
   db.transaction(() => {
-    if (!db.prepare(`UPDATE tipos_documento SET nome=?, sentido=?, modelo=?, natureza=?, perfil_id=?, c_trib_nac=?, cfop=?, ind_op=?, gera_credito=?, destino=?, padrao=? WHERE id=? AND empresa_id=? AND ativo=1`)
-      .run(d.nome, d.sentido, d.modelo, d.natureza ?? null, d.perfil_id ?? null, d.c_trib_nac || null, d.cfop || null, d.ind_op || null, d.gera_credito ? 1 : 0, d.destino, d.padrao ? 1 : 0, id, empresaId).changes) throw new ErroNegocio('Tipo de documento não encontrado.', 404);
+    if (!db.prepare(`UPDATE tipos_documento SET nome=?, sentido=?, modelo=?, natureza=?, perfil_id=?, c_trib_nac=?, cfop=?, ind_op=?, ind_final=?, ind_dest=?, gera_credito=?, destino=?, padrao=? WHERE id=? AND empresa_id=? AND ativo=1`)
+      .run(d.nome, d.sentido, d.modelo, d.natureza ?? null, d.perfil_id ?? null, d.c_trib_nac || null, d.cfop || null, d.ind_op || null, d.ind_final ?? 0, d.ind_dest ?? 0, d.gera_credito ? 1 : 0, d.destino, d.padrao ? 1 : 0, id, empresaId).changes) throw new ErroNegocio('Tipo de documento não encontrado.', 404);
     exclusivoPadrao(empresaId, id, d);
   })();
 }
@@ -158,42 +168,97 @@ export function conferirTipoDoVinculo(empresaId: number, tipoId: number | null |
 }
 
 /**
- * Retenções e ISS retido que o perfil do tipo de documento define para um serviço.
- * Devolve null quando o serviço não tem tipo/perfil (vale a tributação cadastrada no próprio serviço).
+ * Tributação efetiva de um tipo de documento numa data: tudo o que a DPS precisa vir do perfil
+ * (ISSQN, alíquota, retenções, imunidade, totais aproximados, município, informações e o grupo IBS/CBS).
  */
-export function tributacaoDoPerfil(servicoId: number, data = hojeBr()) {
-  const r = db.prepare(`SELECT t.perfil_id FROM servicos s JOIN tipos_documento t ON t.id = s.tipo_documento_id WHERE s.id = ? AND t.ativo = 1`).get(servicoId) as any;
-  if (!r?.perfil_id) return null;
-  const it = itensVigentes(r.perfil_id, data);
-  const ret = (cod: string) => it.find((x) => x.imposto_codigo === cod && x.retido)?.aliquota ?? null;
-  return { pPis: ret('PIS'), pCofins: ret('COFINS'), pCsll: ret('CSLL'), pIrrf: ret('IRRF'), pCp: ret('INSS'), issRetido: it.some((x) => x.imposto_codigo === 'ISS' && x.retido) ? 2 : 1 };
+export function tributacaoEfetiva(tipoId: number, data = hojeBr()) {
+  const t = db.prepare('SELECT * FROM tipos_documento WHERE id = ? AND ativo = 1').get(tipoId) as any;
+  if (!t) return null;
+  const p = t.perfil_id ? (db.prepare('SELECT * FROM perfis_tributacao WHERE id = ? AND ativo = 1').get(t.perfil_id) as any) : null;
+  const it = p ? itensVigentes(p.id, data) : [];
+  const item = (cod: string) => it.filter((x) => x.imposto_codigo === cod).sort((a, b) => (b.vigencia_ini ?? '').localeCompare(a.vigencia_ini ?? ''))[0];
+  const ret = (cod: string) => { const x = item(cod); return x?.retido ? x.aliquota : null; };
+  const iss = item('ISS');
+  const ibsItem = ['CBS', 'IBS_UF', 'IBS_MUN'].map(item).find((x) => x?.cst && x?.c_class_trib);
+  const temTot = p && (p.p_tot_fed != null || p.p_tot_est != null || p.p_tot_mun != null);
+  return {
+    tipoId: t.id as number, tipoNome: t.nome as string, cTribNac: (t.c_trib_nac as string | null) ?? null, temPerfil: !!p,
+    aliquota: (iss?.aliquota as number | undefined) ?? null,
+    tribISSQN: (p?.trib_issqn ?? 1) as 1 | 2 | 3 | 4,
+    tpImunidade: (p?.trib_issqn === 2 ? p?.tp_imunidade : null) as number | null,
+    issRetido: (iss?.retido ? 2 : 1) as 1 | 2,
+    pPis: ret('PIS'), pCofins: ret('COFINS'), pCsll: ret('CSLL'), pIrrf: ret('IRRF'), pCp: ret('INSS'),
+    pTotTrib: temTot ? { fed: p.p_tot_fed, est: p.p_tot_est, mun: p.p_tot_mun } : null,
+    municipioPrestacao: (p?.municipio_prestacao as string | null) ?? null,
+    infoComplementar: (p?.info_complementar as string | null) ?? null,
+    ibscbs: ibsItem && t.ind_op ? { indFinal: t.ind_final as 0 | 1, cIndOp: String(t.ind_op), indDest: t.ind_dest as 0 | 1, cst: ibsItem.cst as string, cClassTrib: ibsItem.c_class_trib as string } : null,
+  };
 }
 
-/** Cria perfis a partir da tributação já cadastrada nos serviços (retenções) e vincula cada serviço. Idempotente. */
+/** Tipo de documento que vale para um serviço (o dele, ou o padrão de saída da empresa). */
+export function tipoDoServico(servicoId: number | null | undefined, empresaId: number): number | null {
+  const sv = servicoId ? (db.prepare('SELECT tipo_documento_id FROM servicos WHERE id = ?').get(servicoId) as any) : null;
+  return sv?.tipo_documento_id ?? tipoPadrao(empresaId, 'SAIDA')?.id ?? null;
+}
+
+/**
+ * Tributação completa de um serviço no formato que a emissão e as telas já usam:
+ * o que vem do tipo/perfil prevalece sobre o que ficou gravado no próprio serviço (cadastros antigos).
+ */
+export function tributacaoCompletaDoServico(sv: any, data = hojeBr()) {
+  const antiga = sv.tributacao_json ? JSON.parse(sv.tributacao_json) : null;
+  const ef = sv.tipo_documento_id ? tributacaoEfetiva(sv.tipo_documento_id, data) : null;
+  if (!ef?.temPerfil) return { tributacao: antiga, aliquota: sv.aliquota ?? null, ibscbs: sv.ibscbs_json ? JSON.parse(sv.ibscbs_json) : null, tipo: ef };
+  return {
+    tributacao: { tribISSQN: ef.tribISSQN, issRetido: ef.issRetido, tpImunidade: ef.tpImunidade, pPis: ef.pPis, pCofins: ef.pCofins, pCsll: ef.pCsll, pIrrf: ef.pIrrf, pCp: ef.pCp,
+      pTotTrib: ef.pTotTrib, municipioPrestacao: ef.municipioPrestacao, infoComplementar: ef.infoComplementar },
+    aliquota: ef.aliquota ?? sv.aliquota ?? null,
+    ibscbs: ef.ibscbs ?? (sv.ibscbs_json ? JSON.parse(sv.ibscbs_json) : null),
+    tipo: ef,
+  };
+}
+
+/**
+ * Cria perfis e tipos a partir da tributação que estava gravada dentro de cada serviço (alíquota do ISS, retenções,
+ * ISSQN, imunidade, totais aproximados, município, informações e grupo IBS/CBS) e vincula o serviço ao tipo. Idempotente.
+ */
 export function gerarPerfisDosServicos(empresaId: number) {
-  const servs = db.prepare('SELECT id, nome, aliquota, tributacao_json FROM servicos WHERE empresa_id = ? AND ativo = 1 AND tipo_documento_id IS NULL').all(empresaId) as any[];
+  const servs = db.prepare('SELECT id, aliquota, tributacao_json, ibscbs_json FROM servicos WHERE empresa_id = ? AND ativo = 1 AND tipo_documento_id IS NULL').all(empresaId) as any[];
   let criados = 0;
-  { // cada perfil/tipo já é gravado em sua própria transação; refazer a operação é seguro (idempotente)
-    const cache = new Map<string, number>();
-    for (const sv of servs) {
-      const t = sv.tributacao_json ? JSON.parse(sv.tributacao_json) : {};
-      const itens: z.infer<typeof ItemPerfil>[] = [];
-      const add = (cod: string, aliq: any, retido: boolean) => { if (aliq != null && Number(aliq) > 0) itens.push({ imposto_codigo: cod, aliquota: Number(aliq), reducao_base: 0, retido, cst: null, c_class_trib: null, vigencia_ini: null, vigencia_fim: null }); };
-      add('ISS', sv.aliquota, t.issRetido === 2 || t.issRetido === 3);
-      add('PIS', t.pPis, true); add('COFINS', t.pCofins, true); add('CSLL', t.pCsll, true); add('IRRF', t.pIrrf, true); add('INSS', t.pCp, true);
-      if (!itens.length) continue;
-      const chave = JSON.stringify(itens);
-      let tipoId = cache.get(chave);
-      if (!tipoId) {
-        const nome = `Serviço — ${itens.map((i) => i.imposto_codigo + (i.retido ? ' ret.' : '')).join(', ')}`.slice(0, 80);
-        const perfil = criarPerfil(empresaId, { nome, descricao: 'Criado a partir da tributação cadastrada nos serviços.', itens });
-        tipoId = criarTipo(empresaId, { nome, sentido: 'SAIDA', modelo: 'NFSE', natureza: 'Serviço', perfil_id: perfil.id, gera_credito: false, destino: 'RECEITA', padrao: false }).id;
-        cache.set(chave, tipoId); criados++;
-      }
-      db.prepare('UPDATE servicos SET tipo_documento_id = ? WHERE id = ?').run(tipoId, sv.id);
+  const cache = new Map<string, number>(); // cada perfil/tipo é gravado em sua própria transação; refazer é seguro
+  for (const sv of servs) {
+    const t = sv.tributacao_json ? JSON.parse(sv.tributacao_json) : {};
+    const ib = sv.ibscbs_json ? JSON.parse(sv.ibscbs_json) : null;
+    const itens: z.infer<typeof ItemPerfil>[] = [];
+    const add = (cod: string, aliq: any, retido: boolean, extra: Partial<z.infer<typeof ItemPerfil>> = {}) => {
+      if (aliq != null && Number(aliq) >= 0 && (Number(aliq) > 0 || extra.cst)) itens.push({ imposto_codigo: cod, aliquota: Number(aliq), reducao_base: 0, retido, cst: null, c_class_trib: null, vigencia_ini: null, vigencia_fim: null, ...extra });
+    };
+    add('ISS', sv.aliquota, t.issRetido === 2 || t.issRetido === 3);
+    add('PIS', t.pPis, true); add('COFINS', t.pCofins, true); add('CSLL', t.pCsll, true); add('IRRF', t.pIrrf, true); add('INSS', t.pCp, true);
+    if (ib) for (const cod of ['IBS_UF', 'IBS_MUN', 'CBS']) add(cod, 0, false, { cst: ib.cst, c_class_trib: ib.cClassTrib });
+    const cab = { trib_issqn: (t.tribISSQN ?? 1) as 1 | 2 | 3 | 4, tp_imunidade: t.tpImunidade ?? null, p_tot_fed: t.pTotTrib?.fed ?? null, p_tot_est: t.pTotTrib?.est ?? null, p_tot_mun: t.pTotTrib?.mun ?? null,
+      municipio_prestacao: t.municipioPrestacao || null, info_complementar: t.infoComplementar || null };
+    const vazio = !itens.length && cab.trib_issqn === 1 && !cab.p_tot_fed && !cab.p_tot_est && !cab.p_tot_mun && !cab.municipio_prestacao && !cab.info_complementar;
+    if (vazio) continue;
+    const chave = JSON.stringify([itens, cab, ib]);
+    let tipoId = cache.get(chave);
+    if (!tipoId) {
+      const partes = [...new Set(itens.map((i) => i.imposto_codigo + (i.retido ? ' ret.' : '')))];
+      const nome = `Serviço — ${partes.length ? partes.join(', ') : 'tributação padrão'}${cab.trib_issqn !== 1 ? ` (ISSQN ${cab.trib_issqn})` : ''}`.slice(0, 80);
+      const perfil = criarPerfil(empresaId, { nome, descricao: 'Criado a partir da tributação que estava cadastrada nos serviços.', ...cab, itens });
+      tipoId = criarTipo(empresaId, { nome, sentido: 'SAIDA', modelo: 'NFSE', natureza: 'Serviço', perfil_id: perfil.id, ind_op: ib?.cIndOp ?? null, ind_final: ib?.indFinal ?? 0, ind_dest: ib?.indDest ?? 0, gera_credito: false, destino: 'RECEITA', padrao: false }).id;
+      cache.set(chave, tipoId); criados++;
     }
+    db.prepare('UPDATE servicos SET tipo_documento_id = ? WHERE id = ?').run(tipoId, sv.id);
   }
   return { servicos: servs.length, perfisCriados: criados };
+}
+
+/** Na inicialização: converte a tributação antiga dos serviços de todas as empresas (só mexe no que ainda não tem tipo). */
+export function migrarServicosLegados() {
+  try {
+    for (const e of db.prepare('SELECT DISTINCT empresa_id FROM servicos WHERE ativo = 1 AND tipo_documento_id IS NULL AND (tributacao_json IS NOT NULL OR ibscbs_json IS NOT NULL)').all() as { empresa_id: number }[]) gerarPerfisDosServicos(e.empresa_id);
+  } catch (err) { console.error('Conversão da tributação dos serviços:', err); }
 }
 
 // ---------------------------------------------------------------------------
@@ -229,7 +294,7 @@ export function prepararCompetencia(empresaId: number, mes: string, recalcular =
   const semTipo = { notas: 0, compras: 0 };
   db.transaction(() => {
     if (recalcular) db.prepare("DELETE FROM documento_tributos WHERE empresa_id = ? AND competencia = ?").run(empresaId, mes);
-    const notas = db.prepare(`SELECT n.id, n.competencia, n.valor_servico, n.xml_nfse, s.tipo_documento_id FROM notas n LEFT JOIN servicos s ON s.id = n.servico_id
+    const notas = db.prepare(`SELECT n.id, n.competencia, n.valor_servico, n.xml_nfse, COALESCE(n.tipo_documento_id, s.tipo_documento_id) AS tipo_documento_id FROM notas n LEFT JOIN servicos s ON s.id = n.servico_id
       WHERE n.empresa_id = ? AND n.status = 'AUTORIZADA' AND substr(n.competencia,1,7) = ?`).all(empresaId, mes) as any[];
     for (const n of notas) {
       const tipo = n.tipo_documento_id ? (db.prepare('SELECT id, perfil_id FROM tipos_documento WHERE id = ?').get(n.tipo_documento_id) as any) : padSaida;

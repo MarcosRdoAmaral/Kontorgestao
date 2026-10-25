@@ -566,6 +566,18 @@ const migracoes: string[] = [
     UNIQUE (origem, documento_id, imposto_codigo, fonte)
   );
   CREATE INDEX idx_doc_tributos ON documento_tributos(empresa_id, competencia);`,
+  // 20: o perfil passa a carregar também os dados da DPS (ISSQN, imunidade, totais aproximados, município, informações);
+  // o tipo de documento carrega o indicador IBS/CBS; a nota guarda o tipo usado
+  `ALTER TABLE perfis_tributacao ADD COLUMN trib_issqn INTEGER NOT NULL DEFAULT 1;
+  ALTER TABLE perfis_tributacao ADD COLUMN tp_imunidade INTEGER;
+  ALTER TABLE perfis_tributacao ADD COLUMN p_tot_fed REAL;
+  ALTER TABLE perfis_tributacao ADD COLUMN p_tot_est REAL;
+  ALTER TABLE perfis_tributacao ADD COLUMN p_tot_mun REAL;
+  ALTER TABLE perfis_tributacao ADD COLUMN municipio_prestacao TEXT;
+  ALTER TABLE perfis_tributacao ADD COLUMN info_complementar TEXT;
+  ALTER TABLE tipos_documento ADD COLUMN ind_final INTEGER NOT NULL DEFAULT 0;
+  ALTER TABLE tipos_documento ADD COLUMN ind_dest INTEGER NOT NULL DEFAULT 0;
+  ALTER TABLE notas ADD COLUMN tipo_documento_id INTEGER REFERENCES tipos_documento(id);`,
 ];
 
 export function migrar(): void {

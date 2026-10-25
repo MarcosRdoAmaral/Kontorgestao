@@ -4,7 +4,7 @@
  * aqui (e a data/versão em MANUAL_VERSAO) antes de publicar a versão.
  * `corpo` é HTML escrito à mão (não recebe dados de usuário).
  */
-export const MANUAL_VERSAO = '3.3.0';
+export const MANUAL_VERSAO = '3.4.0';
 
 export const MANUAL = [
   {
@@ -58,7 +58,7 @@ export const MANUAL = [
     corpo: `
       <p>Em <strong>Serviços</strong> cadastre cada serviço prestado pela empresa selecionada: descrição que sai na nota, código de tributação nacional (cTribNac), alíquota e, se for o caso, NBS.</p>
       <h3>Tributação do serviço</h3>
-      <p>No cadastro há a seção de tributação, onde se configura o que se repete em toda nota desse serviço: indicador de operação, código de classificação tributária, ISS retido, <strong>retenções federais</strong> (PIS, COFINS, CSLL, IRRF, INSS) e demais campos. Ao escolher o serviço na emissão, esses valores já preenchem o formulário e seguem para o XML da DPS.</p>
+      <p>O serviço <strong>não guarda mais</strong> alíquotas nem retenções: ele apenas aponta para um <strong>tipo de documento</strong> (campo <em>Tributação &gt; Tipo de documento</em>). Alíquota do ISS, ISSQN, imunidade, retenções (PIS, COFINS, CSLL, IRRF, INSS), totais aproximados, município e IBS/CBS ficam no perfil ligado ao tipo, em <strong>Tributação</strong>. Sem tipo, vale o tipo padrão de saída da empresa. Serviços antigos foram convertidos automaticamente em perfil e tipo.</p>
       <p class="dica">Confira sempre o enquadramento com o contador. O sistema só repete o que foi cadastrado.</p>`,
   },
   {
@@ -67,7 +67,8 @@ export const MANUAL = [
       <ol>
         <li>Abra <strong>Emitir nota</strong> (confira a empresa no alto do menu).</li>
         <li><strong>Cliente:</strong> comece a <strong>digitar o nome</strong> (ou o CNPJ/CPF): a lista se filtra enquanto você escreve; use as setas e Enter, ou clique no cliente. Apagar o campo volta para <em>Consumidor não identificado</em>. <kbd>F2</kbd> abre a consulta completa, em janela. Também dá para cadastrar um cliente novo ali mesmo.</li>
-        <li><strong>Serviço:</strong> ao escolher, descrição, código, alíquotas e retenções do cadastro são preenchidos.</li>
+        <li><strong>Serviço:</strong> ao escolher, descrição e código são preenchidos e o <strong>tipo de documento</strong> do serviço é selecionado.</li>
+        <li><strong>Tipo de documento:</strong> traz alíquota, ISSQN, retenções, totais aproximados, município e informações complementares do perfil (na data da competência). Trocar o tipo refaz o preenchimento; os campos ainda podem ser ajustados na nota.</li>
         <li>Informe competência, valor e, se precisar, ajuste descrição e retenções.</li>
         <li>Se o cliente fatura com boleto, defina o vencimento (já sugerido pela regra do cliente).</li>
         <li><strong>Emitir.</strong> O sistema monta a DPS, assina com o certificado e envia à Sefin.</li>
