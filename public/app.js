@@ -337,6 +337,8 @@ async function iniciar() {
   $('#app').hidden = false;
   $('#nome-usuario').textContent = `${estado.usuario.nome} (${estado.usuario.login})`;
   document.querySelectorAll('[data-modulo]').forEach((a) => (a.hidden = !estado.usuario.modulos.includes(a.dataset.modulo)));
+  // quem não tem o acesso a Relatórios ainda enxerga o manual, por um item próprio no menu
+  $('#menu-doc').hidden = estado.usuario.modulos.includes('relatorios');
   if (estado.usuario.trocar_senha) { $('#app').hidden = true; return trocarSenha({ obrigatoria: true }); }
   await carregarEmpresas();
   atualizarLicenca();
@@ -357,10 +359,11 @@ const rotas = {
 
 function rotear() {
   const [, nome = 'painel', param] = location.hash.split('/');
-  document.querySelectorAll('nav a').forEach((a) => a.classList.toggle('ativo', a.getAttribute('href') === `#/${nome}`));
+  document.querySelectorAll('nav a').forEach((a) => a.classList.toggle('ativo', a.getAttribute('href') === `#/${nome}` || (a.id === 'menu-doc' && nome === 'relatorios' && param === 'documentacao')));
+  const manual = nome === 'relatorios' && param === 'documentacao'; // o manual é de todos os usuários
   if (['usuarios', 'email', 'backup', 'licenca'].includes(nome)) { location.hash = '#/config/' + nome; return; } // endereços antigos
-  if (!telaPermitida(nome)) { conteudo.innerHTML = '<div class="vazio"><p>Seu usuário não tem acesso a esta funcionalidade.</p></div>'; return; }
-  const precisaEmpresa = !['painel', 'empresas', 'nota', 'config'].includes(nome);
+  if (!manual && !telaPermitida(nome)) { conteudo.innerHTML = '<div class="vazio"><p>Seu usuário não tem acesso a esta funcionalidade.</p></div>'; return; }
+  const precisaEmpresa = !manual && !['painel', 'empresas', 'nota', 'config'].includes(nome);
   if (precisaEmpresa && !empresa()) {
     conteudo.innerHTML = `<div class="vazio"><p>Cadastre a primeira empresa para começar a emitir.</p>
       ${estado.usuario.papel !== 'cliente' ? '<a href="#/empresas">Cadastrar empresa</a>' : ''}</div>`;
