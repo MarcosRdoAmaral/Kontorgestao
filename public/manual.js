@@ -4,7 +4,7 @@
  * aqui (e a data/versão em MANUAL_VERSAO) antes de publicar a versão.
  * `corpo` é HTML escrito à mão (não recebe dados de usuário).
  */
-export const MANUAL_VERSAO = '3.4.0';
+export const MANUAL_VERSAO = '3.5.0';
 
 export const MANUAL = [
   {
@@ -140,6 +140,25 @@ export const MANUAL = [
       <p><strong>Lançar compra manual</strong> registra uma compra sem XML (cupom, recibo): fornecedor, data, valor, vencimento e categoria.</p>
       <h3>Detalhe, XML e exclusão</h3>
       <p>Clique na compra para ver itens, totais e parcelas e baixar o XML. <strong>Excluir compra</strong> (permissão <em>Excluir registros</em>) apaga também as despesas que ela gerou. O relatório <em>Compras (NF-e de entrada)</em> está em Relatórios. O acesso a Compras é liberado por usuário em Configurações &gt; Usuários e acessos.</p>`,
+  },
+  {
+    id: 'estoque', titulo: 'Estoque de insumos', resumo: 'Material de expediente e insumos: entradas, baixas e avisos no topo.',
+    corpo: `
+      <p>Em <strong>Estoque</strong> ficam os insumos usados na prestação dos serviços (papel, canetas, toner etc.). O saldo de cada item é a soma das entradas, baixas e ajustes.</p>
+      <h3>Cadastrar e dar entrada</h3>
+      <ul>
+        <li><strong>Novo item:</strong> nome, unidade, categoria e <em>estoque mínimo</em> (quando o saldo chegar a esse valor o sistema avisa para comprar). Dá para informar um saldo inicial.</li>
+        <li><strong>Pela compra:</strong> em <em>Compras</em>, abra a NF-e e clique em <strong>Lançar no estoque</strong>. Marque os itens que são insumos, ajuste nome/quantidade se precisar; itens com o mesmo nome somam no que já existe. Um item da nota só entra uma vez.</li>
+        <li><strong>Entrada manual:</strong> botão <em>Entrada</em> na linha do item.</li>
+      </ul>
+      <h3>Dar baixa</h3>
+      <p>Use <strong>Baixa</strong> sempre que retirar material, informando a quantidade, a data e, se quiser, onde foi usado. Não é possível baixar mais que o saldo. Se a contagem física diferir, use <strong>Contagem</strong> (inventário) e informe o saldo real: o sistema registra o ajuste.</p>
+      <h3>Avisos no topo</h3>
+      <ul>
+        <li><strong>Precisa comprar</strong> (vermelho): saldo igual ou abaixo do mínimo, ou item zerado.</li>
+        <li><strong>Comprado e sem uso</strong> (amarelo): entrou no estoque e está há 30 dias ou mais sem nenhuma baixa.</li>
+      </ul>
+      <p>O aviso aparece em todas as telas para quem tem a permissão <em>Estoque de insumos</em> e pode ser dispensado com o ×; volta se a situação mudar. O <strong>Histórico</strong> de cada item mostra todos os lançamentos.</p>`,
   },
   {
     id: 'tributacao', titulo: 'Tributação e apuração assistida', resumo: 'Impostos, perfis, tipos de documento e comparação com o que as notas declaram.',

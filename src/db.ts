@@ -578,6 +578,34 @@ const migracoes: string[] = [
   ALTER TABLE tipos_documento ADD COLUMN ind_final INTEGER NOT NULL DEFAULT 0;
   ALTER TABLE tipos_documento ADD COLUMN ind_dest INTEGER NOT NULL DEFAULT 0;
   ALTER TABLE notas ADD COLUMN tipo_documento_id INTEGER REFERENCES tipos_documento(id);`,
+  // 21: estoque básico de insumos (material de expediente etc.): itens e movimentos (saldo = soma dos movimentos)
+  `CREATE TABLE estoque_itens (
+    id INTEGER PRIMARY KEY,
+    empresa_id INTEGER NOT NULL REFERENCES empresas(id),
+    nome TEXT NOT NULL,
+    unidade TEXT NOT NULL DEFAULT 'un',
+    categoria TEXT,
+    estoque_minimo REAL NOT NULL DEFAULT 0,
+    observacao TEXT,
+    ativo INTEGER NOT NULL DEFAULT 1,
+    criado_em TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+  CREATE INDEX idx_estoque_itens ON estoque_itens(empresa_id, ativo);
+  CREATE TABLE estoque_movimentos (
+    id INTEGER PRIMARY KEY,
+    empresa_id INTEGER NOT NULL REFERENCES empresas(id),
+    item_id INTEGER NOT NULL REFERENCES estoque_itens(id) ON DELETE CASCADE,
+    tipo TEXT NOT NULL CHECK (tipo IN ('ENTRADA','SAIDA','AJUSTE')),
+    quantidade REAL NOT NULL,
+    custo_unitario REAL,
+    data TEXT NOT NULL,
+    compra_item_id INTEGER REFERENCES compra_itens(id) ON DELETE SET NULL,
+    observacao TEXT,
+    usuario_id INTEGER,
+    criado_em TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+  CREATE INDEX idx_estoque_mov ON estoque_movimentos(item_id, data);
+  CREATE UNIQUE INDEX idx_estoque_mov_compra ON estoque_movimentos(compra_item_id) WHERE compra_item_id IS NOT NULL;`,
 ];
 
 export function migrar(): void {

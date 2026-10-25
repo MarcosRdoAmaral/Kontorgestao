@@ -66,6 +66,16 @@ nav a { color: var(--menu); text-decoration: none; padding: 9px 11px; border-rad
 nav a:hover { background: var(--superficie-2); }
 nav a.ativo { background: var(--laranja-fundo); color: var(--laranja); border-left-color: var(--laranja); font-weight: 600; }
 .usuario { margin-top: auto; font-size: .85rem; display: flex; justify-content: space-between; align-items: center; color: var(--tinta-2); gap: 8px; }
+.coluna-principal { min-width: 0; }
+#avisos-topo:not(:empty) { padding: 16px clamp(16px, 4vw, 44px) 0; max-width: 1200px; }
+#avisos-topo .banner { margin-bottom: 8px; display: flex; gap: 12px; align-items: baseline; }
+#avisos-topo .banner .texto { flex: 1; }
+#avisos-topo .banner.perigo { background: var(--vermelho-fundo); color: var(--vermelho); border: 1px solid currentColor; }
+#avisos-topo .banner button { padding: 2px 8px; }
+.carimbo.COMPRAR { color: var(--vermelho); background: var(--vermelho-fundo); }
+.carimbo.PARADO { color: var(--ambar); background: var(--ambar-fundo); }
+.carimbo.OK { color: var(--verde); background: var(--verde-fundo); }
+.carimbo.ZERADO { color: var(--tinta-2); background: var(--cinza-fundo); }
 main { padding: 28px clamp(16px, 4vw, 44px); max-width: 1200px; width: 100%; outline: none; }
 @media (max-width: 820px) {
   .app { grid-template-columns: 1fr; }
@@ -276,3 +286,6 @@ label.check input { width: auto; }
 /* Tributação */
 #dialogo:has(.dialogo-largo) { width: min(1100px, 96vw); max-width: none; }
 .dialogo-largo td input, .dialogo-largo td select { width: 100%; min-width: 0; }
+
+.tabela.estoque .acoes-linha { white-space: normal; min-width: 260px; }
+.tabela.estoque .acoes-linha button { padding: 4px 10px; margin: 2px; }

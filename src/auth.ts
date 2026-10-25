@@ -9,7 +9,7 @@ export type Tipo = 'adm' | 'normal';
 /** Módulos que podem ser liberados por usuário. Configurações (usuários, e-mail, backup, licença) é sempre só do adm. */
 export const MODULOS = {
   painel: 'Painel do mês', emitir: 'Emitir nota', notas: 'Notas emitidas', cobrancas: 'Cobranças',
-  banco: 'Dados bancários', despesas: 'Despesas e balanço', tomadores: 'Clientes', servicos: 'Serviços', empresas: 'Empresas', relatorios: 'Relatórios', compras: 'Compras', tributacao: 'Tributação e apuração',
+  banco: 'Dados bancários', despesas: 'Despesas e balanço', tomadores: 'Clientes', servicos: 'Serviços', empresas: 'Empresas', relatorios: 'Relatórios', compras: 'Compras', tributacao: 'Tributação e apuração', estoque: 'Estoque de insumos',
   excluir: 'Excluir registros',
 } as const;
 export type Modulo = keyof typeof MODULOS;
@@ -71,6 +71,7 @@ const REGRAS: Regra[] = [
   { m: 'GET', r: /^\/api\/empresas\/\d+\/tributacao\/tipos(\/\d+\/efetiva)?$/, mod: ['tributacao', 'servicos', 'compras', 'emitir'] },
   { r: /^\/api\/tributacao\/impostos(\/[A-Z_]+)?$|^\/api\/empresas\/\d+\/tributacao\/.*$/, mod: ['tributacao'] },
   { r: /^\/api\/empresas\/\d+\/compras(\/importar-xml)?$|^\/api\/compras\/\d+(\/xml)?$/, mod: ['compras'] },
+  { r: /^\/api\/empresas\/\d+\/estoque(\/.*)?$|^\/api\/estoque\/(itens|movimentos)\/\d+(\/movimentos)?$|^\/api\/compras\/\d+\/estoque$/, mod: ['estoque'] },
   { m: 'GET', r: /^\/api\/empresas\/\d+\/feriados$/, mod: ['banco', 'empresas', 'emitir'] },
   { r: /^\/api\/empresas\/\d+\/feriados$/, mod: ['banco', 'empresas'] },
 ];

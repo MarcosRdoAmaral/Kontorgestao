@@ -396,13 +396,13 @@ async function iniciar() {
 
 /** A tela pertence a algum módulo liberado para o usuário? (o servidor confere de novo em cada chamada) */
 function telaPermitida(nome) {
-  const modulo = { painel: 'painel', emitir: 'emitir', notas: 'notas', nota: 'notas', cobrancas: 'cobrancas', banco: 'empresas', despesas: 'despesas', compras: 'compras', tributacao: 'tributacao', extrato: 'despesas', agenda: 'emitir', relatorios: 'relatorios', tomadores: 'tomadores', servicos: 'servicos', empresas: 'empresas' }[nome];
+  const modulo = { painel: 'painel', emitir: 'emitir', notas: 'notas', nota: 'notas', cobrancas: 'cobrancas', banco: 'empresas', despesas: 'despesas', compras: 'compras', estoque: 'estoque', tributacao: 'tributacao', extrato: 'despesas', agenda: 'emitir', relatorios: 'relatorios', tomadores: 'tomadores', servicos: 'servicos', empresas: 'empresas' }[nome];
   return nome === 'config' || (modulo && estado.usuario.modulos.includes(modulo));
 }
 
 const rotas = {
   painel: telaPainel, emitir: telaEmitir, notas: telaNotas, nota: telaNota,
-  cobrancas: telaCobrancas, banco: telaBanco, despesas: telaDespesas, compras: telaCompras, tributacao: telaTributacao, extrato: telaExtrato, agenda: telaAgenda, relatorios: telaRelatorios, tomadores: telaTomadores, servicos: telaServicos, empresas: telaEmpresas, config: telaConfig,
+  cobrancas: telaCobrancas, banco: telaBanco, despesas: telaDespesas, compras: telaCompras, estoque: telaEstoque, tributacao: telaTributacao, extrato: telaExtrato, agenda: telaAgenda, relatorios: telaRelatorios, tomadores: telaTomadores, servicos: telaServicos, empresas: telaEmpresas, config: telaConfig,
 };
 
 function rotear() {
@@ -417,6 +417,7 @@ function rotear() {
       ${estado.usuario.papel !== 'cliente' ? '<a href="#/empresas">Cadastrar empresa</a>' : ''}</div>`;
     return;
   }
+  atualizarAvisosEstoque();
   (rotas[nome] ?? telaPainel)(param).catch((e) => (conteudo.innerHTML = `<p class="erro">${esc(mensagemErro(e))}</p>`));
   conteudo.focus();
 }
@@ -1332,7 +1333,8 @@ async function detalheCompra(id, voltar) {
     <h3>Totais</h3><dl class="dados"><dt>Produtos</dt><dd>${brl(c.valor_produtos)}</dd>${c.valor_frete ? `<dt>Frete e seguro</dt><dd>${brl(c.valor_frete)}</dd>` : ''}${c.valor_outras ? `<dt>Outras despesas</dt><dd>${brl(c.valor_outras)}</dd>` : ''}${c.valor_desconto ? `<dt>Desconto</dt><dd>${brl(c.valor_desconto)}</dd>` : ''}${c.valor_icms ? `<dt>ICMS</dt><dd>${brl(c.valor_icms)}</dd>` : ''}${c.valor_ipi ? `<dt>IPI</dt><dd>${brl(c.valor_ipi)}</dd>` : ''}<dt>Total da nota</dt><dd><strong>${brl(c.valor_total)}</strong></dd></dl>
     <h3>Parcelas</h3><table class="tabela"><thead><tr><th>Parcela</th><th>Vencimento</th><th class="num">Valor</th><th>Despesa</th></tr></thead><tbody>
       ${c.parcelas.map((p) => `<tr><td>${esc(p.numero ?? '')}</td><td>${dataBr(p.vencimento)}</td><td class="num">${brl(p.valor)}</td><td>${p.despesa_id ? 'lançada' : '<span class="dica">não lançada</span>'}</td></tr>`).join('')}</tbody></table>
-    <div class="acoes">${c.tem_xml ? '<button id="c-xml">Baixar XML</button>' : ''}${podeExcluirRegistros() ? '<button class="perigo" id="c-excluir">Excluir compra</button>' : ''}<button data-fechar>Fechar</button></div></div>`, (dlg) => {
+    <div class="acoes">${c.itens.length && estado.usuario.modulos.includes('estoque') ? '<button id="c-estoque">Lançar no estoque</button>' : ''}${c.tem_xml ? '<button id="c-xml">Baixar XML</button>' : ''}${podeExcluirRegistros() ? '<button class="perigo" id="c-excluir">Excluir compra</button>' : ''}<button data-fechar>Fechar</button></div></div>`, (dlg) => {
+    dlg.querySelector('#c-estoque')?.addEventListener('click', () => lancarCompraNoEstoque(id));
     dlg.querySelector('#c-xml')?.addEventListener('click', () => baixar(`/api/compras/${id}/xml`, `NFe_${c.numero ?? id}.xml`));
     dlg.querySelector('#c-excluir')?.addEventListener('click', async () => {
       if (!confirm('Excluir esta compra? As despesas que ela gerou também serão apagadas. Não dá para desfazer.')) return;
@@ -1641,6 +1643,152 @@ async function telaDespesas() {
       ev.preventDefault();
       try { await api('PUT', `${base}/despesas-categorias`, { categorias: ev.target.cats.value.split('\n') }); dlg.close(); telaDespesas(); }
       catch (e) { $('#erro-cats').textContent = mensagemErro(e); }
+    };
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Estoque de insumos
+// ---------------------------------------------------------------------------
+const qtd = (n) => String(Math.round((n ?? 0) * 1000) / 1000).replace('.', ',');
+const SIT_ESTOQUE = { COMPRAR: 'Comprar', PARADO: 'Sem uso', OK: 'Em dia', ZERADO: 'Zerado' };
+
+/** Faixa no topo: o que precisa ser comprado e o que foi comprado e segue sem uso (some até a próxima abertura se fechada). */
+async function atualizarAvisosEstoque() {
+  const el = $('#avisos-topo');
+  if (!el) return;
+  if (!estado.usuario?.modulos?.includes('estoque') || !estado.empresaId) { el.innerHTML = ''; return; }
+  try {
+    const a = await api('GET', `/api/empresas/${estado.empresaId}/estoque/avisos`);
+    const chave = `${estado.empresaId}:${a.comprar.map((i) => i.id).join(',')}|${a.parados.map((i) => i.id).join(',')}`;
+    if (estado.avisoEstoqueFechado === chave || (!a.comprar.length && !a.parados.length)) { el.innerHTML = ''; return; }
+    const lista = (xs) => xs.slice(0, 5).map((i) => `${esc(i.nome)} (${qtd(i.saldo)} ${esc(i.unidade)})`).join(', ') + (xs.length > 5 ? ` e mais ${xs.length - 5}` : '');
+    el.innerHTML =
+      (a.comprar.length ? `<div class="banner perigo"><span class="texto"><strong>Estoque — precisa comprar:</strong> ${lista(a.comprar)}. <a href="#/estoque">Ver estoque</a></span><button type="button" data-fechar-aviso title="Dispensar">×</button></div>` : '') +
+      (a.parados.length ? `<div class="banner teste"><span class="texto"><strong>Estoque — comprado e sem uso há ${a.diasParado}+ dias:</strong> ${lista(a.parados)}. <a href="#/estoque">Ver estoque</a></span><button type="button" data-fechar-aviso title="Dispensar">×</button></div>` : '');
+    el.querySelectorAll('[data-fechar-aviso]').forEach((b) => (b.onclick = () => { estado.avisoEstoqueFechado = chave; el.innerHTML = ''; }));
+  } catch { el.innerHTML = ''; }
+}
+
+async function telaEstoque() {
+  const base = `/api/empresas/${estado.empresaId}/estoque`;
+  const itens = await api('GET', `${base}/itens`);
+  const ordem = { COMPRAR: 0, PARADO: 1, ZERADO: 2, OK: 3 };
+  itens.sort((a, b) => ordem[a.situacao] - ordem[b.situacao] || a.nome.localeCompare(b.nome));
+  const n = (s) => itens.filter((i) => i.situacao === s).length;
+  conteudo.innerHTML = `
+    <div class="topo"><div><h1>Estoque de insumos</h1><p class="sutil">Material de expediente e insumos da prestação de serviços. Entre pela <strong>NF-e de compra</strong> (em Compras) ou manualmente, e dê <strong>baixa</strong> conforme usar. O topo da tela avisa o que precisa comprar e o que foi comprado e não saiu.</p></div>
+      <div><button class="primario" id="novo-item">Novo item</button> <button id="hist-geral">Histórico geral</button></div></div>
+    <div class="resumo">
+      <div class="cartao"><div class="sutil">Itens</div><div class="valor">${itens.length}</div></div>
+      <div class="cartao"><div class="sutil">Precisam de compra</div><div class="valor">${n('COMPRAR')}</div></div>
+      <div class="cartao"><div class="sutil">Comprados e sem uso</div><div class="valor">${n('PARADO')}</div></div>
+    </div>
+    ${itens.length ? `<div class="rolagem"><table class="tabela estoque"><thead><tr><th>Item</th><th>Categoria</th><th class="num">Saldo</th><th class="num">Mínimo</th><th>Última entrada</th><th>Última baixa</th><th>Situação</th><th></th></tr></thead><tbody>
+      ${itens.map((i) => `<tr><td>${esc(i.nome)}</td><td>${esc(i.categoria ?? '')}</td><td class="num"><strong>${qtd(i.saldo)}</strong> ${esc(i.unidade)}</td><td class="num">${i.estoque_minimo ? qtd(i.estoque_minimo) : '—'}</td>
+        <td>${i.ultima_entrada ? dataBr(i.ultima_entrada) : '—'}</td><td>${i.ultima_saida ? dataBr(i.ultima_saida) : '—'}</td><td><span class="carimbo ${i.situacao}">${SIT_ESTOQUE[i.situacao]}</span></td>
+        <td class="acoes-linha"><button data-mov="SAIDA" data-i="${i.id}" class="primario">Baixa</button><button data-mov="ENTRADA" data-i="${i.id}">Entrada</button><button data-mov="AJUSTE" data-i="${i.id}" title="Informar o saldo contado (inventário)">Contagem</button><button data-hist="${i.id}">Histórico</button><button data-ed="${i.id}">Editar</button></td></tr>`).join('')}</tbody></table></div>`
+      : '<div class="vazio"><p>Nenhum item ainda. Cadastre um item ou, em <a href="#/compras">Compras</a>, abra uma NF-e e use <strong>Lançar no estoque</strong>.</p></div>'}`;
+  const porId = (id) => itens.find((i) => i.id === Number(id));
+  const refrescar = () => { telaEstoque(); atualizarAvisosEstoque(); };
+
+  const formItem = (it) => {
+    it ??= { unidade: 'un', estoque_minimo: 0 };
+    abrirDialogo(`<form id="form-item"><h2>${it.id ? 'Editar item' : 'Novo item de estoque'}</h2>
+      <div class="grade">
+        <label class="largo">Nome <input name="nome" required maxlength="120" value="${esc(it.nome ?? '')}" placeholder="Ex.: Papel A4 (resma)"></label>
+        <label>Unidade <input name="unidade" required maxlength="10" value="${esc(it.unidade ?? 'un')}" placeholder="un, cx, resma"></label>
+        <label>Categoria <input name="categoria" maxlength="60" value="${esc(it.categoria ?? '')}" placeholder="Material de expediente"></label>
+        <label>Estoque mínimo <input name="estoque_minimo" data-num inputmode="decimal" value="${String(it.estoque_minimo ?? 0).replace('.', ',')}"><span class="dica">Quando o saldo chegar a este valor o sistema avisa para comprar.</span></label>
+        <label class="largo">Observação <input name="observacao" maxlength="300" value="${esc(it.observacao ?? '')}"></label>
+        ${it.id ? '' : '<label>Saldo inicial <input name="saldo" data-num inputmode="decimal" placeholder="0"></label>'}
+      </div>
+      <p class="erro" id="erro-item"></p>
+      <div class="acoes"><button class="primario" type="submit">Salvar</button>${it.id && podeExcluirRegistros() ? '<button type="button" class="perigo" id="ex-item">Excluir</button>' : ''}<button type="button" data-fechar>Cancelar</button></div></form>`, (dlg) => {
+      dlg.querySelector('#ex-item') && (dlg.querySelector('#ex-item').onclick = async () => {
+        if (!confirm('Excluir este item? Com histórico, ele apenas deixa de aparecer.')) return;
+        try { await api('DELETE', `/api/estoque/itens/${it.id}`); dlg.close(); refrescar(); } catch (e) { $('#erro-item').textContent = mensagemErro(e); }
+      });
+      dlg.querySelector('#form-item').onsubmit = async (ev) => {
+        ev.preventDefault(); const x = lerForm(ev.target);
+        const corpo = { nome: x.nome, unidade: x.unidade, categoria: x.categoria, estoque_minimo: x.estoque_minimo ?? 0, observacao: x.observacao };
+        try {
+          if (it.id) await api('PUT', `/api/estoque/itens/${it.id}`, corpo);
+          else {
+            const r = await api('POST', `${base}/itens`, corpo);
+            if (x.saldo > 0) await api('POST', `/api/estoque/itens/${r.id}/movimentos`, { tipo: 'ENTRADA', quantidade: x.saldo, observacao: 'Saldo inicial' });
+          }
+          dlg.close(); aviso('Item salvo.'); refrescar();
+        } catch (e) { $('#erro-item').textContent = mensagemErro(e); }
+      };
+    });
+  };
+
+  const formMov = (it, tipo) => {
+    const titulo = { SAIDA: 'Dar baixa', ENTRADA: 'Entrada manual', AJUSTE: 'Inventário (saldo contado)' }[tipo];
+    abrirDialogo(`<form id="form-mov"><h2>${titulo}: ${esc(it.nome)}</h2>
+      <p class="sutil">Saldo atual: <strong>${qtd(it.saldo)} ${esc(it.unidade)}</strong></p>
+      <div class="grade">
+        <label>${tipo === 'AJUSTE' ? 'Saldo contado' : 'Quantidade'} (${esc(it.unidade)}) <input name="quantidade" data-num inputmode="decimal" required autofocus></label>
+        <label>Data <input type="date" name="data" value="${hoje()}"></label>
+        ${tipo === 'ENTRADA' ? '<label>Custo unitário (R$) <input name="custo_unitario" data-num inputmode="decimal"></label>' : ''}
+        <label class="largo">Observação <input name="observacao" maxlength="300" placeholder="${tipo === 'SAIDA' ? 'Ex.: usado no atendimento do cliente X' : ''}"></label>
+      </div>
+      <p class="erro" id="erro-mov"></p>
+      <div class="acoes"><button class="primario" type="submit">Confirmar</button><button type="button" data-fechar>Cancelar</button></div></form>`, (dlg) => {
+      dlg.querySelector('#form-mov').onsubmit = async (ev) => {
+        ev.preventDefault(); const x = lerForm(ev.target);
+        try {
+          const r = await api('POST', `/api/estoque/itens/${it.id}/movimentos`, { tipo, quantidade: x.quantidade ?? 0, data: x.data, custo_unitario: x.custo_unitario ?? null, observacao: x.observacao });
+          dlg.close(); aviso(`Saldo de ${it.nome}: ${qtd(r.saldo)} ${it.unidade}.`); refrescar();
+        } catch (e) { $('#erro-mov').textContent = mensagemErro(e); }
+      };
+    });
+  };
+
+  const historico = async (it) => {
+    const movs = await api('GET', `${base}/movimentos${it ? `?item=${it.id}` : ''}`);
+    const TIPO = { ENTRADA: 'Entrada', SAIDA: 'Baixa', AJUSTE: 'Ajuste' };
+    abrirDialogo(`<h2>Histórico${it ? ': ' + esc(it.nome) : ' do estoque'}</h2>
+      ${movs.length ? `<div class="rolagem"><table class="tabela"><thead><tr><th>Data</th>${it ? '' : '<th>Item</th>'}<th>Tipo</th><th class="num">Quantidade</th><th>Observação</th><th></th></tr></thead><tbody>
+      ${movs.map((m) => `<tr><td>${dataBr(m.data)}</td>${it ? '' : `<td>${esc(m.item)}</td>`}<td>${TIPO[m.tipo]}</td><td class="num">${m.quantidade > 0 ? '+' : ''}${qtd(m.quantidade)} ${esc(m.unidade)}</td><td>${esc(m.observacao ?? '')}</td>
+        <td>${podeExcluirRegistros() ? `<button data-dm="${m.id}" title="Apagar este lançamento">×</button>` : ''}</td></tr>`).join('')}</tbody></table></div>` : '<p class="sutil">Sem movimentos.</p>'}
+      <div class="acoes"><button type="button" data-fechar>Fechar</button></div>`, (dlg) => {
+      dlg.querySelectorAll('[data-dm]').forEach((b) => (b.onclick = async () => {
+        if (!confirm('Apagar este lançamento?')) return;
+        try { await api('DELETE', `/api/estoque/movimentos/${b.dataset.dm}`); dlg.close(); refrescar(); } catch (e) { aviso(mensagemErro(e)); }
+      }));
+    });
+  };
+
+  $('#novo-item').onclick = () => formItem();
+  $('#hist-geral').onclick = () => historico(null);
+  conteudo.querySelectorAll('[data-mov]').forEach((b) => (b.onclick = () => formMov(porId(b.dataset.i), b.dataset.mov)));
+  conteudo.querySelectorAll('[data-hist]').forEach((b) => (b.onclick = () => historico(porId(b.dataset.hist))));
+  conteudo.querySelectorAll('[data-ed]').forEach((b) => (b.onclick = () => formItem(porId(b.dataset.ed))));
+}
+
+/** Na compra: escolhe os itens da NF-e que entram no estoque (itens com o mesmo nome somam no que já existe). */
+async function lancarCompraNoEstoque(compraId, depois) {
+  const { itens } = await api('GET', `/api/compras/${compraId}/estoque`);
+  if (!itens.length) { aviso('Esta compra não tem itens.'); return; }
+  abrirDialogo(`<form id="form-lanc"><h2>Lançar no estoque</h2>
+    <p class="sutil">Marque o que é insumo para o escritório. O nome pode ser ajustado; se já existir um item com o mesmo nome, a quantidade entra nele. Itens já lançados ficam marcados e bloqueados.</p>
+    <div class="rolagem"><table class="tabela"><thead><tr><th></th><th>Nome no estoque</th><th class="num">Quantidade</th></tr></thead><tbody>
+    ${itens.map((i) => `<tr data-id="${i.id}"><td><input type="checkbox" name="usar" ${i.estoque_item_id ? 'checked disabled' : ''}></td>
+      <td><input name="nome" value="${esc(i.descricao)}" maxlength="120" ${i.estoque_item_id ? 'disabled' : ''}></td>
+      <td class="num"><input name="quantidade" data-num size="7" value="${String(i.quantidade).replace('.', ',')}" ${i.estoque_item_id ? 'disabled' : ''}> ${esc(i.unidade ?? '')}</td></tr>`).join('')}</tbody></table></div>
+    <p class="erro" id="erro-lanc"></p>
+    <div class="acoes"><button class="primario" type="submit">Lançar</button><button type="button" data-fechar>Cancelar</button></div></form>`, (dlg) => {
+    dlg.querySelector('#form-lanc').onsubmit = async (ev) => {
+      ev.preventDefault();
+      const sel = [...dlg.querySelectorAll('tr[data-id]')].filter((tr) => { const c = tr.querySelector('[name=usar]'); return c.checked && !c.disabled; }).map((tr) => ({
+        compra_item_id: Number(tr.dataset.id), nome: tr.querySelector('[name=nome]').value.trim(), quantidade: numero(tr.querySelector('[name=quantidade]').value) || null }));
+      if (!sel.length) { $('#erro-lanc').textContent = 'Marque pelo menos um item.'; return; }
+      try {
+        const r = await api('POST', `/api/compras/${compraId}/estoque`, { itens: sel });
+        dlg.close(); aviso(`${r.lancados} item(ns) lançado(s) no estoque${r.novos ? ` (${r.novos} novo(s))` : ''}.`); atualizarAvisosEstoque(); depois?.();
+      } catch (e) { $('#erro-lanc').textContent = mensagemErro(e); }
     };
   });
 }
