@@ -532,6 +532,11 @@ async function telaEmitir(notaIdCorrecao) {
         </div>
       </fieldset>
 
+      <fieldset id="bloco-composta" hidden><legend>Descrição composta do cliente</legend>
+        <div class="grade" id="comp-campos"></div>
+        <p class="dica" id="comp-info"></p>
+      </fieldset>
+
       <fieldset><legend>Serviço</legend>
         <div class="grade">
           <label class="largo">Serviço cadastrado
@@ -603,7 +608,7 @@ async function telaEmitir(notaIdCorrecao) {
   if (p.tribISSQN) f.tribISSQN.value = p.tribISSQN;
   if (p.issRetido) f.issRetido.value = p.issRetido;
 
-  let pCpServico = null, tpImunidadeServico = null;
+  let pCpServico = null, tpImunidadeServico = null, modeloComposto = null, tCompor = null;
   f.servicoId.onchange = () => {
     const s = servicos.find((x) => x.id === Number(f.servicoId.value));
     if (!s) return;
@@ -615,6 +620,7 @@ async function telaEmitir(notaIdCorrecao) {
     const tid = s.tipo_documento_id ?? tiposSaida.find((t) => t.padrao)?.id ?? '';
     f.tipoDocumentoId.value = String(tid);
     aplicarTipo();
+    if (modeloComposto && !f.tipoDocumentoId.value) aplicarComposta();
   };
   const fmt = (n) => (n == null ? '' : String(n).replace('.', ','));
   async function aplicarTipo() {
@@ -632,10 +638,43 @@ async function telaEmitir(notaIdCorrecao) {
       pCpServico = t.pCp ?? null; tpImunidadeServico = t.tpImunidade ?? null;
       recalcular();
       sugerirBoleto?.();
+      if (modeloComposto) aplicarComposta();
     } catch (err) { $('#erro-emitir').textContent = mensagemErro(err); }
   }
   f.tipoDocumentoId.onchange = aplicarTipo;
   f.competencia.addEventListener('change', () => f.tipoDocumentoId.value && aplicarTipo());
+  // descrição composta: o cliente pode ter um modelo (período, ordem de compra, linhas de valor e INSS só sobre algumas)
+  const modeloDe = (t) => { try { const m = t?.descricao_modelo ? JSON.parse(t.descricao_modelo) : null; return m?.ativo ? m : null; } catch { return null; } };
+  function prepararComposta() {
+    const t = tomadores.find((x) => x.id === Number(f.tomadorId.value));
+    modeloComposto = modeloDe(t);
+    $('#bloco-composta').hidden = !modeloComposto;
+    f.descricao.readOnly = !!modeloComposto;
+    if (!modeloComposto) { $('#comp-campos').innerHTML = ''; return; }
+    const m = modeloComposto, ant = lerForm(f);
+    $('#comp-campos').innerHTML =
+      (m.periodo ? `<label>Período inicial <input type="date" name="comp_ini" value="${esc(ant.comp_ini ?? '')}"></label><label>Período final <input type="date" name="comp_fim" value="${esc(ant.comp_fim ?? '')}"></label>` : '') +
+      (m.ordem_compra ? `<label>Ordem de compra <input name="comp_oc" maxlength="60" value="${esc(ant.comp_oc ?? '')}"></label>` : '') +
+      m.linhas.map((l, i) => `<label>${esc(l.rotulo)} (R$)${l.retem_cp ? ' · retém INSS' : ''} <input name="comp_v${i}" data-num inputmode="decimal"></label>`).join('');
+    $('#comp-campos').querySelectorAll('input').forEach((el) => el.addEventListener('input', () => { clearTimeout(tCompor); tCompor = setTimeout(aplicarComposta, 250); }));
+    aplicarComposta();
+  }
+  async function aplicarComposta() {
+    if (!modeloComposto || !f.tomadorId.value) return;
+    const x = lerForm(f);
+    try {
+      const r = await api('POST', `/api/tomadores/${f.tomadorId.value}/descricao`, { periodoIni: x.comp_ini || null, periodoFim: x.comp_fim || null, ordemCompra: x.comp_oc || null, valores: modeloComposto.linhas.map((_, i) => x[`comp_v${i}`] ?? 0) });
+      $('#erro-emitir').textContent = '';
+      f.descricao.value = r.descricao;
+      f.valor.value = r.valorTotal ? String(r.valorTotal.toFixed(2)).replace('.', ',') : '';
+      pCpServico = null;
+      recalcular();
+      f.elements.cp.value = r.cp ? r.cp.toFixed(2).replace('.', ',') : '';
+      $('#comp-info').textContent = `Total ${brl(r.valorTotal)} · INSS ${String(r.cpPct).replace('.', ',')}% sobre ${brl(r.baseCp)} = ${brl(r.cp)}.`;
+      sugerirBoleto?.();
+    } catch (err) { $('#erro-emitir').textContent = mensagemErro(err); }
+  }
+  f.tomadorId.addEventListener('change', () => setTimeout(prepararComposta, 0));
   habilitarConsultaF2($('#form-emitir'), $('#form-emitir').tomadorId, tomadores);
   ligarBuscaCliente($('#form-emitir').tomadorId, tomadores);
   $('#novo-tomador').onclick = () => formTomador(null, async (id) => { telaEmitir.prefTomador = id; await telaEmitir(notaIdCorrecao); $('#form-emitir').tomadorId.value = id; });
@@ -2094,7 +2133,7 @@ async function formTomador(t, aoSalvar) {
   t ??= { tipo_doc: 'CNPJ', modo_faturamento: 'NOTA', vencimento_tipo: 'PRAZO', vencimento_valor: 10, enviar_email_auto: 0 };
   abrirDialogo(`
     <form id="form-tomador"><h2>${t.id ? 'Editar cliente' : 'Novo cliente'}</h2>
-      <nav class="abas" id="abas-cliente"><a href="#" data-aba="cadastro" class="ativo">Cadastro</a><a href="#" data-aba="servicos">Serviços padrão${t.servicos_padrao?.length ? ' •' : ''}</a><a href="#" data-aba="descontos">Descontos${t.desconto_valor ? ' •' : ''}</a></nav>
+      <nav class="abas" id="abas-cliente"><a href="#" data-aba="cadastro" class="ativo">Cadastro</a><a href="#" data-aba="servicos">Serviços padrão${t.servicos_padrao?.length ? ' •' : ''}</a><a href="#" data-aba="descontos">Descontos${t.desconto_valor ? ' •' : ''}</a><a href="#" data-aba="descricao">Descrição da nota${t.descricao_modelo ? ' •' : ''}</a></nav>
       <div data-painel="cadastro">
       <fieldset class="sub"><legend>Identificação</legend><div class="grade">
         <label>Tipo <select name="tipo_doc">${['CNPJ', 'CPF', 'SEM'].map((v) => `<option value="${v}" ${t.tipo_doc === v ? 'selected' : ''}>${v === 'SEM' ? 'Sem documento' : v}</option>`).join('')}</select></label>
@@ -2145,6 +2184,23 @@ async function formTomador(t, aoSalvar) {
         </div>
         <p class="dica">O valor é abatido de <strong>todos os boletos</strong> deste cliente (emitidos com nota, só boleto ou reemitidos), e o motivo sai nas instruções do boleto. Na emissão da NFS-e o sistema lembra que o cliente tem desconto e deixa você decidir se lança também como desconto na nota. Deixe em branco para não ter desconto.</p></fieldset>
       </div>
+      <div data-painel="descricao" hidden>
+        <fieldset class="sub"><legend>Descrição composta (automática)</legend>
+          <label class="check"><input type="checkbox" name="dm_ativo"> Montar a descrição da nota automaticamente para este cliente</label>
+          <div id="dm-corpo">
+            <div class="grade">
+              <label class="largo">Texto inicial <input name="dm_texto" maxlength="500" placeholder="Prestação de serviços conforme contrato"></label>
+              <label class="check"><input type="checkbox" name="dm_periodo"> Pedir período (data inicial e final)</label>
+              <label class="check"><input type="checkbox" name="dm_oc"> Pedir ordem de compra</label>
+              <label>Retenção de INSS (%) <input name="dm_cp" data-num inputmode="decimal" size="5"><span class="dica">Aplicada só nas linhas marcadas como "retém INSS".</span></label>
+            </div>
+            <h4>Linhas de valor</h4>
+            <div id="dm-linhas"></div>
+            <button type="button" id="dm-add">Adicionar linha</button>
+            <p class="dica">Exemplo: "Mão de obra" (retém INSS) e "Aluguel de máquinas". Na emissão, informe o valor de cada linha: o valor da nota é a soma e o INSS é calculado só sobre as linhas marcadas. PIS, COFINS, CSLL e IR seguem o tipo de documento, sobre o valor total.</p>
+          </div>
+        </fieldset>
+      </div>
       <p class="erro" id="erro-tomador"></p>
       <div class="acoes"><button class="primario" type="submit">Salvar cliente</button><button type="button" data-fechar>Fechar</button></div>
     </form>`, (d) => {
@@ -2178,6 +2234,21 @@ async function formTomador(t, aoSalvar) {
       padroes.push({ servico_id: livre.id, valor: livre.valor_padrao ?? 0, descricao: '', padrao: !padroes.length }); desenharPadroes();
     };
     desenharPadroes();
+    // descrição composta do cliente
+    const dm0 = (() => { try { return t.descricao_modelo ? JSON.parse(t.descricao_modelo) : null; } catch { return null; } })();
+    let dmLinhas = (dm0?.linhas ?? [{ rotulo: 'Mão de obra', retem_cp: true }, { rotulo: 'Aluguel de máquinas', retem_cp: false }]).map((x) => ({ ...x }));
+    f.dm_ativo.checked = !!dm0?.ativo; f.dm_texto.value = dm0?.texto ?? 'Prestação de serviços'; f.dm_periodo.checked = dm0 ? !!dm0.periodo : true; f.dm_oc.checked = dm0 ? !!dm0.ordem_compra : true;
+    f.dm_cp.value = String(dm0?.cp_pct ?? 11).replace('.', ',');
+    const desenharDm = () => {
+      $('#dm-corpo').hidden = !f.dm_ativo.checked;
+      $('#dm-linhas').innerHTML = dmLinhas.map((l, i) => `<div class="linha-serv"><label class="largo">Rótulo <input data-dl="rotulo" data-i="${i}" maxlength="60" value="${esc(l.rotulo)}"></label>
+        <label class="check"><input type="checkbox" data-dl="retem_cp" data-i="${i}" ${l.retem_cp ? 'checked' : ''}> Retém INSS</label>${dmLinhas.length > 1 ? `<button type="button" data-dl-del="${i}">Remover</button>` : ''}</div>`).join('');
+      $('#dm-linhas').querySelectorAll('[data-dl]').forEach((el) => (el.oninput = el.onchange = () => { const x = dmLinhas[Number(el.dataset.i)]; x[el.dataset.dl] = el.type === 'checkbox' ? el.checked : el.value; }));
+      $('#dm-linhas').querySelectorAll('[data-dl-del]').forEach((b) => (b.onclick = () => { dmLinhas.splice(Number(b.dataset.dlDel), 1); desenharDm(); }));
+    };
+    f.dm_ativo.onchange = desenharDm;
+    $('#dm-add').onclick = () => { if (dmLinhas.length < 8) { dmLinhas.push({ rotulo: '', retem_cp: false }); desenharDm(); } };
+    desenharDm();
     f.cep.onblur = () => buscarCep(f);
     ligarConsultaCnpj(f, 'tomador');
     const ajustar = () => {
@@ -2197,6 +2268,12 @@ async function formTomador(t, aoSalvar) {
         corpo.email_cobranca = f.email_cobranca.value.trim() || null;
         if (padroes.some((x) => !(x.valor > 0))) throw new Error('Informe o valor de cada serviço padrão (aba Serviços padrão).');
         corpo.servicos_padrao = padroes.map((x) => ({ servico_id: x.servico_id, valor: x.valor, descricao: (x.descricao || '').trim() || null, padrao: !!x.padrao }));
+        corpo.descricao_modelo = f.dm_ativo.checked
+          ? { ativo: true, texto: f.dm_texto.value.trim() || 'Prestação de serviços', periodo: f.dm_periodo.checked, ordem_compra: f.dm_oc.checked, cp_pct: numero(f.dm_cp.value) ?? 11,
+              linhas: dmLinhas.filter((l) => String(l.rotulo).trim()).map((l) => ({ rotulo: String(l.rotulo).trim(), retem_cp: !!l.retem_cp })) }
+          : null;
+        if (corpo.descricao_modelo && !corpo.descricao_modelo.linhas.length) throw new Error('Informe ao menos uma linha de valor na aba Descrição da nota.');
+        ['dm_ativo', 'dm_texto', 'dm_periodo', 'dm_oc', 'dm_cp'].forEach((k) => delete corpo[k]);
         corpo.desconto_valor = numero(f.desconto_valor.value) || null; corpo.desconto_motivo = f.desconto_motivo.value.trim() || null;
         const r = t.id ? await api('PUT', `/api/tomadores/${t.id}`, corpo) : await api('POST', `/api/empresas/${estado.empresaId}/tomadores`, corpo);
         d.close(); aviso('Cliente salvo.');

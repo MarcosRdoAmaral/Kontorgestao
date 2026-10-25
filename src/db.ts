@@ -606,6 +606,8 @@ const migracoes: string[] = [
   );
   CREATE INDEX idx_estoque_mov ON estoque_movimentos(item_id, data);
   CREATE UNIQUE INDEX idx_estoque_mov_compra ON estoque_movimentos(compra_item_id) WHERE compra_item_id IS NOT NULL;`,
+  // 22: modelo de descrição composta por cliente (período, ordem de compra, linhas de valor com retenção de INSS)
+  `ALTER TABLE tomadores ADD COLUMN descricao_modelo TEXT;`,
 ];
 
 export function migrar(): void {

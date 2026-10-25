@@ -14,6 +14,7 @@ import { Classificacao, balancoExtrato, candidatosBoleto, classificar, conciliar
 import { catalogo, gerarRelatorio, relatorioCsv, relatorioPdf } from './servicos/relatorios.js';
 import { configurarAgenda, executarItem, executarProntas, listarAgenda, pularItem, resumoAgenda } from './servicos/agenda.js';
 import { EdicaoImposto, Perfil, TipoDocumento, apuracaoAssistida, conferirTipoDoVinculo, criarPerfil, criarTipo, editarImposto, editarPerfil, editarTipo, excluirPerfil, excluirTipo, gerarPerfisDosServicos, listarImpostos, listarPerfis, listarTipos, tributacaoCompletaDoServico, tributacaoEfetiva, NATUREZAS } from './servicos/tributacao.js';
+import { DescricaoModelo, EntradaDescricao, lerModelo, montarDescricao } from './servicos/descricao.js';
 import { ItemEstoque, LancamentoCompra, Movimento, avisos as avisosEstoque, criarItem as criarItemEstoque, editarItem as editarItemEstoque, excluirItem as excluirItemEstoque, excluirMovimento, itensDaCompra, lancarCompraNoEstoque, listarItens as listarItensEstoque, listarMovimentos, movimentar } from './servicos/estoque.js';
 import { CompraManual, OpcoesImportacao, criarCompraManual, excluirCompra, importarCompraXml, listarCompras, obterCompra, xmlDaCompra } from './servicos/compras.js';
 import { pacoteContabilidade } from './servicos/contabilidade.js';
@@ -84,6 +85,7 @@ const Tomador = z.object({
   enviar_email_auto: z.union([z.boolean(), z.literal(0), z.literal(1)]).default(false).transform((v) => (v ? 1 : 0)),
   desconto_valor: z.number().min(0).max(99999999).nullish().transform((v) => (v && v > 0 ? Math.round(v * 100) / 100 : null)),
   desconto_motivo: z.string().trim().max(80).nullish().transform((v) => v || null),
+  descricao_modelo: DescricaoModelo.nullish().transform((m) => (m ? JSON.stringify(m) : null)),
   /** Serviços que o sistema sempre usa com este cliente, com o valor de cada um. */
   servicos_padrao: z.array(z.object({
     servico_id: z.number().int(), valor: z.number().positive('Informe o valor do serviço'),
@@ -308,10 +310,10 @@ export async function rotas(app: FastifyInstance) {
       const d = Tomador.parse(req.body);
       conferirServicosPadrao(id, d.servicos_padrao);
       const r = db.prepare(`INSERT INTO tomadores (empresa_id, tipo_doc, documento, nome, inscricao_municipal, email, fone, cep, cod_municipio, logradouro, numero, complemento, bairro,
-        modo_faturamento, vencimento_tipo, vencimento_valor, email_cobranca, enviar_email_auto, cidade, uf, desconto_valor, desconto_motivo)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(id, d.tipo_doc, d.documento, d.nome, d.inscricao_municipal ?? null, d.email || null, d.fone, d.cep,
+        modo_faturamento, vencimento_tipo, vencimento_valor, email_cobranca, enviar_email_auto, cidade, uf, desconto_valor, desconto_motivo, descricao_modelo)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(id, d.tipo_doc, d.documento, d.nome, d.inscricao_municipal ?? null, d.email || null, d.fone, d.cep,
         d.cod_municipio ?? null, d.logradouro ?? null, d.numero ?? null, d.complemento ?? null, d.bairro ?? null,
-        d.modo_faturamento, d.vencimento_tipo, d.vencimento_valor, d.email_cobranca || null, d.enviar_email_auto, d.cidade || null, d.uf || null, d.desconto_valor, d.desconto_motivo);
+        d.modo_faturamento, d.vencimento_tipo, d.vencimento_valor, d.email_cobranca || null, d.enviar_email_auto, d.cidade || null, d.uf || null, d.desconto_valor, d.desconto_motivo, d.descricao_modelo);
       salvarServicosPadrao(id, Number(r.lastInsertRowid), d.servicos_padrao);
       return { id: Number(r.lastInsertRowid) };
     });
@@ -323,12 +325,22 @@ export async function rotas(app: FastifyInstance) {
       const d = Tomador.parse(req.body);
       conferirServicosPadrao(t.empresa_id, d.servicos_padrao);
       db.prepare(`UPDATE tomadores SET tipo_doc=?, documento=?, nome=?, inscricao_municipal=?, email=?, fone=?, cep=?, cod_municipio=?, logradouro=?, numero=?, complemento=?, bairro=?,
-        modo_faturamento=?, vencimento_tipo=?, vencimento_valor=?, email_cobranca=?, enviar_email_auto=?, cidade=?, uf=?, desconto_valor=?, desconto_motivo=? WHERE id=?`)
+        modo_faturamento=?, vencimento_tipo=?, vencimento_valor=?, email_cobranca=?, enviar_email_auto=?, cidade=?, uf=?, desconto_valor=?, desconto_motivo=?, descricao_modelo=? WHERE id=?`)
         .run(d.tipo_doc, d.documento, d.nome, d.inscricao_municipal ?? null, d.email || null, d.fone, d.cep, d.cod_municipio ?? null,
           d.logradouro ?? null, d.numero ?? null, d.complemento ?? null, d.bairro ?? null,
-          d.modo_faturamento, d.vencimento_tipo, d.vencimento_valor, d.email_cobranca || null, d.enviar_email_auto, d.cidade || null, d.uf || null, d.desconto_valor, d.desconto_motivo, id);
+          d.modo_faturamento, d.vencimento_tipo, d.vencimento_valor, d.email_cobranca || null, d.enviar_email_auto, d.cidade || null, d.uf || null, d.desconto_valor, d.desconto_motivo, d.descricao_modelo, id);
       salvarServicosPadrao(t.empresa_id, id, d.servicos_padrao);
       return { ok: true };
+    });
+
+    api.post('/api/tomadores/:id/descricao', async (req) => {
+      const id = Number((req.params as any).id);
+      const t = db.prepare('SELECT empresa_id, descricao_modelo FROM tomadores WHERE id = ?').get(id) as any;
+      if (!t) throw new ErroNegocio('Tomador não encontrado.', 404);
+      checarEmpresa(req, t.empresa_id);
+      const modelo = lerModelo(t.descricao_modelo);
+      if (!modelo) throw new ErroNegocio('Este cliente não tem modelo de descrição ativo.');
+      try { return montarDescricao(modelo, EntradaDescricao.parse(req.body)); } catch (e) { if (e instanceof ErroNegocio || (e as any)?.issues) throw e; throw new ErroNegocio((e as Error).message); }
     });
 
     // ---------- Serviços ----------

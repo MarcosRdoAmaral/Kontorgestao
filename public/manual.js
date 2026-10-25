@@ -4,7 +4,7 @@
  * aqui (e a data/versão em MANUAL_VERSAO) antes de publicar a versão.
  * `corpo` é HTML escrito à mão (não recebe dados de usuário).
  */
-export const MANUAL_VERSAO = '3.5.0';
+export const MANUAL_VERSAO = '3.6.0';
 
 export const MANUAL = [
   {
@@ -68,6 +68,7 @@ export const MANUAL = [
         <li>Abra <strong>Emitir nota</strong> (confira a empresa no alto do menu).</li>
         <li><strong>Cliente:</strong> comece a <strong>digitar o nome</strong> (ou o CNPJ/CPF): a lista se filtra enquanto você escreve; use as setas e Enter, ou clique no cliente. Apagar o campo volta para <em>Consumidor não identificado</em>. <kbd>F2</kbd> abre a consulta completa, em janela. Também dá para cadastrar um cliente novo ali mesmo.</li>
         <li><strong>Serviço:</strong> ao escolher, descrição e código são preenchidos e o <strong>tipo de documento</strong> do serviço é selecionado.</li>
+        <li><strong>Cliente com descrição composta:</strong> se o cliente tem esse modelo (aba <em>Descrição da nota</em> no cadastro), aparece um bloco com período, ordem de compra e o valor de cada linha (ex.: mão de obra e aluguel de máquinas). A descrição, o valor total e o INSS retido (só sobre as linhas marcadas) são calculados sozinhos; PIS, COFINS, CSLL e IR seguem o tipo de documento, sobre o total.</li>
         <li><strong>Tipo de documento:</strong> traz alíquota, ISSQN, retenções, totais aproximados, município e informações complementares do perfil (na data da competência). Trocar o tipo refaz o preenchimento; os campos ainda podem ser ajustados na nota.</li>
         <li>Informe competência, valor e, se precisar, ajuste descrição e retenções.</li>
         <li>Se o cliente fatura com boleto, defina o vencimento (já sugerido pela regra do cliente).</li>
