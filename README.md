@@ -125,3 +125,6 @@ Marco da versão 2: emissão de NFS-e nacional, faturamento por cliente (nota / 
 - Senha padrão `Kontor2026`: usada quando um administrador redefine a senha ou o usuário é criado sem senha; a troca é obrigatória no próximo acesso.
 - "Esqueci minha senha": envia um código de 6 dígitos (15 min) ao e-mail do usuário, usando o SMTP configurado em Configurações > E-mail; ao confirmar o código a senha volta à padrão.
 - **Configurações** reúne Minha conta, Usuários e acessos, E-mail, Backup, Licença e Atualizações (busca automática ao abrir, a cada hora e ao voltar à janela, com botão "Verificar agora").
+
+## Manual do usuário
+O manual fica em **Relatórios > Documentação** e é escrito em `public/manual.js`. Toda funcionalidade nova ou alterada deve atualizar o tópico correspondente e o `MANUAL_VERSAO` (o teste `test/manual.test.ts` falha se a versão do manual ficar diferente da do `package.json`).

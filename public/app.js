@@ -1004,7 +1004,46 @@ async function telaBanco() {
 // ---------------------------------------------------------------------------
 // Despesas e balanço
 // ---------------------------------------------------------------------------
-async function telaRelatorios() {
+async function telaDocumentacao() {
+  const { MANUAL, MANUAL_VERSAO } = await import('/manual.js');
+  const est = (telaDocumentacao.est ??= { topico: MANUAL[0].id, busca: '' });
+  const textoPuro = (t) => (t.titulo + ' ' + t.resumo + ' ' + t.corpo.replace(/<[^>]+>/g, ' ')).toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+  conteudo.innerHTML = `
+    <div class="topo"><div><h1>Relatórios</h1><p class="sutil">Manual de uso do sistema (versão ${MANUAL_VERSAO}).</p></div></div>
+    <nav class="abas" aria-label="Relatórios"><a href="#/relatorios">Relatórios</a><a href="#/relatorios/documentacao" class="ativo">Documentação</a></nav>
+    <div class="manual">
+      <aside class="manual-indice">
+        <input type="search" id="man-busca" placeholder="Pesquisar no manual" autocomplete="off" value="${esc(est.busca)}">
+        <div id="man-lista"></div>
+        <button type="button" id="man-imprimir">Imprimir / salvar em PDF</button>
+      </aside>
+      <article class="manual-corpo" id="man-corpo"></article>
+    </div>`;
+  const pintar = () => {
+    const q = est.busca.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim();
+    const achados = MANUAL.filter((t) => !q || textoPuro(t).includes(q));
+    if (!achados.some((t) => t.id === est.topico) && achados[0]) est.topico = achados[0].id;
+    $('#man-lista').innerHTML = achados.length
+      ? achados.map((t) => `<a href="#" data-t="${t.id}" class="${t.id === est.topico ? 'ativo' : ''}"><strong>${esc(t.titulo)}</strong><span>${esc(t.resumo)}</span></a>`).join('')
+      : '<p class="dica">Nada encontrado.</p>';
+    $('#man-lista').querySelectorAll('[data-t]').forEach((a) => (a.onclick = (ev) => { ev.preventDefault(); est.topico = a.dataset.t; pintar(); $('#man-corpo').scrollIntoView({ block: 'start' }); }));
+    const t = MANUAL.find((x) => x.id === est.topico);
+    $('#man-corpo').innerHTML = t ? `<h2>${esc(t.titulo)}</h2><p class="sutil">${esc(t.resumo)}</p>${t.corpo}` : '';
+  };
+  $('#man-busca').oninput = (ev) => { est.busca = ev.target.value; pintar(); };
+  $('#man-imprimir').onclick = () => {
+    const t = MANUAL.find((x) => x.id === est.topico);
+    const box = $('#man-corpo'); const antes = box.innerHTML;
+    box.innerHTML = `<h1>Manual do Kontor Gestão — versão ${MANUAL_VERSAO}</h1>` + MANUAL.map((x) => `<section><h2>${esc(x.titulo)}</h2>${x.corpo}</section>`).join('');
+    document.body.classList.add('imprimindo-manual');
+    const voltar = () => { document.body.classList.remove('imprimindo-manual'); box.innerHTML = antes; window.removeEventListener('afterprint', voltar); };
+    window.addEventListener('afterprint', voltar); setTimeout(() => window.print(), 50);
+  };
+  pintar();
+}
+
+async function telaRelatorios(aba) {
+  if (aba === 'documentacao') return telaDocumentacao();
   const cat = await api('GET', '/api/relatorios');
   const ini = mesAtual() + '-01', fim = new Date(Date.UTC(+mesAtual().slice(0, 4), +mesAtual().slice(5), 0)).toISOString().slice(0, 10);
   const est = telaRelatorios.est ??= { rel: cat[0].id, de: ini, ate: fim, tomadorId: '', situacao: '' };
@@ -1012,6 +1051,7 @@ async function telaRelatorios() {
   const fmtCel = (v, t) => (v == null || v === '' ? '' : t === 'moeda' ? brl(v) : t === 'data' ? dataBr(v) : esc(String(v)));
   conteudo.innerHTML = `
     <div class="topo"><div><h1>Relatórios</h1><p class="sutil">A nota e o boleto têm datas diferentes (emissão, vencimento, pagamento). Cada relatório diz qual data usa no filtro e mostra as outras nas colunas.</p></div></div>
+    <nav class="abas" aria-label="Relatórios"><a href="#/relatorios" class="ativo">Relatórios</a><a href="#/relatorios/documentacao">Documentação</a></nav>
     <form id="form-rel" class="filtros grade">
       <label class="largo">Relatório <select name="rel">${cat.map((c) => `<option value="${c.id}" ${c.id === est.rel ? 'selected' : ''}>${esc(c.titulo)}</option>`).join('')}</select><span class="dica" id="desc-rel"></span></label>
       <label>De <input type="date" name="de" required value="${est.de}"></label>
