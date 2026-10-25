@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { db } from '../db.js';
 import { lerNfe } from '../nfe/leitura.js';
 import { ErroNegocio } from './emissao.js';
+import { conferirTipoDoVinculo, tipoPadrao } from './tributacao.js';
 
 const r2 = (n: number) => Math.round((n + Number.EPSILON) * 100) / 100;
 const soDig = (s: string | null | undefined) => String(s ?? '').replace(/[^0-9A-Za-z]/g, '').toUpperCase();
@@ -11,6 +12,7 @@ export const OpcoesImportacao = z.object({
   /** Lança as parcelas (ou o total, se à vista) como despesas na data de vencimento. */
   gerarDespesas: z.boolean().default(false),
   categoria: z.string().trim().max(60).default('Material e equipamentos'),
+  tipoDocumentoId: z.number().int().nullish(),
 });
 
 function lancarDespesa(empresaId: number, usuarioId: number, data: string, categoria: string, descricao: string, valor: number) {
@@ -36,12 +38,13 @@ export function importarCompraXml(empresaId: number, usuarioId: number, entrada:
   const somaParc = r2(nfe.parcelas.reduce((a, p) => a + p.valor, 0));
   if (nfe.parcelas.length && Math.abs(somaParc - t.nf) > 0.05) alertas.push(`A soma das parcelas (R$ ${somaParc.toFixed(2)}) difere do total da nota.`);
 
+  const tipoId = conferirTipoDoVinculo(empresaId, entrada.tipoDocumentoId, 'ENTRADA') ?? tipoPadrao(empresaId, 'ENTRADA')?.id ?? null;
   const id = db.transaction(() => {
     const cid = Number(db.prepare(`INSERT INTO compras (empresa_id, fornecedor_documento, fornecedor_nome, numero, serie, chave_acesso, emissao, natureza, categoria,
-        valor_produtos, valor_frete, valor_desconto, valor_outras, valor_icms, valor_ipi, valor_total, xml, origem, criado_por)
-      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'XML',?)`).run(
+        valor_produtos, valor_frete, valor_desconto, valor_outras, valor_icms, valor_ipi, valor_total, xml, origem, criado_por, tipo_documento_id)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'XML',?,?)`).run(
       empresaId, nfe.fornecedor.documento, nfe.fornecedor.nome, nfe.numero, nfe.serie, nfe.chave, nfe.emissao, nfe.natureza, entrada.gerarDespesas ? entrada.categoria : null,
-      t.produtos, t.frete + t.seguro, t.desconto, t.outras, t.icms, t.ipi, t.nf, entrada.xml, usuarioId).lastInsertRowid);
+      t.produtos, t.frete + t.seguro, t.desconto, t.outras, t.icms, t.ipi, t.nf, entrada.xml, usuarioId, tipoId).lastInsertRowid);
     const ins = db.prepare('INSERT INTO compra_itens (compra_id, n_item, codigo, descricao, ncm, cfop, unidade, quantidade, valor_unitario, valor_total, desconto) VALUES (?,?,?,?,?,?,?,?,?,?,?)');
     for (const i of nfe.itens) ins.run(cid, i.n, i.codigo, i.descricao, i.ncm, i.cfop, i.unidade, i.quantidade, i.valorUnit, i.valor, i.desconto);
     const parcelas = nfe.parcelas.length ? nfe.parcelas : [{ numero: null as string | null, vencimento: nfe.emissao, valor: t.nf }];
@@ -67,12 +70,14 @@ export const CompraManual = z.object({
   gerarDespesas: z.boolean().default(false),
   categoria: z.string().trim().max(60).default('Material e equipamentos'),
   vencimento: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullish(),
+  tipoDocumentoId: z.number().int().nullish(),
 });
 
 export function criarCompraManual(empresaId: number, usuarioId: number, d: z.infer<typeof CompraManual>) {
+  const tipoId = conferirTipoDoVinculo(empresaId, d.tipoDocumentoId, 'ENTRADA') ?? tipoPadrao(empresaId, 'ENTRADA')?.id ?? null;
   return db.transaction(() => {
-    const cid = Number(db.prepare(`INSERT INTO compras (empresa_id, fornecedor_documento, fornecedor_nome, numero, emissao, categoria, observacao, valor_produtos, valor_total, origem, criado_por)
-      VALUES (?,?,?,?,?,?,?,?,?,'MANUAL',?)`).run(empresaId, d.fornecedor_documento ?? null, d.fornecedor_nome, d.numero ?? null, d.emissao, d.gerarDespesas ? d.categoria : null, d.observacao ?? null, d.valor_total, d.valor_total, usuarioId).lastInsertRowid);
+    const cid = Number(db.prepare(`INSERT INTO compras (empresa_id, fornecedor_documento, fornecedor_nome, numero, emissao, categoria, observacao, valor_produtos, valor_total, origem, criado_por, tipo_documento_id)
+      VALUES (?,?,?,?,?,?,?,?,?,'MANUAL',?,?)`).run(empresaId, d.fornecedor_documento ?? null, d.fornecedor_nome, d.numero ?? null, d.emissao, d.gerarDespesas ? d.categoria : null, d.observacao ?? null, d.valor_total, d.valor_total, usuarioId, tipoId).lastInsertRowid);
     const venc = d.vencimento ?? d.emissao;
     const desp = d.gerarDespesas ? lancarDespesa(empresaId, usuarioId, venc, d.categoria, `Compra${d.numero ? ' ' + d.numero : ''} — ${d.fornecedor_nome}`, d.valor_total) : null;
     db.prepare('INSERT INTO compra_parcelas (compra_id, vencimento, valor, despesa_id) VALUES (?,?,?,?)').run(cid, venc, d.valor_total, desp);
@@ -95,7 +100,7 @@ export function listarCompras(empresaId: number, mes: string) {
 }
 
 export function obterCompra(id: number) {
-  const c = db.prepare('SELECT id, empresa_id, fornecedor_documento, fornecedor_nome, numero, serie, chave_acesso, emissao, natureza, categoria, observacao, valor_produtos, valor_frete, valor_desconto, valor_outras, valor_icms, valor_ipi, valor_total, origem, criado_em, (xml IS NOT NULL) AS tem_xml FROM compras WHERE id = ?').get(id) as any;
+  const c = db.prepare('SELECT id, empresa_id, tipo_documento_id, fornecedor_documento, fornecedor_nome, numero, serie, chave_acesso, emissao, natureza, categoria, observacao, valor_produtos, valor_frete, valor_desconto, valor_outras, valor_icms, valor_ipi, valor_total, origem, criado_em, (xml IS NOT NULL) AS tem_xml FROM compras WHERE id = ?').get(id) as any;
   if (!c) throw new ErroNegocio('Compra não encontrada.', 404);
   c.itens = db.prepare('SELECT n_item, codigo, descricao, ncm, cfop, unidade, quantidade, valor_unitario, valor_total, desconto FROM compra_itens WHERE compra_id = ? ORDER BY n_item').all(id);
   c.parcelas = db.prepare('SELECT numero, vencimento, valor, despesa_id FROM compra_parcelas WHERE compra_id = ? ORDER BY vencimento, id').all(id);

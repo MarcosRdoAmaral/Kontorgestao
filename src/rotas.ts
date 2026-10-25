@@ -13,6 +13,7 @@ import { Despesa, criarDespesa, editarDespesa, excluirDespesa, listarCategorias,
 import { Classificacao, balancoExtrato, candidatosBoleto, classificar, conciliar, excluirImportacao, extratoDoMes, importarExtrato } from './servicos/extrato.js';
 import { catalogo, gerarRelatorio, relatorioCsv, relatorioPdf } from './servicos/relatorios.js';
 import { configurarAgenda, executarItem, executarProntas, listarAgenda, pularItem, resumoAgenda } from './servicos/agenda.js';
+import { EdicaoImposto, Perfil, TipoDocumento, apuracaoAssistida, conferirTipoDoVinculo, criarPerfil, criarTipo, editarImposto, editarPerfil, editarTipo, excluirPerfil, excluirTipo, gerarPerfisDosServicos, listarImpostos, listarPerfis, listarTipos, tributacaoDoPerfil, NATUREZAS } from './servicos/tributacao.js';
 import { CompraManual, OpcoesImportacao, criarCompraManual, excluirCompra, importarCompraXml, listarCompras, obterCompra, xmlDaCompra } from './servicos/compras.js';
 import { pacoteContabilidade } from './servicos/contabilidade.js';
 import { criarBackup, listarBackups } from './servicos/backup.js';
@@ -110,6 +111,7 @@ const Servico = z.object({
     municipioPrestacao: z.string().regex(/^\d{7}$/, 'Município da prestação: código IBGE de 7 dígitos').nullish().or(z.literal('').transform(() => null)),
     infoComplementar: z.string().max(2000).nullish(),
   }).nullish(),
+  tipo_documento_id: z.number().int().nullish(),
   ibscbs: z.object({
     indFinal: z.union([z.literal(0), z.literal(1)]),
     cIndOp: z.string().regex(/^\d{6}$/, 'Indicador da operação (cIndOp) precisa ter 6 dígitos'),
@@ -333,14 +335,14 @@ export async function rotas(app: FastifyInstance) {
       const id = Number((req.params as any).id);
       checarEmpresa(req, id);
       return db.prepare('SELECT * FROM servicos WHERE empresa_id = ? AND ativo = 1 ORDER BY nome').all(id)
-        .map((s: any) => ({ ...s, ibscbs: s.ibscbs_json ? JSON.parse(s.ibscbs_json) : null, tributacao: s.tributacao_json ? JSON.parse(s.tributacao_json) : null }));
+        .map((s: any) => ({ ...s, ibscbs: s.ibscbs_json ? JSON.parse(s.ibscbs_json) : null, tributacao: (s.tributacao_json || s.tipo_documento_id) ? { ...(s.tributacao_json ? JSON.parse(s.tributacao_json) : {}), ...(tributacaoDoPerfil(s.id) ?? {}) } : null }));
     });
     api.post('/api/empresas/:id/servicos', async (req) => {
       const id = Number((req.params as any).id);
       checarEmpresa(req, id);
       const d = Servico.parse(req.body);
-      const r = db.prepare(`INSERT INTO servicos (empresa_id, nome, descricao, c_trib_nac, c_trib_mun, c_nbs, aliquota, valor_padrao, ibscbs_json, tributacao_json) VALUES (?,?,?,?,?,?,?,?,?,?)`)
-        .run(id, d.nome, d.descricao, d.c_trib_nac, d.c_trib_mun || null, d.c_nbs, d.aliquota ?? null, d.valor_padrao ?? null, d.ibscbs ? JSON.stringify(d.ibscbs) : null, d.tributacao ? JSON.stringify(d.tributacao) : null);
+      const r = db.prepare(`INSERT INTO servicos (empresa_id, nome, descricao, c_trib_nac, c_trib_mun, c_nbs, aliquota, valor_padrao, ibscbs_json, tributacao_json, tipo_documento_id) VALUES (?,?,?,?,?,?,?,?,?,?,?)`)
+        .run(id, d.nome, d.descricao, d.c_trib_nac, d.c_trib_mun || null, d.c_nbs, d.aliquota ?? null, d.valor_padrao ?? null, d.ibscbs ? JSON.stringify(d.ibscbs) : null, d.tributacao ? JSON.stringify(d.tributacao) : null, conferirTipoDoVinculo(id, d.tipo_documento_id, 'SAIDA'));
       return { id: Number(r.lastInsertRowid) };
     });
     api.put('/api/servicos/:id', async (req) => {
@@ -349,8 +351,8 @@ export async function rotas(app: FastifyInstance) {
       if (!s) throw new ErroNegocio('Serviço não encontrado.', 404);
       checarEmpresa(req, s.empresa_id);
       const d = Servico.parse(req.body);
-      db.prepare(`UPDATE servicos SET nome=?, descricao=?, c_trib_nac=?, c_trib_mun=?, c_nbs=?, aliquota=?, valor_padrao=?, ibscbs_json=?, tributacao_json=? WHERE id=?`)
-        .run(d.nome, d.descricao, d.c_trib_nac, d.c_trib_mun || null, d.c_nbs, d.aliquota ?? null, d.valor_padrao ?? null, d.ibscbs ? JSON.stringify(d.ibscbs) : null, d.tributacao ? JSON.stringify(d.tributacao) : null, id);
+      db.prepare(`UPDATE servicos SET nome=?, descricao=?, c_trib_nac=?, c_trib_mun=?, c_nbs=?, aliquota=?, valor_padrao=?, ibscbs_json=?, tributacao_json=?, tipo_documento_id=? WHERE id=?`)
+        .run(d.nome, d.descricao, d.c_trib_nac, d.c_trib_mun || null, d.c_nbs, d.aliquota ?? null, d.valor_padrao ?? null, d.ibscbs ? JSON.stringify(d.ibscbs) : null, d.tributacao ? JSON.stringify(d.tributacao) : null, conferirTipoDoVinculo(s.empresa_id, d.tipo_documento_id, 'SAIDA'), id);
       return { ok: true };
     });
     api.delete('/api/servicos/:id', async (req) => {
@@ -723,6 +725,24 @@ export async function rotas(app: FastifyInstance) {
       const p = req.params as any; checarEmpresa(req, Number(p.id));
       excluirDespesa(Number(p.id), Number(p.did)); return { ok: true };
     });
+    // ---------- Tributação: impostos, perfis, tipos de documento e apuração assistida ----------
+    api.get('/api/tributacao/impostos', async () => listarImpostos());
+    api.put('/api/tributacao/impostos/:codigo', async (req) => { editarImposto(String((req.params as any).codigo), EdicaoImposto.parse(req.body)); return { ok: true }; });
+    api.get('/api/empresas/:id/tributacao/perfis', async (req) => { const id = Number((req.params as any).id); checarEmpresa(req, id); return listarPerfis(id); });
+    api.post('/api/empresas/:id/tributacao/perfis', async (req) => { const id = Number((req.params as any).id); checarEmpresa(req, id); return criarPerfil(id, Perfil.parse(req.body)); });
+    api.put('/api/empresas/:id/tributacao/perfis/:pid', async (req) => { const p = req.params as any; checarEmpresa(req, Number(p.id)); editarPerfil(Number(p.id), Number(p.pid), Perfil.parse(req.body)); return { ok: true }; });
+    api.delete('/api/empresas/:id/tributacao/perfis/:pid', async (req) => { const p = req.params as any; checarEmpresa(req, Number(p.id)); excluirPerfil(Number(p.id), Number(p.pid)); return { ok: true }; });
+    api.get('/api/empresas/:id/tributacao/tipos', async (req) => { const id = Number((req.params as any).id); checarEmpresa(req, id); return { tipos: listarTipos(id), naturezas: NATUREZAS }; });
+    api.post('/api/empresas/:id/tributacao/tipos', async (req) => { const id = Number((req.params as any).id); checarEmpresa(req, id); return criarTipo(id, TipoDocumento.parse(req.body)); });
+    api.put('/api/empresas/:id/tributacao/tipos/:tid', async (req) => { const p = req.params as any; checarEmpresa(req, Number(p.id)); editarTipo(Number(p.id), Number(p.tid), TipoDocumento.parse(req.body)); return { ok: true }; });
+    api.delete('/api/empresas/:id/tributacao/tipos/:tid', async (req) => { const p = req.params as any; checarEmpresa(req, Number(p.id)); excluirTipo(Number(p.id), Number(p.tid)); return { ok: true }; });
+    api.post('/api/empresas/:id/tributacao/gerar-dos-servicos', async (req) => { const id = Number((req.params as any).id); checarEmpresa(req, id); return gerarPerfisDosServicos(id); });
+    api.get('/api/empresas/:id/tributacao/apuracao', async (req) => {
+      const id = Number((req.params as any).id); checarEmpresa(req, id);
+      const q = z.object({ mes: z.string().regex(/^\d{4}-\d{2}$/), recalcular: z.string().optional() }).parse(req.query);
+      return apuracaoAssistida(id, q.mes, q.recalcular === '1');
+    });
+
     // ---------- Compras (NF-e de entrada) ----------
     const compraDoUsuario = (req: FastifyRequest, id: number) => {
       const c = db.prepare('SELECT empresa_id FROM compras WHERE id = ?').get(id) as { empresa_id: number } | undefined;

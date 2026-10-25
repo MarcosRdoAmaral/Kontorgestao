@@ -4,7 +4,7 @@
  * aqui (e a data/versão em MANUAL_VERSAO) antes de publicar a versão.
  * `corpo` é HTML escrito à mão (não recebe dados de usuário).
  */
-export const MANUAL_VERSAO = '3.2.0';
+export const MANUAL_VERSAO = '3.3.0';
 
 export const MANUAL = [
   {
@@ -139,6 +139,27 @@ export const MANUAL = [
       <p><strong>Lançar compra manual</strong> registra uma compra sem XML (cupom, recibo): fornecedor, data, valor, vencimento e categoria.</p>
       <h3>Detalhe, XML e exclusão</h3>
       <p>Clique na compra para ver itens, totais e parcelas e baixar o XML. <strong>Excluir compra</strong> (permissão <em>Excluir registros</em>) apaga também as despesas que ela gerou. O relatório <em>Compras (NF-e de entrada)</em> está em Relatórios. O acesso a Compras é liberado por usuário em Configurações &gt; Usuários e acessos.</p>`,
+  },
+  {
+    id: 'tributacao', titulo: 'Tributação e apuração assistida', resumo: 'Impostos, perfis, tipos de documento e comparação com o que as notas declaram.',
+    corpo: `
+      <p>Em <strong>Tributação</strong> você cadastra os impostos uma vez, junta em <em>perfis</em>, liga cada <em>tipo de documento</em> a um perfil e só então vincula serviços e compras ao tipo.</p>
+      <h3>1. Impostos</h3>
+      <p>Catálogo pronto: ISS, ICMS, IPI, PIS, COFINS, CSLL, IRRF, INSS, IBS (estadual e municipal) e CBS. Dá para renomear e desativar o que a empresa não usa.</p>
+      <h3>2. Perfis de tributação</h3>
+      <p>Um perfil é um conjunto de linhas: imposto, alíquota, redução de base, se é <strong>retido</strong>, CST e cClassTrib (IBS/CBS) e a <strong>vigência</strong> (de/até). Como as alíquotas do IBS/CBS mudam ao longo da transição, use uma linha por período; vale a que está em vigor na data do documento.</p>
+      <h3>3. Tipos de documento</h3>
+      <p>Cada tipo define o sentido (<em>saída</em> ou <em>entrada</em>), o modelo (NFS-e, NF-e de compra, manual), a natureza (serviço, revenda, insumo, uso e consumo, ativo imobilizado, devolução), o perfil, o código padrão, se <em>gera crédito</em> e o destino financeiro. Marque um tipo como <strong>padrão</strong> do sentido para ele valer quando o serviço ou a compra não indicar nenhum.</p>
+      <p>O botão <strong>Criar a partir dos serviços</strong> converte as retenções já cadastradas nos serviços em perfis e tipos, e vincula cada serviço.</p>
+      <h3>4. Vínculos</h3>
+      <ul>
+        <li><strong>Serviço (saída):</strong> no cadastro do serviço, campo <em>Tipo de documento</em>. Com tipo, as retenções e o ISS retido passam a vir do perfil, tanto na tela de emissão quanto no XML da DPS.</li>
+        <li><strong>Compra (entrada):</strong> ao importar o XML ou lançar manualmente, escolha o tipo (ou deixe o padrão).</li>
+      </ul>
+      <h3>5. Apuração assistida</h3>
+      <p>Escolha o mês. Para cada imposto o sistema mostra <strong>débitos</strong> (notas emitidas), <strong>créditos</strong> (compras de tipos que geram crédito) e o saldo, lado a lado em <em>calculado</em> (perfil aplicado ao valor) e <em>XML</em> (o que a nota declarou, inclusive IBS e CBS). Retenções aparecem à parte. A lista de <strong>divergências</strong> aponta, documento a documento, onde o cálculo e o XML diferem em mais de R$ 0,05.</p>
+      <p>O cálculo fica gravado no documento. Mudou um perfil? Use <strong>Recalcular</strong> para refazer o mês.</p>
+      <p class="dica">É uma conferência assistida, não a apuração oficial: valide sempre com o contador. O acesso é liberado por usuário (permissão <em>Tributação e apuração</em>).</p>`,
   },
   {
     id: 'despesas', titulo: 'Despesas e balanço', resumo: 'Lançar despesas e acompanhar receitas × despesas.',

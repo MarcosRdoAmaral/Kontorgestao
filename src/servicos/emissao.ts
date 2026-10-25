@@ -6,6 +6,7 @@ import { db } from '../db.js';
 import { decifrar, decifrarTexto } from '../cofre.js';
 import type { Usuario } from '../auth.js';
 import { lerPfx, type CertificadoA1 } from '../nfse/certificado.js';
+import { tributacaoDoPerfil } from './tributacao.js';
 import { montarDps, type DadosDPS } from '../nfse/dps.js';
 import { assinarXml } from '../nfse/assinatura.js';
 import { montarCancelamento } from '../nfse/evento.js';
@@ -206,7 +207,9 @@ export function comRetencoesDoServico<T extends EntradaEmissao>(e: T): T {
   const r = e.retencoes;
   if (r && Object.values(r).some((v) => v != null)) return e; // o usuário já definiu as retenções na nota
   const sv = db.prepare('SELECT tributacao_json FROM servicos WHERE id = ? AND empresa_id = ?').get(e.servicoId, e.empresaId) as any;
-  const t = sv?.tributacao_json ? JSON.parse(sv.tributacao_json) : null;
+  let t = sv?.tributacao_json ? JSON.parse(sv.tributacao_json) : null;
+  const doPerfil = tributacaoDoPerfil(e.servicoId); // serviço ligado a um tipo de documento: o perfil define as retenções
+  if (doPerfil) t = { ...(t ?? {}), ...doPerfil };
   if (!t) return e;
   const base = e.valor - (e.descontoIncondicionado ?? 0);
   const v = (pc?: number | null) => (pc ? Math.round(base * pc) / 100 : null);

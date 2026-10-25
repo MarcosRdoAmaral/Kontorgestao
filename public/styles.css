@@ -272,3 +272,7 @@ label.check { display: flex; flex-direction: row; align-items: center; gap: 8px;
 label.check input { width: auto; }
 #dialogo:has(.detalhe-compra) { width: min(960px, 94vw); max-width: none; }
 .detalhe-compra .tabela { font-size: 14px; }
+
+/* Tributação */
+#dialogo:has(.dialogo-largo) { width: min(1100px, 96vw); max-width: none; }
+.dialogo-largo td input, .dialogo-largo td select { width: 100%; min-width: 0; }

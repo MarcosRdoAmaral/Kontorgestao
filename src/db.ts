@@ -485,6 +485,87 @@ const migracoes: string[] = [
     despesa_id INTEGER REFERENCES despesas(id) ON DELETE SET NULL
   );
   CREATE INDEX idx_compra_parcelas ON compra_parcelas(compra_id);`,
+  // 19: tributação — catálogo de impostos, perfis (com vigência), tipos de documento e apuração assistida
+  `CREATE TABLE impostos (
+    codigo TEXT PRIMARY KEY,
+    nome TEXT NOT NULL,
+    grupo TEXT NOT NULL CHECK (grupo IN ('MUNICIPAL','ESTADUAL','FEDERAL','IBS_CBS')),
+    pode_reter INTEGER NOT NULL DEFAULT 0,
+    credita INTEGER NOT NULL DEFAULT 0,
+    ativo INTEGER NOT NULL DEFAULT 1,
+    ordem INTEGER NOT NULL DEFAULT 0
+  );
+  INSERT INTO impostos (codigo, nome, grupo, pode_reter, credita, ordem) VALUES
+    ('ISS','ISS (imposto sobre serviços)','MUNICIPAL',1,0,1),
+    ('ICMS','ICMS','ESTADUAL',0,1,2),
+    ('IPI','IPI','FEDERAL',0,1,3),
+    ('PIS','PIS','FEDERAL',1,1,4),
+    ('COFINS','COFINS','FEDERAL',1,1,5),
+    ('CSLL','CSLL','FEDERAL',1,0,6),
+    ('IRRF','IRRF','FEDERAL',1,0,7),
+    ('INSS','INSS (contribuição previdenciária)','FEDERAL',1,0,8),
+    ('IBS_UF','IBS — parcela estadual','IBS_CBS',0,1,9),
+    ('IBS_MUN','IBS — parcela municipal','IBS_CBS',0,1,10),
+    ('CBS','CBS','IBS_CBS',0,1,11);
+  CREATE TABLE perfis_tributacao (
+    id INTEGER PRIMARY KEY,
+    empresa_id INTEGER NOT NULL REFERENCES empresas(id),
+    nome TEXT NOT NULL,
+    descricao TEXT,
+    ativo INTEGER NOT NULL DEFAULT 1,
+    criado_em TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+  CREATE INDEX idx_perfis_empresa ON perfis_tributacao(empresa_id);
+  CREATE TABLE perfil_itens (
+    id INTEGER PRIMARY KEY,
+    perfil_id INTEGER NOT NULL REFERENCES perfis_tributacao(id) ON DELETE CASCADE,
+    imposto_codigo TEXT NOT NULL REFERENCES impostos(codigo),
+    aliquota REAL NOT NULL DEFAULT 0,
+    reducao_base REAL NOT NULL DEFAULT 0,
+    retido INTEGER NOT NULL DEFAULT 0,
+    cst TEXT,
+    c_class_trib TEXT,
+    vigencia_ini TEXT,
+    vigencia_fim TEXT
+  );
+  CREATE INDEX idx_perfil_itens ON perfil_itens(perfil_id);
+  CREATE TABLE tipos_documento (
+    id INTEGER PRIMARY KEY,
+    empresa_id INTEGER NOT NULL REFERENCES empresas(id),
+    nome TEXT NOT NULL,
+    sentido TEXT NOT NULL CHECK (sentido IN ('SAIDA','ENTRADA')),
+    modelo TEXT NOT NULL DEFAULT 'NFSE' CHECK (modelo IN ('NFSE','NFE','MANUAL')),
+    natureza TEXT,
+    perfil_id INTEGER REFERENCES perfis_tributacao(id) ON DELETE SET NULL,
+    c_trib_nac TEXT,
+    cfop TEXT,
+    ind_op TEXT,
+    gera_credito INTEGER NOT NULL DEFAULT 0,
+    destino TEXT NOT NULL DEFAULT 'NENHUM' CHECK (destino IN ('RECEITA','DESPESA','NENHUM')),
+    padrao INTEGER NOT NULL DEFAULT 0,
+    ativo INTEGER NOT NULL DEFAULT 1,
+    criado_em TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+  CREATE INDEX idx_tipos_empresa ON tipos_documento(empresa_id, sentido);
+  ALTER TABLE servicos ADD COLUMN tipo_documento_id INTEGER REFERENCES tipos_documento(id);
+  ALTER TABLE compras ADD COLUMN tipo_documento_id INTEGER REFERENCES tipos_documento(id);
+  CREATE TABLE documento_tributos (
+    id INTEGER PRIMARY KEY,
+    empresa_id INTEGER NOT NULL REFERENCES empresas(id),
+    origem TEXT NOT NULL CHECK (origem IN ('NOTA','COMPRA')),
+    documento_id INTEGER NOT NULL,
+    competencia TEXT NOT NULL,
+    imposto_codigo TEXT NOT NULL REFERENCES impostos(codigo),
+    base REAL NOT NULL DEFAULT 0,
+    aliquota REAL,
+    valor REAL NOT NULL DEFAULT 0,
+    retido INTEGER NOT NULL DEFAULT 0,
+    fonte TEXT NOT NULL CHECK (fonte IN ('CALCULADO','XML')),
+    perfil_id INTEGER,
+    calculado_em TEXT NOT NULL DEFAULT (datetime('now')),
+    UNIQUE (origem, documento_id, imposto_codigo, fonte)
+  );
+  CREATE INDEX idx_doc_tributos ON documento_tributos(empresa_id, competencia);`,
 ];
 
 export function migrar(): void {
