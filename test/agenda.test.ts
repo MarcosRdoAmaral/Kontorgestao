@@ -4,17 +4,18 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import crypto from 'node:crypto';
-import { dataPrevista } from '../src/servicos/agenda.js';
 
-test('agenda: data prevista no dia útil e último dia do mês', () => {
+const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'nfse-ag-'));
+Object.assign(process.env, { DATABASE_PATH: path.join(tmp, 'd.db'), STORAGE_DIR: tmp, MASTER_KEY: crypto.randomBytes(32).toString('base64'), SESSION_SECRET: 'x', NFSE_DESKTOP: '1' });
+
+test('agenda: data prevista no dia útil e último dia do mês', async () => {
+  const { dataPrevista } = await import('../src/servicos/agenda.js');
   assert.equal(dataPrevista('2026-11', 14), '2026-11-14'.replace('14', '16'), '14/11/2026 é sábado e 15 é feriado/domingo → segunda 16');
   assert.equal(dataPrevista('2026-02', 31), '2026-03-02', '28/02 é sábado → segunda 02/03');
   assert.equal(dataPrevista('2026-10', 5), '2026-10-05');
 });
 
 test('emissão automática: pronta no dia, confirma, não repete, pular e erro', async () => {
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'nfse-ag-'));
-  Object.assign(process.env, { DATABASE_PATH: path.join(tmp, 'd.db'), STORAGE_DIR: tmp, MASTER_KEY: crypto.randomBytes(32).toString('base64'), SESSION_SECRET: 'x', NFSE_DESKTOP: '1' });
   const { criarApp } = await import('../src/server.js');
   const { db } = await import('../src/db.js');
   const app = await criarApp();
