@@ -424,6 +424,23 @@ const migracoes: string[] = [
   `ALTER TABLE empresas ADD COLUMN modo_emissao TEXT NOT NULL DEFAULT 'CERTIFICADO';
   ALTER TABLE empresas ADD COLUMN portal_login TEXT;
   ALTER TABLE empresas ADD COLUMN portal_senha_enc TEXT;`,
+  // 17: emissão automática mensal (agenda por cliente) e histórico do que foi emitido em cada mês
+  `ALTER TABLE tomadores ADD COLUMN agenda_ativa INTEGER NOT NULL DEFAULT 0;
+  ALTER TABLE tomadores ADD COLUMN agenda_dia INTEGER;
+  CREATE TABLE agenda_execucoes (
+    id INTEGER PRIMARY KEY,
+    empresa_id INTEGER NOT NULL REFERENCES empresas(id),
+    tomador_id INTEGER NOT NULL REFERENCES tomadores(id),
+    servico_id INTEGER NOT NULL REFERENCES servicos(id),
+    competencia TEXT NOT NULL,                 -- AAAA-MM
+    status TEXT NOT NULL CHECK (status IN ('EMITIDA','ERRO','PULADA')),
+    valor REAL,
+    nota_id INTEGER REFERENCES notas(id),
+    cobranca_id INTEGER REFERENCES cobrancas(id),
+    mensagem TEXT,
+    criado_em TEXT NOT NULL DEFAULT (datetime('now')),
+    UNIQUE (tomador_id, servico_id, competencia)
+  );`,
 ];
 
 export function migrar(): void {

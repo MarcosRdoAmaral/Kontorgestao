@@ -11,6 +11,7 @@ import { BoletoAvulso, EntradaFaturamento, faturar, gerarBoletoAvulso, listarCob
 import { ContaBancaria, obterModelosWhatsapp, reemitirCobranca, salvarModelosWhatsapp, boletoPdf, cancelarCobranca, gerarRemessaEmpresa, listarRemessas, marcarPago, obterCobranca, obterConta, obterRemessa, processarRetorno, salvarConta } from './servicos/cobranca.js';
 import { Despesa, criarDespesa, editarDespesa, excluirDespesa, listarCategorias, listarDespesas, painelFinanceiro, salvarCategorias } from './servicos/financeiro.js';
 import { Classificacao, balancoExtrato, candidatosBoleto, classificar, conciliar, excluirImportacao, extratoDoMes, importarExtrato } from './servicos/extrato.js';
+import { configurarAgenda, executarItem, executarProntas, listarAgenda, pularItem, resumoAgenda } from './servicos/agenda.js';
 import { pacoteContabilidade } from './servicos/contabilidade.js';
 import { criarBackup, listarBackups } from './servicos/backup.js';
 import { consultarCnpj } from './servicos/consulta-cnpj.js';
@@ -451,6 +452,33 @@ export async function rotas(app: FastifyInstance) {
       const entrada = EntradaFaturamento.parse(req.body);
       checarEmpresa(req, entrada.empresaId);
       return faturar(u(req), entrada);
+    });
+
+    // ---------- Emissão automática (agenda mensal por cliente) ----------
+    const mesAgenda = z.string().regex(/^\d{4}-\d{2}$/);
+    api.get('/api/empresas/:id/agenda', async (req) => {
+      const id = Number((req.params as any).id); checarEmpresa(req, id);
+      const mes = mesAgenda.catch(new Date(Date.now() - 3 * 3600e3).toISOString().slice(0, 7)).parse((req.query as any).mes);
+      return { mes, itens: listarAgenda(id, mes), resumo: resumoAgenda(id, mes) };
+    });
+    api.post('/api/empresas/:id/agenda/config', async (req) => {
+      const id = Number((req.params as any).id); checarEmpresa(req, id);
+      const d = z.object({ tomadorId: z.number().int(), ativa: z.boolean(), dia: z.number().int().nullish() }).parse(req.body);
+      configurarAgenda(id, d.tomadorId, d.ativa, d.dia ?? null); return { ok: true };
+    });
+    api.post('/api/empresas/:id/agenda/executar', async (req) => {
+      const id = Number((req.params as any).id); checarEmpresa(req, id);
+      const d = z.object({ tomadorId: z.number().int(), servicoId: z.number().int(), mes: mesAgenda }).parse(req.body);
+      return executarItem(u(req), id, d.tomadorId, d.servicoId, d.mes);
+    });
+    api.post('/api/empresas/:id/agenda/executar-todas', async (req) => {
+      const id = Number((req.params as any).id); checarEmpresa(req, id);
+      return executarProntas(u(req), id, z.object({ mes: mesAgenda }).parse(req.body).mes);
+    });
+    api.post('/api/empresas/:id/agenda/pular', async (req) => {
+      const id = Number((req.params as any).id); checarEmpresa(req, id);
+      const d = z.object({ tomadorId: z.number().int(), servicoId: z.number().int(), mes: mesAgenda, desfazer: z.boolean().default(false) }).parse(req.body);
+      pularItem(id, d.tomadorId, d.servicoId, d.mes, d.desfazer); return { ok: true };
     });
 
     api.post('/api/empresas/:id/boleto-avulso', { preHandler: exigirPapel('admin', 'operador') }, async (req) => {

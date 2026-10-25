@@ -308,13 +308,13 @@ async function iniciar() {
 
 /** A tela pertence a algum módulo liberado para o usuário? (o servidor confere de novo em cada chamada) */
 function telaPermitida(nome) {
-  const modulo = { painel: 'painel', emitir: 'emitir', notas: 'notas', nota: 'notas', cobrancas: 'cobrancas', banco: 'banco', despesas: 'despesas', extrato: 'despesas', tomadores: 'tomadores', servicos: 'servicos', empresas: 'empresas' }[nome];
+  const modulo = { painel: 'painel', emitir: 'emitir', notas: 'notas', nota: 'notas', cobrancas: 'cobrancas', banco: 'banco', despesas: 'despesas', extrato: 'despesas', agenda: 'emitir', tomadores: 'tomadores', servicos: 'servicos', empresas: 'empresas' }[nome];
   return nome === 'config' || (modulo && estado.usuario.modulos.includes(modulo));
 }
 
 const rotas = {
   painel: telaPainel, emitir: telaEmitir, notas: telaNotas, nota: telaNota,
-  cobrancas: telaCobrancas, banco: telaBanco, despesas: telaDespesas, extrato: telaExtrato, tomadores: telaTomadores, servicos: telaServicos, empresas: telaEmpresas, config: telaConfig,
+  cobrancas: telaCobrancas, banco: telaBanco, despesas: telaDespesas, extrato: telaExtrato, agenda: telaAgenda, tomadores: telaTomadores, servicos: telaServicos, empresas: telaEmpresas, config: telaConfig,
 };
 
 function rotear() {
@@ -965,6 +965,71 @@ async function telaBanco() {
 // ---------------------------------------------------------------------------
 // Despesas e balanço
 // ---------------------------------------------------------------------------
+const STATUS_AGENDA = { SEM_AGENDA: ['Sem agenda', ''], AGENDADA: ['Agendada', ''], PRONTA: ['Pronta para confirmar', 'cor-ambar'], EMITIDA: ['Emitida', 'cor-verde'], ERRO: ['Com erro', 'cor-vermelho'], PULADA: ['Pulada neste mês', ''] };
+
+async function telaAgenda() {
+  const mes = telaAgenda.mes ?? mesAtual();
+  const base = `/api/empresas/${estado.empresaId}/agenda`;
+  const d = await api('GET', `${base}?mes=${mes}`);
+  const porCliente = new Map();
+  for (const i of d.itens) (porCliente.get(i.tomador_id) ?? porCliente.set(i.tomador_id, []).get(i.tomador_id)).push(i);
+  const prontas = d.itens.filter((i) => i.status === 'PRONTA' || i.status === 'ERRO');
+  const totalProntas = prontas.reduce((t, i) => t + i.valor, 0);
+  const acaoTxt = (m) => ({ NOTA: 'nota', NOTA_BOLETO: 'nota + boleto', BOLETO: 'boleto' }[m] ?? m);
+  conteudo.innerHTML = `
+    <div class="topo"><div><h1>Emissão automática</h1><p class="sutil">Todo mês, na data de cada cliente, o sistema deixa a emissão pronta com o serviço padrão e o valor cadastrados. Você confere e confirma; nada é emitido sem a sua confirmação.</p></div>
+      <div><label>Mês <input type="month" id="mes-ag" value="${mes}"></label>
+        <button class="primario" id="todas" ${prontas.length ? '' : 'disabled'}>Emitir ${prontas.length ? prontas.length + ' pronta(s)' : 'prontas'}</button></div></div>
+    ${porCliente.size ? `<div class="resumo">
+      <div class="cartao"><div class="sutil">Prontas para confirmar</div><div class="valor" style="color:${COR.laranja}">${d.resumo.prontas}</div><div class="dica">${prontas.length ? brl(totalProntas) + ' em serviços' : 'nada pendente'}</div></div>
+      <div class="cartao"><div class="sutil">Agendadas</div><div class="valor">${d.resumo.agendadas}</div><div class="dica">ainda não chegou a data</div></div>
+      <div class="cartao"><div class="sutil">Com erro</div><div class="valor" style="color:${d.resumo.erros ? COR.vermelho : COR.verde}">${d.resumo.erros}</div></div>
+    </div>
+    <div class="rolagem"><table class="tabela"><thead><tr><th>Cliente</th><th>Serviço</th><th class="num">Valor</th><th>O que gera</th><th>Data</th><th>Situação</th><th></th></tr></thead><tbody>
+    ${[...porCliente.values()].map((itens) => itens.map((i, k) => `<tr>
+      ${k === 0 ? `<td rowspan="${itens.length}"><strong>${esc(i.tomador)}</strong><br>${i.agenda_ativa ? `<span class="dica">todo dia ${i.agenda_dia}</span> ` : ''}<button data-cfg="${i.tomador_id}">${i.agenda_ativa ? 'Alterar' : 'Agendar'}</button></td>` : ''}
+      <td>${esc(i.servico)}</td><td class="num">${brl(i.valor)}</td><td>${acaoTxt(i.modo)}</td><td>${i.data_prevista ? dataBr(i.data_prevista) : '—'}</td>
+      <td><span class="${STATUS_AGENDA[i.status][1]}">${STATUS_AGENDA[i.status][0]}</span>${i.mensagem && i.status !== 'PULADA' ? `<br><span class="dica">${esc(i.mensagem)}</span>` : ''}</td>
+      <td class="acoes-linha">${i.status === 'PRONTA' || i.status === 'ERRO' ? `<button data-exe="${i.tomador_id}:${i.servico_id}">${i.status === 'ERRO' ? 'Tentar de novo' : 'Emitir'}</button> <button data-pul="${i.tomador_id}:${i.servico_id}">Pular</button>` : i.status === 'PULADA' ? `<button data-des="${i.tomador_id}:${i.servico_id}">Desfazer</button>` : i.nota_id ? `<a href="#/nota/${i.nota_id}">Ver nota</a>` : ''}</td></tr>`).join('')).join('')}
+    </tbody></table></div>`
+    : '<div class="vazio">Nenhum cliente com serviço padrão. Abra um cliente, cadastre o serviço e o valor na aba <strong>Serviços padrão</strong> e volte aqui para agendar. <a href="#/tomadores">Ir para Clientes</a></div>'}`;
+  $('#mes-ag').onchange = (ev) => { telaAgenda.mes = ev.target.value || mesAtual(); telaAgenda(); };
+  const recarregar = async () => { const y = window.scrollY; await telaAgenda(); window.scrollTo(0, y); };
+  const par = (v) => v.split(':').map(Number);
+  conteudo.querySelectorAll('[data-cfg]').forEach((b) => (b.onclick = () => {
+    const i = d.itens.find((x) => x.tomador_id === Number(b.dataset.cfg));
+    abrirDialogo(`<form id="form-ag"><h2>Emissão automática — ${esc(i.tomador)}</h2>
+      <p class="sutil">Gera ${acaoTxt(i.modo)} com os serviços padrão e valores do cadastro do cliente. Se o dia cair em fim de semana ou feriado, passa para o próximo dia útil.</p>
+      <div class="grade"><label class="largo"><span><input type="checkbox" name="ativa" ${i.agenda_ativa ? 'checked' : ''}> Agendar todo mês</span></label>
+        <label>Dia do mês <input name="dia" type="number" min="1" max="31" value="${i.agenda_dia ?? 5}"></label></div>
+      <p class="erro" id="erro-ag"></p><div class="acoes"><button class="primario" type="submit">Salvar</button><button type="button" data-fechar>Fechar</button></div></form>`, (dlg) => {
+      $('#form-ag').onsubmit = async (ev) => {
+        ev.preventDefault(); const f = ev.target;
+        try { await api('POST', `${base}/config`, { tomadorId: i.tomador_id, ativa: f.ativa.checked, dia: Number(f.dia.value) }); dlg.close(); await recarregar(); }
+        catch (e) { $('#erro-ag').textContent = mensagemErro(e); }
+      };
+    });
+  }));
+  const exec = async (b, rotulo) => {
+    const [t, sv] = par(b.dataset.exe); b.disabled = true; b.textContent = 'Emitindo…';
+    try { const r = await api('POST', `${base}/executar`, { tomadorId: t, servicoId: sv, mes }); aviso(r.status === 'EMITIDA' ? 'Emitido.' : (r.mensagem ?? 'Não foi possível emitir.')); }
+    catch (e) { aviso(mensagemErro(e)); }
+    await recarregar();
+  };
+  conteudo.querySelectorAll('[data-exe]').forEach((b) => (b.onclick = () => exec(b)));
+  conteudo.querySelectorAll('[data-pul],[data-des]').forEach((b) => (b.onclick = async () => {
+    const [t, sv] = par(b.dataset.pul ?? b.dataset.des);
+    await api('POST', `${base}/pular`, { tomadorId: t, servicoId: sv, mes, desfazer: !!b.dataset.des }); await recarregar();
+  }));
+  $('#todas').onclick = async () => {
+    if (!confirm(`Emitir agora ${prontas.length} item(ns), no total de ${brl(totalProntas)} em serviços?\nSerão geradas as notas e/ou boletos de cada cliente.`)) return;
+    const b = $('#todas'); b.disabled = true; b.textContent = 'Emitindo…';
+    try { const r = await api('POST', `${base}/executar-todas`, { mes }); aviso(`${r.emitidas} emitido(s)${r.erros ? `, ${r.erros} com erro` : ''}.`); }
+    catch (e) { aviso(mensagemErro(e)); }
+    await recarregar();
+  };
+}
+
 async function telaExtrato() {
   const mes = telaExtrato.mes ?? mesAtual();
   const filtro = telaExtrato.filtro ?? 'todos';
