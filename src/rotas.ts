@@ -23,7 +23,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { lerPfx } from './nfse/certificado.js';
 import { codMunicipioValido, cTribNacValido, documentoValido, limparDoc, soDigitos } from './nfse/validacao.js';
-import { EntradaEmissao, ErroNegocio, cancelar, danfse, emitir, enviar, importarNotaXml, obterNota, reconciliar } from './servicos/emissao.js';
+import { EntradaEmissao, ErroNegocio, cancelar, danfse, emitir, enviar, excluirNota, importarNotaXml, obterNota, reconciliar } from './servicos/emissao.js';
 import { MOTIVOS_CANCELAMENTO } from './nfse/evento.js';
 
 const u = (req: FastifyRequest) => req.usuario as Usuario;
@@ -602,6 +602,12 @@ export async function rotas(app: FastifyInstance) {
       const id = Number((req.params as any).id);
       notaDoUsuario(req, id);
       return reconciliar(id);
+    });
+
+    api.delete('/api/notas/:id', { preHandler: exigirPapel('admin', 'operador') }, async (req) => {
+      const id = Number((req.params as any).id);
+      notaDoUsuario(req, id);
+      return excluirNota(id);
     });
 
     api.post('/api/notas/:id/cancelar', { preHandler: exigirPapel('admin', 'operador') }, async (req) => {

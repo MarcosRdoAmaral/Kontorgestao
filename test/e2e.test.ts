@@ -221,6 +221,16 @@ test('fluxo completo: cadastro, emissão, rejeição, queda de rede, DANFSe e ca
   assert.equal(r.json.status, 'CANCELADA', JSON.stringify(r.json));
   assert.equal((await call('POST', `/api/notas/${nota1}/cancelar`, { cMotivo: 1, xMotivo: 'Erro no valor do serviço informado' }, token)).status, 400);
 
+  // 5a) exclusão: só nota não autorizada (autorizada e cancelada nunca)
+  assert.equal((await call('DELETE', `/api/notas/${nota1}`, undefined, token)).status, 400, 'cancelada não se exclui');
+  assert.equal((await call('DELETE', `/api/notas/${rej}`, undefined, token)).status, 400, 'autorizada (após reenvio) não se exclui');
+  modo = 'rejeitar';
+  const rej2 = (await call('POST', '/api/notas', base, token)).json;
+  modo = 'ok';
+  assert.equal(rej2.status, 'REJEITADA');
+  assert.equal((await call('DELETE', `/api/notas/${rej2.id}`, undefined, token)).status, 200);
+  assert.equal((await call('GET', `/api/notas/${rej2.id}`, undefined, token)).status, 404);
+
   // 5b) aviso de cancelamento por e-mail (PDF + XML da nota + XML do cancelamento)
   assert.equal((await call('POST', `/api/notas/${nota1}/email`, { para: ['cliente@x.com'], tipo: 'cancelamento' }, token)).status, 400, 'nota de teste não é enviada');
   bancoEmail.prepare('UPDATE notas SET ambiente = 1 WHERE id = ?').run(nota1);

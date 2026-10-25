@@ -1373,6 +1373,7 @@ async function telaNota(id) {
   const n = await api('GET', `/api/notas/${id}`);
   const p = n.payload;
   const podeCancelar = n.status === 'AUTORIZADA' && estado.usuario.papel !== 'cliente';
+  const podeExcluir = ['REJEITADA', 'ERRO_COMUNICACAO', 'PENDENTE'].includes(n.status) && !n.chave_acesso && estado.usuario.papel !== 'cliente';
   conteudo.innerHTML = `
     <div class="topo"><div>
       <h1>${n.n_nfse ? `NFS-e nº ${n.n_nfse}` : `DPS ${n.serie}/${n.n_dps}`}</h1>
@@ -1387,6 +1388,7 @@ async function telaNota(id) {
       ${['REJEITADA', 'ERRO_COMUNICACAO', 'PENDENTE'].includes(n.status) ? `<a href="#/emitir/${n.id}"><button type="button">Corrigir e reenviar</button></a><button id="b-reenviar">Reenviar sem alterar</button>` : ''}
       ${n.status === 'ERRO_COMUNICACAO' ? '<button id="b-consultar">Consultar na Sefin</button>' : ''}
       ${podeCancelar ? '<button class="perigo" id="b-cancelar">Cancelar nota</button>' : ''}
+      ${podeExcluir ? '<button class="perigo" id="b-excluir">Excluir nota</button>' : ''}
     </div>
     <h2>Dados</h2>
     <dl class="dados">
@@ -1457,6 +1459,11 @@ async function telaNota(id) {
   });
   acao('#b-reenviar', `/api/notas/${id}/reenviar`, (r) => `Situação: ${STATUS[r.status]}.`);
   acao('#b-consultar', `/api/notas/${id}/reconciliar`, (r) => (r.status === 'AUTORIZADA' ? 'A nota já havia sido gerada e foi recuperada.' : 'A Sefin não tem NFS-e para esta DPS. Pode reenviar.'));
+  $('#b-excluir') && ($('#b-excluir').onclick = async () => {
+    const aviso2 = n.status === 'REJEITADA' ? '' : '\n\nAtenção: a Sefin pode já ter gerado esta nota. Use "Consultar na Sefin" antes, se tiver dúvida.';
+    if (!confirm(`Excluir esta nota (DPS ${n.serie}/${n.n_dps})? Ela não foi autorizada e some do sistema. Não dá para desfazer.${aviso2}`)) return;
+    try { await api('DELETE', `/api/notas/${id}`); aviso('Nota excluída.'); location.hash = '#/notas'; } catch (e) { aviso(mensagemErro(e)); }
+  });
   $('#b-cancelar') && ($('#b-cancelar').onclick = () => abrirDialogo(`
     <form id="form-cancelar"><h2>Cancelar NFS-e nº ${n.n_nfse}</h2>
       <p class="sutil">O cancelamento é registrado na Sefin e não pode ser desfeito. Fora do prazo do seu município, ele pode exigir análise da prefeitura.</p>

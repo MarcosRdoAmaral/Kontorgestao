@@ -61,6 +61,7 @@ const REGRAS: Regra[] = [
   { r: /^\/api\/empresas\/\d+\/agenda(\/.*)?$/, mod: ['emitir'] },
   { m: 'POST', r: /^\/api\/empresas\/\d+\/notas\/importar-xml$/, mod: ['notas', 'emitir'] },
   { m: 'GET', r: /^\/api\/(notas|notas-lote)$|^\/api\/notas\/\d+(\/(danfse|xml|emails))?$/, mod: LER_NOTA },
+  { m: 'DELETE', r: /^\/api\/notas\/\d+$/, mod: ['notas', 'emitir'] },
   { m: 'POST', r: /^\/api\/notas\/\d+\/(email|reenviar|reconciliar|cancelar)$/, mod: ['notas', 'emitir'] },
   { m: 'GET', r: /^\/api\/relatorios\//, mod: ['painel'] },
   { m: 'GET', r: /^\/api\/empresas\/\d+\/painel$/, mod: ['painel'] },

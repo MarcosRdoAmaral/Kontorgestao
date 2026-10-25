@@ -326,6 +326,30 @@ export async function reconciliar(notaId: number) {
   return obterNota(notaId);
 }
 
+/**
+ * Exclui uma nota que NÃO foi autorizada (rejeitada, pendente ou sem resposta da Sefin).
+ * Autorizadas e canceladas são documentos fiscais e nunca podem ser apagadas — só canceladas.
+ * Boletos ligados à nota ficam no sistema, apenas sem o vínculo; a emissão automática do mês volta a ficar livre.
+ */
+export function excluirNota(notaId: number) {
+  const nota = db.prepare('SELECT id, status, chave_acesso FROM notas WHERE id = ?').get(notaId) as any;
+  if (!nota) throw new ErroNegocio('Nota não encontrada.');
+  if (nota.status === 'AUTORIZADA' || nota.status === 'CANCELADA' || nota.chave_acesso) {
+    throw new ErroNegocio('Nota autorizada não pode ser excluída. Se for o caso, cancele a nota.');
+  }
+  db.exec('BEGIN');
+  try {
+    db.prepare('UPDATE cobrancas SET nota_id = NULL WHERE nota_id = ?').run(notaId);
+    db.prepare('DELETE FROM agenda_execucoes WHERE nota_id = ?').run(notaId);
+    db.prepare('DELETE FROM emails_enviados WHERE nota_id = ?').run(notaId);
+    db.prepare('DELETE FROM eventos WHERE nota_id = ?').run(notaId);
+    db.prepare('DELETE FROM log_comunicacao WHERE nota_id = ?').run(notaId);
+    db.prepare('DELETE FROM notas WHERE id = ?').run(notaId);
+    db.exec('COMMIT');
+  } catch (e) { db.exec('ROLLBACK'); throw e; }
+  return { ok: true };
+}
+
 export async function cancelar(u: Usuario, notaId: number, cMotivo: 1 | 2 | 9, xMotivo: string) {
   const nota = db.prepare('SELECT * FROM notas WHERE id = ?').get(notaId) as any;
   if (!nota || nota.status !== 'AUTORIZADA') throw new ErroNegocio('Só é possível cancelar NFS-e autorizada.');
