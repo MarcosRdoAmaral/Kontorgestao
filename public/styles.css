@@ -51,6 +51,7 @@ a { color: var(--laranja); }
 .marca img { width: 100%; max-width: 168px; display: block; }
 .seletor-empresa span { display: block; font-size: .8rem; color: var(--tinta-2); margin-bottom: 4px; }
 .info-empresa { font-size: .8rem; color: var(--tinta-2); line-height: 1.5; }
+.info-empresa .nome-completo { color: var(--tinta); overflow-wrap: anywhere; }
 .info-empresa .alerta { color: var(--ambar); }
 nav { display: grid; gap: 2px; }
 nav a { color: #d6d6d6; text-decoration: none; padding: 9px 11px; border-radius: var(--raio); border-left: 3px solid transparent; }

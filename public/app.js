@@ -277,7 +277,9 @@ function infoEmpresa() {
   const e = empresa();
   if (!e) { $('#info-empresa').innerHTML = ''; return; }
   const dias = e.cert_validade ? Math.floor((new Date(e.cert_validade) - Date.now()) / 864e5) : null;
-  $('#info-empresa').innerHTML = `${fmtDoc(e.documento)}<br>
+  $('#empresa-atual').title = e.razao_social;
+  const nomeCompleto = e.nome_fantasia || e.razao_social;
+  $('#info-empresa').innerHTML = `<strong class="nome-completo">${esc(nomeCompleto)}</strong>${e.nome_fantasia && e.nome_fantasia !== e.razao_social ? `<br>${esc(e.razao_social)}` : ''}<br>${fmtDoc(e.documento)}<br>
     ${e.ambiente === 1 ? 'Produção' : '<span class="alerta">Produção restrita (testes)</span>'} · série ${esc(e.serie)}<br>
     ${!e.tem_certificado ? '<span class="alerta">Sem certificado A1</span>' : dias < 30 ? `<span class="alerta">Certificado vence em ${dias} dias</span>` : `Certificado até ${dataBr(e.cert_validade)}`}`;
 }
