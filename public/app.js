@@ -147,7 +147,9 @@ function graficoBarras(rotulos, series, destaque) {
   return svg + '</svg>';
 }
 const legenda = (itens) => `<div class="legenda">${itens.map(([cor, t]) => `<span><i style="background:${cor}"></i>${t}</span>`).join('')}</div>`;
-const COR = { verde: '#4ade80', laranja: '#fb923d', vermelho: '#f87171' };
+const cssVar = (n) => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+/** Cores dos gráficos acompanham o tema escolhido. */
+const COR = { get verde() { return cssVar('--verde'); }, get laranja() { return cssVar('--laranja'); }, get vermelho() { return cssVar('--vermelho'); } };
 
 // ---------------------------------------------------------------------------
 // Sessão e estrutura
@@ -308,7 +310,7 @@ async function iniciar() {
 
 /** A tela pertence a algum módulo liberado para o usuário? (o servidor confere de novo em cada chamada) */
 function telaPermitida(nome) {
-  const modulo = { painel: 'painel', emitir: 'emitir', notas: 'notas', nota: 'notas', cobrancas: 'cobrancas', banco: 'banco', despesas: 'despesas', extrato: 'despesas', agenda: 'emitir', relatorios: 'relatorios', tomadores: 'tomadores', servicos: 'servicos', empresas: 'empresas' }[nome];
+  const modulo = { painel: 'painel', emitir: 'emitir', notas: 'notas', nota: 'notas', cobrancas: 'cobrancas', banco: 'empresas', despesas: 'despesas', extrato: 'despesas', agenda: 'emitir', relatorios: 'relatorios', tomadores: 'tomadores', servicos: 'servicos', empresas: 'empresas' }[nome];
   return nome === 'config' || (modulo && estado.usuario.modulos.includes(modulo));
 }
 
@@ -727,7 +729,7 @@ async function telaCobrancas() {
         <button id="novo-boleto" class="primario">Novo boleto</button>
         <button id="modelo-wa">Mensagem do WhatsApp</button>
         <button id="ler-retorno" ${conta ? '' : 'disabled'}>Importar retorno</button><input type="file" id="arq-retorno" accept=".ret,.RET,.txt,.TXT,.rem,.REM,*/*" hidden></div>` : ''}</div>
-    ${conta ? '' : `<div class="banner teste">Os dados bancários (Ailos) desta empresa ainda não foram informados. <a href="#/banco">Informar agora</a> — os boletos pendentes são gerados automaticamente depois disso.</div>`}
+    ${conta ? '' : `<div class="banner teste">Os dados bancários (Ailos) desta empresa ainda não foram informados. <a href="#/banco">Informar agora (em Empresas › Dados bancários)</a> — os boletos pendentes são gerados automaticamente depois disso.</div>`}
     ${lista.length ? `<div class="rolagem"><table class="tabela"><thead><tr><th>Vencimento</th><th>Cliente</th><th>Nota</th><th class="num">Valor</th><th>Situação</th><th></th></tr></thead><tbody>
       ${lista.map((c) => `<tr><td>${dataBr(c.vencimento)}${c.status !== 'PAGO' && c.status !== 'CANCELADO' && c.vencimento < hoje ? ' <span class="dica erro">vencido</span>' : ''}</td>
         <td>${esc(c.tomador_nome)}<br><span class="dica">${esc((c.descricao ?? '').slice(0, 60))}</span>${c.desconto > 0 ? `<br><span class="dica">desconto de ${brl(c.desconto)}: ${esc(c.desconto_motivo ?? '')}</span>` : ''}</td>
@@ -910,7 +912,7 @@ async function telaCobrancas() {
 async function telaBanco() {
   const c = (await api('GET', `/api/empresas/${estado.empresaId}/conta-bancaria`)) ?? { cooperativa_nome: 'Ailos', carteira: '01', multa_pct: 2, juros_pct_mes: 1 };
   conteudo.innerHTML = `
-    <div class="topo"><div><h1>Dados bancários</h1><p class="sutil">${esc(empresa().razao_social)} — cobrança Ailos (banco 085)</p></div></div>
+    <div class="topo"><div><p class="sutil"><a href="#/empresas">← Empresas</a></p><h1>Dados bancários</h1><p class="sutil">${esc(empresa().razao_social)} — cobrança Ailos (banco 085)</p></div></div>
     <form id="form-banco">
       <fieldset><legend>Conta e convênio de cobrança</legend><p class="dica">Peça estes dados à sua cooperativa: o número do convênio de cobrança e a carteira são informados por ela.</p><div class="grade">
         <label>Cooperativa <input name="cooperativa_nome" required maxlength="30" value="${esc(c.cooperativa_nome ?? '')}"></label>
@@ -1930,12 +1932,17 @@ async function telaEmpresas() {
     ${lista.length ? `<div class="rolagem"><table class="tabela"><thead><tr><th>Empresa</th><th>Documento</th><th>Regime</th><th>Ambiente</th><th>Certificado</th><th></th></tr></thead><tbody>
       ${lista.map((e, i) => `<tr><td>${esc(e.razao_social)}</td><td>${fmtDoc(e.documento)}</td><td>${['', 'Não optante', 'MEI', 'Simples ME/EPP'][e.op_simp_nac]}</td>
         <td>${e.ambiente === 1 ? 'Produção' : 'Testes'}</td><td>${e.modo_emissao === 'PORTAL' ? 'Portal (CNPJ e senha)' : e.tem_certificado ? `até ${dataBr(e.cert_validade)}` : '<span class="pendente-txt">Falta enviar</span>'}</td>
-        <td><button data-editar="${i}">Editar</button> ${e.modo_emissao === 'PORTAL' ? '' : `<button data-cert="${i}">Certificado</button>`} <button data-logo="${i}">${e.tem_logo ? 'Logo ✓' : 'Logo'}</button></td></tr>`).join('')}
+        <td><button data-editar="${i}">Editar</button> ${e.modo_emissao === 'PORTAL' ? '' : `<button data-cert="${i}">Certificado</button>`} <button data-logo="${i}">${e.tem_logo ? 'Logo ✓' : 'Logo'}</button> <button data-banco="${i}">Dados bancários</button></td></tr>`).join('')}
     </tbody></table></div>` : '<div class="vazio">Cadastre a primeira empresa cliente do escritório.</div>'}`;
   $('#novo').onclick = () => formEmpresa();
   conteudo.querySelectorAll('[data-editar]').forEach((b) => (b.onclick = () => formEmpresa(lista[b.dataset.editar])));
   conteudo.querySelectorAll('[data-cert]').forEach((b) => (b.onclick = () => formCertificado(lista[b.dataset.cert])));
   conteudo.querySelectorAll('[data-logo]').forEach((b) => (b.onclick = () => formLogo(lista[b.dataset.logo])));
+  conteudo.querySelectorAll('[data-banco]').forEach((b) => (b.onclick = () => {
+    estado.empresaId = lista[b.dataset.banco].id; localStorage.setItem('empresaId', estado.empresaId);
+    api('PUT', '/api/me/empresa', { id: estado.empresaId }).catch(() => {});
+    $('#empresa-atual').value = estado.empresaId; infoEmpresa(); location.hash = '#/banco';
+  }));
 }
 
 // ---------------------------------------------------------------------------
@@ -1952,14 +1959,14 @@ async function telaConfig(aba) {
   const adm = estado.usuario.tipo === 'adm';
   const abas = [
     ['conta', 'Minha conta', true], ['usuarios', 'Usuários e acessos', adm], ['email', 'E-mail', adm],
-    ['backup', 'Backup', adm], ['contabilidade', 'Contabilidade', adm], ['licenca', 'Licença', true], ['atualizacoes', 'Atualizações', true],
+    ['aparencia', 'Aparência', true], ['backup', 'Backup', adm], ['contabilidade', 'Contabilidade', adm], ['licenca', 'Licença', true], ['atualizacoes', 'Atualizações', true],
   ].filter((x) => x[2]);
   if (!abas.some((x) => x[0] === aba)) aba = abas[0][0];
   conteudo.innerHTML = `
     <div class="topo"><div><h1>Configurações</h1><p class="sutil">Ajustes gerais do sistema${adm ? '' : ' e da sua conta'}.</p></div></div>
     <nav class="abas" aria-label="Configurações">${abas.map(([k, nome]) => `<a href="#/config/${k}" class="${k === aba ? 'ativo' : ''}">${nome}</a>`).join('')}</nav>
     <div id="cfg-corpo"></div>`;
-  const tela = { conta: telaMinhaConta, usuarios: telaUsuarios, email: telaEmail, backup: telaBackup, contabilidade: telaContabilidade, licenca: telaLicenca, atualizacoes: telaAtualizacoes }[aba];
+  const tela = { conta: telaMinhaConta, usuarios: telaUsuarios, email: telaEmail, aparencia: telaAparencia, backup: telaBackup, contabilidade: telaContabilidade, licenca: telaLicenca, atualizacoes: telaAtualizacoes }[aba];
   await tela();
 }
 
@@ -1974,6 +1981,27 @@ function telaMinhaConta() {
       <div class="acoes"><button class="primario" id="alterar-senha">Alterar minha senha</button></div>
     </div>`;
   $('#alterar-senha').onclick = () => trocarSenha();
+}
+
+const TEMAS = [
+  { id: 'preto-laranja', nome: 'Preto e laranja', cores: ['#0f0f0f', '#0a0a0a', '#fb923d'] },
+  { id: 'branco-laranja', nome: 'Branco e laranja', cores: ['#ffffff', '#f6f3ef', '#d9600c'] },
+  { id: 'azul-dourado', nome: 'Azul e dourado', cores: ['#060d1d', '#091226', '#dcb25a'] },
+];
+function aplicarTema(id) {
+  document.documentElement.dataset.tema = id;
+  try { localStorage.setItem('tema', id); } catch { /* sem armazenamento: vale só nesta sessão */ }
+}
+
+function telaAparencia() {
+  const atual = document.documentElement.dataset.tema || 'preto-laranja';
+  corpoConfig().innerHTML = `
+    <h2>Aparência</h2>
+    <div class="cartao"><p class="sutil">Escolha as cores do sistema. A escolha vale para este computador e é guardada para as próximas vezes.</p>
+      <div class="temas">${TEMAS.map((t) => `<button type="button" class="tema-opcao ${t.id === atual ? 'ativo' : ''}" data-tema="${t.id}" aria-pressed="${t.id === atual}">
+        <span class="tema-amostra" style="background:${t.cores[1]}"><i style="background:${t.cores[0]}"></i><b style="background:${t.cores[2]}"></b></span>
+        <strong>${t.nome}</strong></button>`).join('')}</div></div>`;
+  corpoConfig().querySelectorAll('[data-tema]').forEach((b) => (b.onclick = () => { aplicarTema(b.dataset.tema); telaAparencia(); }));
 }
 
 async function telaContabilidade() {

@@ -51,8 +51,8 @@ const REGRAS: Regra[] = [
   { r: /^\/api\/empresas\/\d+\/tomadores$|^\/api\/tomadores\/\d+$/, mod: ['tomadores'] },
   { m: 'GET', r: /^\/api\/empresas\/\d+\/servicos$/, mod: ['servicos', 'emitir'] },
   { r: /^\/api\/empresas\/\d+\/servicos$|^\/api\/servicos\/\d+$/, mod: ['servicos'] },
-  { m: 'GET', r: /^\/api\/empresas\/\d+\/conta-bancaria$/, mod: ['banco', 'cobrancas', 'emitir'] },
-  { r: /^\/api\/empresas\/\d+\/conta-bancaria$/, mod: ['banco'] },
+  { m: 'GET', r: /^\/api\/empresas\/\d+\/conta-bancaria$/, mod: ['banco', 'empresas', 'cobrancas', 'emitir'] },
+  { r: /^\/api\/empresas\/\d+\/conta-bancaria$/, mod: ['banco', 'empresas'] },
   { r: /^\/api\/(empresas\/\d+\/(cobrancas|remessas|retorno|boleto-avulso)|cobrancas\/\d+\/(cancelar|pagar|reemitir)|empresas\/\d+\/modelos-whatsapp|remessas\/\d+\/arquivo)$/, mod: ['cobrancas'] },
   { m: 'GET', r: /^\/api\/cobrancas\/\d+\/boleto$/, mod: ['cobrancas', 'notas', 'emitir'] },
   { m: 'POST', r: /^\/api\/(notas|faturar)$/, mod: ['emitir'] },
@@ -66,8 +66,8 @@ const REGRAS: Regra[] = [
   { m: 'GET', r: /^\/api\/empresas\/\d+\/painel$/, mod: ['painel'] },
   { r: /^\/api\/empresas\/\d+\/(despesas(\/\d+)?|despesas-categorias)$/, mod: ['despesas'] },
   { r: /^\/api\/empresas\/\d+\/extrato(\/.*)?$/, mod: ['despesas'] },
-  { m: 'GET', r: /^\/api\/empresas\/\d+\/feriados$/, mod: ['banco', 'emitir'] },
-  { r: /^\/api\/empresas\/\d+\/feriados$/, mod: ['banco'] },
+  { m: 'GET', r: /^\/api\/empresas\/\d+\/feriados$/, mod: ['banco', 'empresas', 'emitir'] },
+  { r: /^\/api\/empresas\/\d+\/feriados$/, mod: ['banco', 'empresas'] },
 ];
 
 /** null = permitido; senão a mensagem de recusa. */
