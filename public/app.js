@@ -396,13 +396,13 @@ async function iniciar() {
 
 /** A tela pertence a algum módulo liberado para o usuário? (o servidor confere de novo em cada chamada) */
 function telaPermitida(nome) {
-  const modulo = { painel: 'painel', emitir: 'emitir', notas: 'notas', nota: 'notas', cobrancas: 'cobrancas', banco: 'empresas', despesas: 'despesas', extrato: 'despesas', agenda: 'emitir', relatorios: 'relatorios', tomadores: 'tomadores', servicos: 'servicos', empresas: 'empresas' }[nome];
+  const modulo = { painel: 'painel', emitir: 'emitir', notas: 'notas', nota: 'notas', cobrancas: 'cobrancas', banco: 'empresas', despesas: 'despesas', compras: 'compras', extrato: 'despesas', agenda: 'emitir', relatorios: 'relatorios', tomadores: 'tomadores', servicos: 'servicos', empresas: 'empresas' }[nome];
   return nome === 'config' || (modulo && estado.usuario.modulos.includes(modulo));
 }
 
 const rotas = {
   painel: telaPainel, emitir: telaEmitir, notas: telaNotas, nota: telaNota,
-  cobrancas: telaCobrancas, banco: telaBanco, despesas: telaDespesas, extrato: telaExtrato, agenda: telaAgenda, relatorios: telaRelatorios, tomadores: telaTomadores, servicos: telaServicos, empresas: telaEmpresas, config: telaConfig,
+  cobrancas: telaCobrancas, banco: telaBanco, despesas: telaDespesas, compras: telaCompras, extrato: telaExtrato, agenda: telaAgenda, relatorios: telaRelatorios, tomadores: telaTomadores, servicos: telaServicos, empresas: telaEmpresas, config: telaConfig,
 };
 
 function rotear() {
@@ -1051,6 +1051,101 @@ async function telaBanco() {
       aviso('Dados bancários salvos.'); telaBanco();
     } catch (e) { $('#erro-banco').textContent = mensagemErro(e); }
   };
+}
+
+// ---------------------------------------------------------------------------
+// Compras (NF-e de entrada)
+// ---------------------------------------------------------------------------
+async function telaCompras() {
+  const mes = telaCompras.mes ?? mesAtual();
+  const base = `/api/empresas/${estado.empresaId}`;
+  const [d, cat] = await Promise.all([api('GET', `${base}/compras?mes=${mes}`), api('GET', `${base}/despesas?mes=${mes}`).then((x) => x.categorias).catch(() => ['Outras'])]);
+  const opcCat = (sel) => cat.map((c) => `<option ${c === sel ? 'selected' : ''}>${esc(c)}</option>`).join('');
+  conteudo.innerHTML = `
+    <div class="topo"><div><h1>Compras</h1><p class="sutil">Notas fiscais de mercadorias que a empresa comprou. Importe o XML da NF-e (um ou vários arquivos) ou lance a compra manualmente.</p></div>
+      <div><label>Mês <input type="month" id="mes-comp" value="${mes}"></label>
+        <button class="primario" id="imp-xml">Importar XML da NF-e</button><input type="file" id="arq-xml" accept=".xml,text/xml,application/xml" multiple hidden>
+        <button id="nova-compra">Lançar compra manual</button></div></div>
+    <div class="resumo">
+      <div class="cartao"><div class="sutil">Total comprado</div><div class="valor">${compacto(d.total)}</div><div class="dica">${d.compras.length} compra(s) em ${nomeMes(mes)}</div></div>
+      <div class="cartao"><div class="sutil">Maiores fornecedores</div>${d.fornecedores.length ? d.fornecedores.map((f) => `<div class="dica">${esc(f.nome)} · <strong>${brl(f.total)}</strong></div>`).join('') : '<div class="dica">—</div>'}</div>
+    </div>
+    ${d.compras.length ? `<div class="rolagem"><table class="tabela"><thead><tr><th>Emissão</th><th>Fornecedor</th><th>NF</th><th class="num">Itens</th><th class="num">Total</th><th>Despesas</th><th></th></tr></thead><tbody>
+      ${d.compras.map((c) => `<tr class="clicavel" data-c="${c.id}"><td>${dataBr(c.emissao)}</td><td>${esc(c.fornecedor_nome)}${c.fornecedor_documento ? `<br><span class="dica">${fmtDoc(c.fornecedor_documento)}</span>` : ''}</td>
+        <td>${esc(c.numero ?? '')}${c.origem === 'MANUAL' ? ' <span class="dica">(manual)</span>' : ''}</td><td class="num">${c.itens || ''}</td><td class="num">${brl(c.valor_total)}</td>
+        <td>${c.despesas ? `<span class="cor-verde">lançadas (${esc(c.categoria ?? '')})</span>` : '<span class="dica">não lançadas</span>'}</td><td><button data-ver="${c.id}">Abrir</button></td></tr>`).join('')}
+    </tbody></table></div>` : '<div class="vazio">Nenhuma compra neste mês. Importe o XML da NF-e recebida do fornecedor.</div>'}`;
+  $('#mes-comp').onchange = (e) => { telaCompras.mes = e.target.value; telaCompras(); };
+  conteudo.querySelectorAll('[data-ver]').forEach((b) => (b.onclick = (ev) => { ev.stopPropagation(); detalheCompra(Number(b.dataset.ver), telaCompras); }));
+  conteudo.querySelectorAll('tr[data-c]').forEach((tr) => (tr.onclick = () => detalheCompra(Number(tr.dataset.c), telaCompras)));
+
+  $('#imp-xml').onclick = () => $('#arq-xml').click();
+  $('#arq-xml').onchange = (ev) => {
+    const arqs = [...ev.target.files]; ev.target.value = '';
+    if (!arqs.length) return;
+    abrirDialogo(`<form id="form-imp"><h2>Importar ${arqs.length} XML de NF-e</h2>
+      <p class="dica">${arqs.map((a) => esc(a.name)).join(', ')}</p>
+      <label class="check"><input type="checkbox" name="gerar" checked> Lançar as parcelas (ou o total, se à vista) nas <strong>despesas</strong>, na data de vencimento</label>
+      <label>Categoria da despesa <select name="categoria">${opcCat('Material e equipamentos')}</select></label>
+      <div id="res-imp"></div>
+      <div class="acoes"><button class="primario" type="submit">Importar</button><button type="button" data-fechar>Fechar</button></div></form>`, (dlg) => {
+      dlg.querySelector('#form-imp').onsubmit = async (e2) => {
+        e2.preventDefault();
+        const f = e2.target, btn = f.querySelector('[type=submit]'); btn.disabled = true; btn.textContent = 'Importando…';
+        const linhas = [];
+        for (const a of arqs) {
+          try {
+            const r = await api('POST', `${base}/compras/importar-xml`, { xml: await a.text(), gerarDespesas: f.gerar.checked, categoria: f.categoria.value });
+            linhas.push(`<li class="cor-verde">NF ${esc(r.numero)} — ${esc(r.fornecedor)} · ${brl(r.valor)} · ${r.itens} item(ns)${r.alertas.map((x) => `<br><span class="aviso-txt">⚠ ${esc(x)}</span>`).join('')}</li>`);
+          } catch (err) { linhas.push(`<li class="cor-vermelho">${esc(a.name)}: ${esc(mensagemErro(err))}</li>`); }
+        }
+        f.querySelector('#res-imp').innerHTML = `<ul class="lista-simples">${linhas.join('')}</ul>`;
+        btn.textContent = 'Concluído'; telaCompras();
+      };
+    });
+  };
+
+  $('#nova-compra').onclick = () => abrirDialogo(`<form id="form-comp"><h2>Lançar compra manual</h2>
+    <div class="grade">
+      <label class="largo">Fornecedor <input name="fornecedor_nome" required maxlength="120"></label>
+      <label>CNPJ/CPF <input name="fornecedor_documento" maxlength="20"></label>
+      <label>Nº da nota/documento <input name="numero" maxlength="30"></label>
+      <label>Data da compra <input type="date" name="emissao" required value="${new Date(Date.now() - 3 * 3600e3).toISOString().slice(0, 10)}"></label>
+      <label>Valor total (R$) <input name="valor_total" data-num inputmode="decimal" required></label>
+      <label>Vencimento <input type="date" name="vencimento"></label>
+      <label>Categoria <select name="categoria">${opcCat('Material e equipamentos')}</select></label>
+      <label class="largo">Observação <input name="observacao" maxlength="300"></label>
+    </div>
+    <label class="check"><input type="checkbox" name="gerar" checked> Lançar nas despesas</label>
+    <p class="erro" id="erro-comp"></p>
+    <div class="acoes"><button class="primario" type="submit">Salvar</button><button type="button" data-fechar>Cancelar</button></div></form>`, (dlg) => {
+    dlg.querySelector('#form-comp').onsubmit = async (e2) => {
+      e2.preventDefault(); const f = e2.target; const v = lerForm(f);
+      try {
+        await api('POST', `${base}/compras`, { fornecedor_nome: v.fornecedor_nome, fornecedor_documento: v.fornecedor_documento, numero: v.numero, emissao: v.emissao, valor_total: v.valor_total, vencimento: v.vencimento, observacao: v.observacao, categoria: f.categoria.value, gerarDespesas: f.gerar.checked });
+        dlg.close(); aviso('Compra lançada.'); telaCompras();
+      } catch (err) { $('#erro-comp').textContent = mensagemErro(err); }
+    };
+  });
+}
+
+async function detalheCompra(id, voltar) {
+  const c = await api('GET', `/api/compras/${id}`);
+  abrirDialogo(`<div class="detalhe-compra"><h2>NF ${esc(c.numero ?? '')} — ${esc(c.fornecedor_nome)}</h2>
+    <p class="sutil">${c.fornecedor_documento ? fmtDoc(c.fornecedor_documento) + ' · ' : ''}emitida em ${dataBr(c.emissao)}${c.natureza ? ' · ' + esc(c.natureza) : ''}${c.origem === 'MANUAL' ? ' · lançamento manual' : ''}</p>
+    ${c.chave_acesso ? `<p class="dica">Chave de acesso: ${esc(c.chave_acesso)}</p>` : ''}${c.observacao ? `<p>${esc(c.observacao)}</p>` : ''}
+    ${c.itens.length ? `<h3>Itens</h3><div class="rolagem"><table class="tabela"><thead><tr><th>#</th><th>Descrição</th><th>NCM</th><th class="num">Qtd</th><th class="num">Unitário</th><th class="num">Total</th></tr></thead><tbody>
+      ${c.itens.map((i) => `<tr><td>${i.n_item}</td><td>${esc(i.descricao)}${i.codigo ? `<br><span class="dica">cód. ${esc(i.codigo)}</span>` : ''}</td><td>${esc(i.ncm ?? '')}</td><td class="num">${String(i.quantidade).replace('.', ',')} ${esc(i.unidade ?? '')}</td><td class="num">${brl(i.valor_unitario)}</td><td class="num">${brl(i.valor_total)}</td></tr>`).join('')}</tbody></table></div>` : ''}
+    <h3>Totais</h3><dl class="dados"><dt>Produtos</dt><dd>${brl(c.valor_produtos)}</dd>${c.valor_frete ? `<dt>Frete e seguro</dt><dd>${brl(c.valor_frete)}</dd>` : ''}${c.valor_outras ? `<dt>Outras despesas</dt><dd>${brl(c.valor_outras)}</dd>` : ''}${c.valor_desconto ? `<dt>Desconto</dt><dd>${brl(c.valor_desconto)}</dd>` : ''}${c.valor_icms ? `<dt>ICMS</dt><dd>${brl(c.valor_icms)}</dd>` : ''}${c.valor_ipi ? `<dt>IPI</dt><dd>${brl(c.valor_ipi)}</dd>` : ''}<dt>Total da nota</dt><dd><strong>${brl(c.valor_total)}</strong></dd></dl>
+    <h3>Parcelas</h3><table class="tabela"><thead><tr><th>Parcela</th><th>Vencimento</th><th class="num">Valor</th><th>Despesa</th></tr></thead><tbody>
+      ${c.parcelas.map((p) => `<tr><td>${esc(p.numero ?? '')}</td><td>${dataBr(p.vencimento)}</td><td class="num">${brl(p.valor)}</td><td>${p.despesa_id ? 'lançada' : '<span class="dica">não lançada</span>'}</td></tr>`).join('')}</tbody></table>
+    <div class="acoes">${c.tem_xml ? '<button id="c-xml">Baixar XML</button>' : ''}${podeExcluirRegistros() ? '<button class="perigo" id="c-excluir">Excluir compra</button>' : ''}<button data-fechar>Fechar</button></div></div>`, (dlg) => {
+    dlg.querySelector('#c-xml')?.addEventListener('click', () => baixar(`/api/compras/${id}/xml`, `NFe_${c.numero ?? id}.xml`));
+    dlg.querySelector('#c-excluir')?.addEventListener('click', async () => {
+      if (!confirm('Excluir esta compra? As despesas que ela gerou também serão apagadas. Não dá para desfazer.')) return;
+      try { await api('DELETE', `/api/compras/${id}`); dlg.close(); aviso('Compra excluída.'); voltar(); } catch (e) { aviso(mensagemErro(e)); }
+    });
+  });
 }
 
 // ---------------------------------------------------------------------------

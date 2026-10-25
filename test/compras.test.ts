@@ -1,0 +1,81 @@
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+
+const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'compras-'));
+process.env.DATABASE_PATH = path.join(dir, 'd.db');
+process.env.STORAGE_DIR = dir;
+process.env.MASTER_KEY = Buffer.alloc(32, 7).toString('base64');
+process.env.SESSION_SECRET = 'x';
+process.env.NFSE_DESKTOP = '1';
+
+const chave = '35261012345678000195550010000012341000012345';
+const nfe = (extra = '', ch = chave, destino = '10512356000168') => `<?xml version="1.0" encoding="UTF-8"?>
+<nfeProc xmlns="http://www.portalfiscal.inf.br/nfe" versao="4.00"><NFe><infNFe Id="NFe${ch}" versao="4.00">
+<ide><cUF>35</cUF><natOp>Venda de mercadoria</natOp><mod>55</mod><serie>1</serie><nNF>1234</nNF><dhEmi>2026-10-10T10:00:00-03:00</dhEmi></ide>
+<emit><CNPJ>12345678000195</CNPJ><xNome>Papelaria Central Ltda</xNome><xFant>Central</xFant><enderEmit><xMun>Florianópolis</xMun><UF>SC</UF></enderEmit></emit>
+<dest><CNPJ>${destino}</CNPJ><xNome>BARBIERI SERVICOS</xNome></dest>
+<det nItem="1"><prod><cProd>A1</cProd><xProd>Papel A4</xProd><NCM>48025610</NCM><CFOP>5102</CFOP><uCom>CX</uCom><qCom>10.0000</qCom><vUnCom>20.0000</vUnCom><vProd>200.00</vProd></prod></det>
+<det nItem="2"><prod><cProd>B2</cProd><xProd>Caneta</xProd><NCM>96081000</NCM><CFOP>5102</CFOP><uCom>UN</uCom><qCom>5.0000</qCom><vUnCom>10.0000</vUnCom><vProd>50.00</vProd></prod></det>
+<total><ICMSTot><vProd>250.00</vProd><vFrete>10.00</vFrete><vSeg>0.00</vSeg><vDesc>0.00</vDesc><vOutro>0.00</vOutro><vICMS>0.00</vICMS><vIPI>0.00</vIPI><vNF>260.00</vNF></ICMSTot></total>
+${extra}</infNFe></NFe><protNFe versao="4.00"><infProt><chNFe>${ch}</chNFe><cStat>100</cStat></infProt></protNFe></nfeProc>`;
+const cobr = '<cobr><dup><nDup>001</nDup><dVenc>2026-11-10</dVenc><vDup>130.00</vDup></dup><dup><nDup>002</nDup><dVenc>2026-12-10</dVenc><vDup>130.00</vDup></dup></cobr>';
+
+test('compras: leitura da NF-e, importação, despesas, duplicidade, exclusão e relatório', async () => {
+  const { migrar, db } = await import('../src/db.js');
+  migrar();
+  const { lerNfe } = await import('../src/nfe/leitura.js');
+  const l = lerNfe(nfe(cobr));
+  assert.equal(l.chave, chave);
+  assert.equal(l.numero, '1234');
+  assert.equal(l.emissao, '2026-10-10');
+  assert.equal(l.fornecedor.nome, 'Papelaria Central Ltda');
+  assert.equal(l.itens.length, 2);
+  assert.equal(l.itens[0].quantidade, 10);
+  assert.equal(l.totais.nf, 260);
+  assert.equal(l.parcelas.length, 2);
+  assert.throws(() => lerNfe('<CompNfse><x/></CompNfse>'), /NFS-e/);
+  assert.throws(() => lerNfe('<abc/>'), /NF-e/);
+
+  const { importarCompraXml, listarCompras, obterCompra, excluirCompra, criarCompraManual } = await import('../src/servicos/compras.js');
+  const { gerarRelatorio } = await import('../src/servicos/relatorios.js');
+  db.prepare("INSERT INTO escritorios (id, nome) VALUES (1, 'E')").run();
+  db.prepare("INSERT INTO usuarios (id, escritorio_id, nome, email, papel, login, senha_hash) VALUES (1, 1, 'A', 'a@x.com', 'admin', 'A', 'x')").run();
+  db.prepare("INSERT INTO empresas (id, escritorio_id, documento, razao_social, cod_municipio, op_simp_nac, ambiente) VALUES (1, 1, '10512356000168', 'BARBIERI', '4208203', 3, 2)").run();
+
+  const r = importarCompraXml(1, 1, { xml: nfe(cobr), gerarDespesas: true, categoria: 'Material e equipamentos' });
+  assert.equal(r.valor, 260);
+  assert.equal(r.itens, 2);
+  assert.equal(r.parcelas, 2);
+  assert.deepEqual(r.alertas, []);
+  assert.equal((db.prepare('SELECT COUNT(*) AS n FROM despesas').get() as any).n, 2);
+  assert.equal((db.prepare("SELECT SUM(valor) AS v FROM despesas WHERE data = '2026-11-10'").get() as any).v, 130);
+
+  assert.throws(() => importarCompraXml(1, 1, { xml: nfe(cobr), gerarDespesas: false, categoria: 'x' }), /já foi importada/);
+  assert.throws(() => importarCompraXml(1, 1, { xml: nfe('', '35261012345678000195550010000012341000099999').replace('<CNPJ>12345678000195</CNPJ><xNome>Papelaria', '<CNPJ>10512356000168</CNPJ><xNome>Papelaria'), gerarDespesas: false, categoria: 'x' }), /própria empresa/);
+
+  // sem parcelas e sem despesas, destinatário diferente gera alerta
+  const r2 = importarCompraXml(1, 1, { xml: nfe('', '35261012345678000195550010000012341000055555', '99999999000199'), gerarDespesas: false, categoria: 'x' });
+  assert.equal(r2.alertas.length, 1);
+  assert.equal((db.prepare('SELECT COUNT(*) AS n FROM despesas').get() as any).n, 2, 'sem gerar despesas não lança');
+
+  const m = criarCompraManual(1, 1, { fornecedor_nome: 'Mercadinho', emissao: '2026-10-12', valor_total: 80, gerarDespesas: true, categoria: 'Outras', vencimento: '2026-10-12' });
+  assert.ok(m.id);
+
+  const lista = listarCompras(1, '2026-10');
+  assert.equal(lista.compras.length, 3);
+  assert.equal(lista.total, 600);
+  const det = obterCompra(r.id);
+  assert.equal(det.itens.length, 2);
+  assert.equal(det.parcelas.length, 2);
+
+  const rel = gerarRelatorio(1, 'compras', { de: '2026-10-01', ate: '2026-10-31' });
+  assert.equal(rel.linhas.length, 3);
+  assert.equal(rel.totais.total, 600);
+
+  excluirCompra(r.id);
+  assert.equal((db.prepare('SELECT COUNT(*) AS n FROM despesas').get() as any).n, 1, 'despesas geradas pela compra saem junto');
+  assert.equal(listarCompras(1, '2026-10').compras.length, 2);
+});

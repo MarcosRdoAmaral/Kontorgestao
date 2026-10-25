@@ -4,7 +4,7 @@
  * aqui (e a data/versão em MANUAL_VERSAO) antes de publicar a versão.
  * `corpo` é HTML escrito à mão (não recebe dados de usuário).
  */
-export const MANUAL_VERSAO = '3.1.2';
+export const MANUAL_VERSAO = '3.2.0';
 
 export const MANUAL = [
   {
@@ -125,6 +125,22 @@ export const MANUAL = [
       </ul>`,
   },
   {
+    id: 'compras', titulo: 'Compras (NF-e de entrada)', resumo: 'Importar o XML da NF-e de compra e lançar nas despesas.',
+    corpo: `
+      <p>Em <strong>Compras</strong> ficam as notas fiscais de mercadorias que a empresa comprou. A tela mostra o mês escolhido, o total comprado e os maiores fornecedores.</p>
+      <h3>Importar o XML da NF-e</h3>
+      <ol>
+        <li>Clique em <strong>Importar XML da NF-e</strong> e escolha um ou <em>vários</em> arquivos de uma vez (o XML que o fornecedor envia ou que se baixa no portal da NF-e).</li>
+        <li>Deixe marcado <em>Lançar nas despesas</em> se quiser que cada parcela (duplicata) vire uma despesa na data de vencimento, na categoria escolhida; nota à vista vira uma despesa só.</li>
+        <li>O resultado aparece arquivo por arquivo. O sistema lê fornecedor, itens (com NCM e CFOP), totais e parcelas.</li>
+      </ol>
+      <p>O sistema avisa e <strong>não importa</strong> quando a nota já foi importada, quando foi emitida pela própria empresa (é uma venda), ou quando o XML é de NFS-e ou de evento. Se o destinatário da nota for outro CNPJ, importa com um alerta para você conferir a empresa selecionada.</p>
+      <h3>Compra manual</h3>
+      <p><strong>Lançar compra manual</strong> registra uma compra sem XML (cupom, recibo): fornecedor, data, valor, vencimento e categoria.</p>
+      <h3>Detalhe, XML e exclusão</h3>
+      <p>Clique na compra para ver itens, totais e parcelas e baixar o XML. <strong>Excluir compra</strong> (permissão <em>Excluir registros</em>) apaga também as despesas que ela gerou. O relatório <em>Compras (NF-e de entrada)</em> está em Relatórios. O acesso a Compras é liberado por usuário em Configurações &gt; Usuários e acessos.</p>`,
+  },
+  {
     id: 'despesas', titulo: 'Despesas e balanço', resumo: 'Lançar despesas e acompanhar receitas × despesas.',
     corpo: `
       <p>Em <strong>Despesas e balanço</strong> lance as despesas da empresa por categoria e acompanhe o resultado do mês: o que foi <em>recebido</em> (boletos pagos) contra o que foi gasto. Marcar as cobranças como pagas e lançar as despesas mantém o balanço confiável. O <strong>Painel do mês</strong> resume faturado, recebido, a receber, em atraso e quem ainda falta emitir.</p>`,
@@ -153,6 +169,7 @@ export const MANUAL = [
         <li><strong>Saldo vencido por cliente</strong> (faixas de atraso) e <strong>Posição por cliente</strong>.</li>
         <li><strong>Notas emitidas e tributos:</strong> ISS e retenções.</li>
         <li><strong>Fluxo de caixa por categoria:</strong> a partir do extrato importado.</li>
+        <li><strong>Compras (NF-e de entrada):</strong> por data de emissão da nota.</li>
       </ul>
       <p>Escolha o relatório, o período, o cliente e a situação (quando houver) e clique em <em>Gerar</em>. Exporte para <strong>Excel (CSV)</strong> ou <strong>PDF</strong>.</p>`,
   },

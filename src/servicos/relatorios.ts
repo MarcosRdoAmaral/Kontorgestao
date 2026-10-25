@@ -130,6 +130,21 @@ export const RELATORIOS: Record<string, Def> = {
         { k: 'retencoes', nome: 'Retenções federais', tipo: 'moeda', soma: true }, { k: 'liquido', nome: 'Líquido', tipo: 'moeda', soma: true }, COL.situacao], linhas };
     },
   },
+  'compras': {
+    titulo: 'Compras (NF-e de entrada)', filtroData: 'Data de emissão da NF-e',
+    descricao: 'Compras lançadas por XML ou manualmente, com o fornecedor, o total e o que foi lançado como despesa.',
+    gerar: (e, f) => ({
+      colunas: [
+        { k: 'emissao', nome: 'Emissão', tipo: 'data' }, { k: 'fornecedor', nome: 'Fornecedor', tipo: 'texto' }, { k: 'documento', nome: 'CNPJ/CPF', tipo: 'texto' },
+        { k: 'numero', nome: 'NF', tipo: 'texto' }, { k: 'produtos', nome: 'Produtos', tipo: 'moeda', soma: true }, { k: 'outras', nome: 'Frete e outras', tipo: 'moeda', soma: true },
+        { k: 'desconto', nome: 'Desconto', tipo: 'moeda', soma: true }, { k: 'total', nome: 'Total', tipo: 'moeda', soma: true }, { k: 'despesa', nome: 'Em despesas', tipo: 'texto' },
+      ],
+      linhas: (db.prepare(`SELECT c.emissao, c.fornecedor_nome AS fornecedor, c.fornecedor_documento AS documento, c.numero, c.valor_produtos AS produtos,
+          (c.valor_frete + c.valor_outras) AS outras, c.valor_desconto AS desconto, c.valor_total AS total,
+          CASE WHEN EXISTS (SELECT 1 FROM compra_parcelas p WHERE p.compra_id = c.id AND p.despesa_id IS NOT NULL) THEN 'Sim' ELSE 'Não' END AS despesa
+        FROM compras c WHERE c.empresa_id = ? AND c.emissao BETWEEN ? AND ? ORDER BY c.emissao, c.id`).all(e, f.de, f.ate) as any[]),
+    }),
+  },
   'fluxo-caixa': {
     titulo: 'Fluxo de caixa por categoria', filtroData: 'Data do lançamento no extrato',
     descricao: 'Entradas e saídas classificadas a partir do extrato bancário importado.',

@@ -71,6 +71,6 @@ test('relatórios: nota emitida em uma data e boleto com vencimento em outra', a
     assert.equal((await rel('inexistente', 'de=2026-10-01&ate=2026-10-31')).status, 404);
     assert.equal((await rel('a-receber', 'de=2026-10-31&ate=2026-10-01')).status, 400);
     assert.equal((await call('GET', `/api/empresas/${eid}/relatorios/a-receber?de=2026-10-01&ate=2026-10-31`)).status, 401);
-    assert.equal((await call('GET', '/api/relatorios', t)).json.length, 8);
+    assert.equal((await call('GET', '/api/relatorios', t)).json.length, 9);
   } finally { await app.close(); }
 });

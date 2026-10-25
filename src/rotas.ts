@@ -13,6 +13,7 @@ import { Despesa, criarDespesa, editarDespesa, excluirDespesa, listarCategorias,
 import { Classificacao, balancoExtrato, candidatosBoleto, classificar, conciliar, excluirImportacao, extratoDoMes, importarExtrato } from './servicos/extrato.js';
 import { catalogo, gerarRelatorio, relatorioCsv, relatorioPdf } from './servicos/relatorios.js';
 import { configurarAgenda, executarItem, executarProntas, listarAgenda, pularItem, resumoAgenda } from './servicos/agenda.js';
+import { CompraManual, OpcoesImportacao, criarCompraManual, excluirCompra, importarCompraXml, listarCompras, obterCompra, xmlDaCompra } from './servicos/compras.js';
 import { pacoteContabilidade } from './servicos/contabilidade.js';
 import { criarBackup, listarBackups } from './servicos/backup.js';
 import { consultarCnpj } from './servicos/consulta-cnpj.js';
@@ -722,6 +723,33 @@ export async function rotas(app: FastifyInstance) {
       const p = req.params as any; checarEmpresa(req, Number(p.id));
       excluirDespesa(Number(p.id), Number(p.did)); return { ok: true };
     });
+    // ---------- Compras (NF-e de entrada) ----------
+    const compraDoUsuario = (req: FastifyRequest, id: number) => {
+      const c = db.prepare('SELECT empresa_id FROM compras WHERE id = ?').get(id) as { empresa_id: number } | undefined;
+      if (!c) throw new ErroNegocio('Compra não encontrada.', 404);
+      checarEmpresa(req, c.empresa_id);
+    };
+    api.get('/api/empresas/:id/compras', async (req) => {
+      const id = Number((req.params as any).id); checarEmpresa(req, id);
+      const { mes } = z.object({ mes: z.string().regex(/^\d{4}-\d{2}$/) }).parse(req.query);
+      return listarCompras(id, mes);
+    });
+    api.post('/api/empresas/:id/compras/importar-xml', { bodyLimit: 6 * 1024 * 1024 }, async (req) => {
+      const id = Number((req.params as any).id); checarEmpresa(req, id);
+      return importarCompraXml(id, u(req).id, OpcoesImportacao.parse(req.body));
+    });
+    api.post('/api/empresas/:id/compras', async (req) => {
+      const id = Number((req.params as any).id); checarEmpresa(req, id);
+      return criarCompraManual(id, u(req).id, CompraManual.parse(req.body));
+    });
+    api.get('/api/compras/:id', async (req) => { const id = Number((req.params as any).id); compraDoUsuario(req, id); return obterCompra(id); });
+    api.get('/api/compras/:id/xml', async (req, reply) => {
+      const id = Number((req.params as any).id); compraDoUsuario(req, id);
+      const { xml, nome } = xmlDaCompra(id);
+      return reply.header('content-type', 'application/xml; charset=utf-8').header('content-disposition', `attachment; filename="${nome}"`).send(xml);
+    });
+    api.delete('/api/compras/:id', async (req) => { const id = Number((req.params as any).id); compraDoUsuario(req, id); return excluirCompra(id); });
+
     api.put('/api/empresas/:id/despesas-categorias', async (req) => {
       const id = Number((req.params as any).id); checarEmpresa(req, id);
       salvarCategorias(id, z.object({ categorias: z.array(z.string()) }).parse(req.body).categorias); return { ok: true };

@@ -441,6 +441,50 @@ const migracoes: string[] = [
     criado_em TEXT NOT NULL DEFAULT (datetime('now')),
     UNIQUE (tomador_id, servico_id, competencia)
   );`,
+  // 18: compras (NF-e de entrada importada por XML ou lançada à mão), itens e parcelas; parcelas podem gerar despesas
+  `CREATE TABLE compras (
+    id INTEGER PRIMARY KEY,
+    empresa_id INTEGER NOT NULL REFERENCES empresas(id),
+    fornecedor_documento TEXT,
+    fornecedor_nome TEXT NOT NULL,
+    numero TEXT,
+    serie TEXT,
+    chave_acesso TEXT,
+    emissao TEXT NOT NULL,
+    natureza TEXT,
+    categoria TEXT,
+    observacao TEXT,
+    valor_produtos REAL NOT NULL DEFAULT 0,
+    valor_frete REAL NOT NULL DEFAULT 0,
+    valor_desconto REAL NOT NULL DEFAULT 0,
+    valor_outras REAL NOT NULL DEFAULT 0,
+    valor_icms REAL NOT NULL DEFAULT 0,
+    valor_ipi REAL NOT NULL DEFAULT 0,
+    valor_total REAL NOT NULL,
+    xml TEXT,
+    origem TEXT NOT NULL DEFAULT 'XML' CHECK (origem IN ('XML','MANUAL')),
+    criado_por INTEGER REFERENCES usuarios(id),
+    criado_em TEXT NOT NULL DEFAULT (datetime('now')),
+    UNIQUE (empresa_id, chave_acesso)
+  );
+  CREATE INDEX idx_compras_empresa ON compras(empresa_id, emissao);
+  CREATE TABLE compra_itens (
+    id INTEGER PRIMARY KEY,
+    compra_id INTEGER NOT NULL REFERENCES compras(id) ON DELETE CASCADE,
+    n_item INTEGER NOT NULL,
+    codigo TEXT, descricao TEXT NOT NULL, ncm TEXT, cfop TEXT, unidade TEXT,
+    quantidade REAL NOT NULL DEFAULT 0, valor_unitario REAL NOT NULL DEFAULT 0, valor_total REAL NOT NULL DEFAULT 0, desconto REAL NOT NULL DEFAULT 0
+  );
+  CREATE INDEX idx_compra_itens ON compra_itens(compra_id);
+  CREATE TABLE compra_parcelas (
+    id INTEGER PRIMARY KEY,
+    compra_id INTEGER NOT NULL REFERENCES compras(id) ON DELETE CASCADE,
+    numero TEXT,
+    vencimento TEXT NOT NULL,
+    valor REAL NOT NULL,
+    despesa_id INTEGER REFERENCES despesas(id) ON DELETE SET NULL
+  );
+  CREATE INDEX idx_compra_parcelas ON compra_parcelas(compra_id);`,
 ];
 
 export function migrar(): void {

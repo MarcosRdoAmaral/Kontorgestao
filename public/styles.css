@@ -264,3 +264,11 @@ tr.inativo td { opacity: .55; }
 .busca-cliente li:hover, .busca-cliente li.sel { background: var(--superficie-2); }
 .busca-cliente li.sel { box-shadow: inset 3px 0 0 var(--laranja); }
 .busca-cliente li.vazio-busca { cursor: default; opacity: .7; }
+
+/* Compras */
+.lista-simples { margin: 10px 0; padding-left: 18px; line-height: 1.5; }
+.aviso-txt { color: var(--aviso-texto); font-size: 13px; }
+label.check { display: flex; flex-direction: row; align-items: center; gap: 8px; margin: 10px 0; }
+label.check input { width: auto; }
+#dialogo:has(.detalhe-compra) { width: min(960px, 94vw); max-width: none; }
+.detalhe-compra .tabela { font-size: 14px; }
