@@ -4,7 +4,7 @@
  * aqui (e a data/versão em MANUAL_VERSAO) antes de publicar a versão.
  * `corpo` é HTML escrito à mão (não recebe dados de usuário).
  */
-export const MANUAL_VERSAO = '3.1.0';
+export const MANUAL_VERSAO = '3.1.1';
 
 export const MANUAL = [
   {
@@ -66,7 +66,7 @@ export const MANUAL = [
     corpo: `
       <ol>
         <li>Abra <strong>Emitir nota</strong> (confira a empresa no alto do menu).</li>
-        <li><strong>Cliente:</strong> escolha na lista ou aperte <kbd>F2</kbd> para pesquisar por nome, CNPJ/CPF ou e-mail. Também dá para cadastrar um cliente novo ali mesmo.</li>
+        <li><strong>Cliente:</strong> comece a <strong>digitar o nome</strong> (ou o CNPJ/CPF): a lista se filtra enquanto você escreve; use as setas e Enter, ou clique no cliente. Apagar o campo volta para <em>Consumidor não identificado</em>. <kbd>F2</kbd> abre a consulta completa, em janela. Também dá para cadastrar um cliente novo ali mesmo.</li>
         <li><strong>Serviço:</strong> ao escolher, descrição, código, alíquotas e retenções do cadastro são preenchidos.</li>
         <li>Informe competência, valor e, se precisar, ajuste descrição e retenções.</li>
         <li>Se o cliente fatura com boleto, defina o vencimento (já sugerido pela regra do cliente).</li>
@@ -178,7 +178,7 @@ export const MANUAL = [
     id: 'atalhos', titulo: 'Atalhos e dicas', resumo: 'Atalhos de teclado e boas práticas.',
     corpo: `
       <ul>
-        <li><kbd>F2</kbd> em Emitir nota: consulta de clientes (setas, Enter para escolher, Esc para fechar).</li>
+        <li>Em Emitir nota, digite no campo do cliente para buscar na hora; <kbd>F2</kbd> abre a consulta completa (setas, Enter para escolher, Esc para fechar).</li>
         <li>Confira sempre a <strong>empresa selecionada</strong> no alto do menu antes de emitir.</li>
         <li>Teste primeiro em <em>Produção restrita</em>.</li>
         <li>Mantenha backup fora do computador e renove o certificado A1 antes do vencimento.</li>

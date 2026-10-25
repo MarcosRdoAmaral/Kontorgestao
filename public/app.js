@@ -120,6 +120,52 @@ function habilitarConsultaF2(form, select, clientes) {
   form.addEventListener('keydown', (ev) => { if (ev.key === 'F2') { ev.preventDefault(); abrir(); } });
 }
 
+/**
+ * Campo de cliente com busca enquanto digita: o <select> original continua sendo a fonte do valor (fica oculto),
+ * e o campo de texto filtra a lista por nome, CNPJ/CPF ou e-mail. Setas + Enter escolhem; texto vazio = sem cliente.
+ */
+function ligarBuscaCliente(select, clientes) {
+  const norm = (x) => String(x ?? '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+  const caixa = document.createElement('div'); caixa.className = 'busca-cliente';
+  caixa.innerHTML = '<input type="text" autocomplete="off" role="combobox" aria-expanded="false" placeholder="Digite o nome ou CNPJ/CPF do cliente (vazio = consumidor não identificado)"><ul role="listbox" hidden></ul>';
+  const entrada = caixa.querySelector('input'), lista = caixa.querySelector('ul');
+  select.hidden = true;
+  select.insertAdjacentElement('beforebegin', caixa);
+  let achados = [], sel = 0;
+  const rotulo = (t) => t.nome;
+  const doSelect = () => { const t = clientes.find((x) => x.id === Number(select.value)); return t ? rotulo(t) : ''; };
+  const sincronizar = () => { entrada.value = doSelect(); };
+  const fechar = () => { lista.hidden = true; entrada.setAttribute('aria-expanded', 'false'); };
+  const pintar = () => {
+    const q = norm(entrada.value).replace(/\s+/g, ' ').trim(), qd = q.replace(/\D/g, '');
+    achados = clientes.filter((t) => !q || norm(t.nome).includes(q) || norm(t.email).includes(q) || (qd && String(t.documento ?? '').replace(/\D/g, '').includes(qd))).slice(0, 12);
+    sel = Math.min(sel, Math.max(achados.length - 1, 0));
+    lista.innerHTML = achados.length
+      ? achados.map((t, i) => `<li role="option" data-i="${i}" class="${i === sel ? 'sel' : ''}"><span>${esc(t.nome)}</span><small>${t.documento ? fmtDoc(t.documento) : ''}</small></li>`).join('')
+      : '<li class="vazio-busca">Nenhum cliente encontrado.</li>';
+    lista.hidden = false; entrada.setAttribute('aria-expanded', 'true');
+    lista.querySelector('.sel')?.scrollIntoView({ block: 'nearest' });
+  };
+  const escolher = (t) => { select.value = String(t.id); sincronizar(); fechar(); select.dispatchEvent(new Event('change')); };
+  entrada.addEventListener('input', () => {
+    sel = 0;
+    if (!entrada.value.trim() && select.value) { select.value = ''; select.dispatchEvent(new Event('change')); } // apagou o campo: sem cliente
+    pintar();
+  });
+  entrada.addEventListener('focus', () => { entrada.select(); });
+  entrada.addEventListener('keydown', (ev) => {
+    if (ev.key === 'ArrowDown') { ev.preventDefault(); if (lista.hidden) pintar(); else { sel = Math.min(sel + 1, achados.length - 1); pintar(); } }
+    else if (ev.key === 'ArrowUp') { ev.preventDefault(); sel = Math.max(sel - 1, 0); pintar(); }
+    else if (ev.key === 'Enter') { ev.preventDefault(); if (!lista.hidden && achados[sel]) escolher(achados[sel]); } // nunca envia o formulário por aqui
+    else if (ev.key === 'Escape') { if (!lista.hidden) { ev.stopPropagation(); fechar(); sincronizar(); } }
+    else if (ev.key === 'Tab') { if (!lista.hidden && achados[sel] && entrada.value.trim() && norm(entrada.value) !== norm(doSelect())) escolher(achados[sel]); else fechar(); }
+  });
+  entrada.addEventListener('blur', () => setTimeout(() => { fechar(); sincronizar(); }, 120));
+  lista.addEventListener('mousedown', (ev) => { ev.preventDefault(); const li = ev.target.closest('li[data-i]'); if (li) escolher(achados[li.dataset.i]); });
+  select.addEventListener('change', sincronizar);
+  sincronizar();
+}
+
 /** Busca endereço e código IBGE pelo CEP (ViaCEP). */
 async function buscarCep(form) {
   const cep = form.cep.value.replace(/\D/g, '');
@@ -461,7 +507,7 @@ async function telaEmitir(notaIdCorrecao) {
     <form id="form-emitir">
       <fieldset><legend>Tomador</legend>
         <div class="grade">
-          <label class="largo">Quem contratou o serviço <span class="dica">(F2 para consultar)</span>
+          <label class="largo">Quem contratou o serviço <span class="dica">(digite para buscar · F2 abre a consulta completa)</span>
             <select name="tomadorId">
               <option value="">Consumidor não identificado</option>
               ${tomadores.map((t) => `<option value="${t.id}" ${p.tomadorId === t.id ? 'selected' : ''}>${esc(t.nome)} ${t.documento ? '— ' + fmtDoc(t.documento) : ''}</option>`).join('')}
@@ -573,6 +619,7 @@ async function telaEmitir(notaIdCorrecao) {
     } else { pCpServico = null; tpImunidadeServico = null; }
   };
   habilitarConsultaF2($('#form-emitir'), $('#form-emitir').tomadorId, tomadores);
+  ligarBuscaCliente($('#form-emitir').tomadorId, tomadores);
   $('#novo-tomador').onclick = () => formTomador(null, async (id) => { telaEmitir.prefTomador = id; await telaEmitir(notaIdCorrecao); $('#form-emitir').tomadorId.value = id; });
 
   // regra do cliente: nota / nota + boleto / só boleto

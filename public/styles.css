@@ -254,3 +254,13 @@ tr.inativo td { opacity: .55; }
   body.imprimindo-manual, body.imprimindo-manual main { background: #fff !important; color: #000 !important; }
   body.imprimindo-manual section { break-inside: avoid-page; margin-bottom: 18px; }
 }
+
+/* Busca de cliente enquanto digita */
+.busca-cliente { position: relative; }
+.busca-cliente input { width: 100%; }
+.busca-cliente ul { position: absolute; z-index: 30; left: 0; right: 0; top: calc(100% + 4px); margin: 0; padding: 4px; list-style: none; max-height: 300px; overflow: auto; background: var(--superficie); border: 1px solid var(--borda-leve); border-radius: 10px; box-shadow: 0 10px 30px var(--sombra); }
+.busca-cliente li { display: flex; justify-content: space-between; gap: 12px; padding: 8px 10px; border-radius: 7px; cursor: pointer; }
+.busca-cliente li small { opacity: .7; white-space: nowrap; }
+.busca-cliente li:hover, .busca-cliente li.sel { background: var(--superficie-2); }
+.busca-cliente li.sel { box-shadow: inset 3px 0 0 var(--laranja); }
+.busca-cliente li.vazio-busca { cursor: default; opacity: .7; }
