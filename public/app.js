@@ -82,6 +82,42 @@ function abrirDialogo(html, aoAbrir) {
   return d;
 }
 
+/**
+ * Consulta de clientes por F2: abre uma busca (nome, CNPJ/CPF ou e-mail) sobre a lista do <select>.
+ * Setas navegam, Enter escolhe, Esc fecha. Vale em qualquer tela que passe o formulário e o select.
+ */
+function habilitarConsultaF2(form, select, clientes) {
+  const abrir = () => {
+    let sel = 0, achados = clientes;
+    const norm = (x) => String(x ?? '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+    abrirDialogo(`
+      <h2>Consultar cliente</h2>
+      <input id="f2-busca" type="search" autocomplete="off" placeholder="Digite o nome, CNPJ/CPF ou e-mail" style="width:100%">
+      <div class="rolagem" style="max-height:320px;margin-top:10px"><table class="tabela"><tbody id="f2-lista"></tbody></table></div>
+      <p class="dica">↑ ↓ para navegar · Enter para escolher · Esc para fechar</p>
+      <div class="acoes"><button type="button" data-fechar>Fechar</button></div>`, (d) => {
+      const lista = d.querySelector('#f2-lista'), busca = d.querySelector('#f2-busca');
+      const escolher = (t) => { d.close(); select.value = String(t.id); select.dispatchEvent(new Event('change')); select.focus(); };
+      const pintar = () => {
+        const q = norm(busca.value).replace(/\s+/g, ' ').trim(), qd = q.replace(/\D/g, '');
+        achados = clientes.filter((t) => !q || norm(t.nome).includes(q) || norm(t.email).includes(q) || (qd && String(t.documento ?? '').replace(/\D/g, '').includes(qd)));
+        sel = Math.min(sel, Math.max(achados.length - 1, 0));
+        lista.innerHTML = achados.length ? achados.slice(0, 200).map((t, i) => `<tr class="clicavel ${i === sel ? 'sel-f2' : ''}" data-i="${i}"><td>${esc(t.nome)}</td><td>${t.documento ? fmtDoc(t.documento) : ''}</td></tr>`).join('') : '<tr><td class="dica">Nenhum cliente encontrado.</td></tr>';
+        lista.querySelectorAll('tr[data-i]').forEach((tr) => (tr.onclick = () => escolher(achados[tr.dataset.i])));
+        lista.querySelector('.sel-f2')?.scrollIntoView({ block: 'nearest' });
+      };
+      busca.oninput = () => { sel = 0; pintar(); };
+      busca.onkeydown = (ev) => {
+        if (ev.key === 'ArrowDown') { ev.preventDefault(); sel = Math.min(sel + 1, achados.length - 1); pintar(); }
+        else if (ev.key === 'ArrowUp') { ev.preventDefault(); sel = Math.max(sel - 1, 0); pintar(); }
+        else if (ev.key === 'Enter') { ev.preventDefault(); if (achados[sel]) escolher(achados[sel]); }
+      };
+      pintar(); busca.focus();
+    });
+  };
+  form.addEventListener('keydown', (ev) => { if (ev.key === 'F2') { ev.preventDefault(); abrir(); } });
+}
+
 /** Busca endereço e código IBGE pelo CEP (ViaCEP). */
 async function buscarCep(form) {
   const cep = form.cep.value.replace(/\D/g, '');
@@ -420,7 +456,7 @@ async function telaEmitir(notaIdCorrecao) {
     <form id="form-emitir">
       <fieldset><legend>Tomador</legend>
         <div class="grade">
-          <label class="largo">Quem contratou o serviço
+          <label class="largo">Quem contratou o serviço <span class="dica">(F2 para consultar)</span>
             <select name="tomadorId">
               <option value="">Consumidor não identificado</option>
               ${tomadores.map((t) => `<option value="${t.id}" ${p.tomadorId === t.id ? 'selected' : ''}>${esc(t.nome)} ${t.documento ? '— ' + fmtDoc(t.documento) : ''}</option>`).join('')}
@@ -531,6 +567,7 @@ async function telaEmitir(notaIdCorrecao) {
       sugerirBoleto?.();
     } else { pCpServico = null; tpImunidadeServico = null; }
   };
+  habilitarConsultaF2($('#form-emitir'), $('#form-emitir').tomadorId, tomadores);
   $('#novo-tomador').onclick = () => formTomador(null, async (id) => { telaEmitir.prefTomador = id; await telaEmitir(notaIdCorrecao); $('#form-emitir').tomadorId.value = id; });
 
   // regra do cliente: nota / nota + boleto / só boleto

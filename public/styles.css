@@ -228,3 +228,5 @@ tr.inativo td { opacity: .55; }
 .tema-opcao.ativo { border-color: var(--laranja); box-shadow: 0 0 0 3px var(--foco); }
 .tema-amostra { height: 74px; border-radius: 8px; display: grid; grid-template-columns: 30% 1fr; overflow: hidden; border: 1px solid rgba(128, 128, 128, .35); }
 .tema-amostra i { display: block; } .tema-amostra b { display: block; margin: 12px; border-radius: 6px; }
+
+.tabela tr.sel-f2 td { background: var(--superficie-2); box-shadow: inset 0 1px 0 var(--laranja), inset 0 -1px 0 var(--laranja); }
