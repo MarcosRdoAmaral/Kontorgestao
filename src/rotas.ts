@@ -11,6 +11,7 @@ import { BoletoAvulso, EntradaFaturamento, faturar, gerarBoletoAvulso, listarCob
 import { ContaBancaria, obterModelosWhatsapp, reemitirCobranca, salvarModelosWhatsapp, boletoPdf, cancelarCobranca, gerarRemessaEmpresa, listarRemessas, marcarPago, obterCobranca, obterConta, obterRemessa, processarRetorno, salvarConta } from './servicos/cobranca.js';
 import { Despesa, criarDespesa, editarDespesa, excluirDespesa, listarCategorias, listarDespesas, painelFinanceiro, salvarCategorias } from './servicos/financeiro.js';
 import { Classificacao, balancoExtrato, candidatosBoleto, classificar, conciliar, excluirImportacao, extratoDoMes, importarExtrato } from './servicos/extrato.js';
+import { catalogo, gerarRelatorio, relatorioCsv, relatorioPdf } from './servicos/relatorios.js';
 import { configurarAgenda, executarItem, executarProntas, listarAgenda, pularItem, resumoAgenda } from './servicos/agenda.js';
 import { pacoteContabilidade } from './servicos/contabilidade.js';
 import { criarBackup, listarBackups } from './servicos/backup.js';
@@ -452,6 +453,24 @@ export async function rotas(app: FastifyInstance) {
       const entrada = EntradaFaturamento.parse(req.body);
       checarEmpresa(req, entrada.empresaId);
       return faturar(u(req), entrada);
+    });
+
+    // ---------- Relatórios ----------
+    api.get('/api/relatorios', async () => catalogo());
+    api.get('/api/empresas/:id/relatorios/:rel', async (req, reply) => {
+      const id = Number((req.params as any).id); checarEmpresa(req, id);
+      const q = z.object({
+        de: z.string().regex(/^\d{4}-\d{2}-\d{2}$/), ate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+        tomadorId: z.coerce.number().int().optional(), situacao: z.string().max(20).optional(), formato: z.enum(['json', 'csv', 'pdf']).default('json'),
+      }).parse(req.query);
+      const r = gerarRelatorio(id, (req.params as any).rel, { de: q.de, ate: q.ate, tomadorId: q.tomadorId ?? null, situacao: q.situacao || null });
+      const nome = `${r.id}_${q.de}_${q.ate}`;
+      if (q.formato === 'csv') return reply.type('text/csv; charset=utf-8').header('Content-Disposition', `attachment; filename="${nome}.csv"`).send(relatorioCsv(r));
+      if (q.formato === 'pdf') {
+        const emp = (db.prepare('SELECT razao_social FROM empresas WHERE id = ?').get(id) as any)?.razao_social ?? '';
+        return reply.type('application/pdf').header('Content-Disposition', `attachment; filename="${nome}.pdf"`).send(await relatorioPdf(r, emp));
+      }
+      return r;
     });
 
     // ---------- Emissão automática (agenda mensal por cliente) ----------

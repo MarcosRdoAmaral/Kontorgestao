@@ -308,13 +308,13 @@ async function iniciar() {
 
 /** A tela pertence a algum módulo liberado para o usuário? (o servidor confere de novo em cada chamada) */
 function telaPermitida(nome) {
-  const modulo = { painel: 'painel', emitir: 'emitir', notas: 'notas', nota: 'notas', cobrancas: 'cobrancas', banco: 'banco', despesas: 'despesas', extrato: 'despesas', agenda: 'emitir', tomadores: 'tomadores', servicos: 'servicos', empresas: 'empresas' }[nome];
+  const modulo = { painel: 'painel', emitir: 'emitir', notas: 'notas', nota: 'notas', cobrancas: 'cobrancas', banco: 'banco', despesas: 'despesas', extrato: 'despesas', agenda: 'emitir', relatorios: 'relatorios', tomadores: 'tomadores', servicos: 'servicos', empresas: 'empresas' }[nome];
   return nome === 'config' || (modulo && estado.usuario.modulos.includes(modulo));
 }
 
 const rotas = {
   painel: telaPainel, emitir: telaEmitir, notas: telaNotas, nota: telaNota,
-  cobrancas: telaCobrancas, banco: telaBanco, despesas: telaDespesas, extrato: telaExtrato, agenda: telaAgenda, tomadores: telaTomadores, servicos: telaServicos, empresas: telaEmpresas, config: telaConfig,
+  cobrancas: telaCobrancas, banco: telaBanco, despesas: telaDespesas, extrato: telaExtrato, agenda: telaAgenda, relatorios: telaRelatorios, tomadores: telaTomadores, servicos: telaServicos, empresas: telaEmpresas, config: telaConfig,
 };
 
 function rotear() {
@@ -965,6 +965,44 @@ async function telaBanco() {
 // ---------------------------------------------------------------------------
 // Despesas e balanço
 // ---------------------------------------------------------------------------
+async function telaRelatorios() {
+  const cat = await api('GET', '/api/relatorios');
+  const ini = mesAtual() + '-01', fim = new Date(Date.UTC(+mesAtual().slice(0, 4), +mesAtual().slice(5), 0)).toISOString().slice(0, 10);
+  const est = telaRelatorios.est ??= { rel: cat[0].id, de: ini, ate: fim, tomadorId: '', situacao: '' };
+  const clientes = await api('GET', `/api/empresas/${estado.empresaId}/tomadores`).catch(() => []);
+  const fmtCel = (v, t) => (v == null || v === '' ? '' : t === 'moeda' ? brl(v) : t === 'data' ? dataBr(v) : esc(String(v)));
+  conteudo.innerHTML = `
+    <div class="topo"><div><h1>Relatórios</h1><p class="sutil">A nota e o boleto têm datas diferentes (emissão, vencimento, pagamento). Cada relatório diz qual data usa no filtro e mostra as outras nas colunas.</p></div></div>
+    <form id="form-rel" class="filtros grade">
+      <label class="largo">Relatório <select name="rel">${cat.map((c) => `<option value="${c.id}" ${c.id === est.rel ? 'selected' : ''}>${esc(c.titulo)}</option>`).join('')}</select><span class="dica" id="desc-rel"></span></label>
+      <label>De <input type="date" name="de" required value="${est.de}"></label>
+      <label>Até <input type="date" name="ate" required value="${est.ate}"></label>
+      <label>Cliente <select name="tomadorId"><option value="">Todos</option>${clientes.map((c) => `<option value="${c.id}" ${String(c.id) === String(est.tomadorId) ? 'selected' : ''}>${esc(c.nome)}</option>`).join('')}</select></label>
+      <label id="lbl-sit">Situação <select name="situacao"><option value="">Todas</option><option>Vencido</option><option>A vencer</option></select></label>
+      <div class="acoes"><button class="primario" type="submit">Gerar</button> <button type="button" id="rel-csv">Excel (CSV)</button> <button type="button" id="rel-pdf">PDF</button></div>
+    </form>
+    <div id="res-rel"><div class="vazio">Escolha o relatório e o período e clique em Gerar.</div></div>`;
+  const f = $('#form-rel');
+  const atual = () => ({ rel: f.rel.value, de: f.de.value, ate: f.ate.value, tomadorId: f.tomadorId.value, situacao: f.situacao.value });
+  const ajustar = () => { const c = cat.find((x) => x.id === f.rel.value); $('#desc-rel').textContent = `${c.descricao} Filtra por: ${c.filtroData}.`; $('#lbl-sit').hidden = !c.situacoes; if (!c.situacoes) f.situacao.value = ''; };
+  f.rel.onchange = ajustar; ajustar(); f.situacao.value = est.situacao;
+  const qs = (formato) => { const a = atual(); return new URLSearchParams({ de: a.de, ate: a.ate, formato, ...(a.tomadorId && { tomadorId: a.tomadorId }), ...(a.situacao && { situacao: a.situacao }) }).toString(); };
+  f.onsubmit = async (ev) => {
+    ev.preventDefault(); Object.assign(est, atual());
+    const box = $('#res-rel'); box.innerHTML = '<p class="sutil">Gerando…</p>';
+    try {
+      const r = await api('GET', `/api/empresas/${estado.empresaId}/relatorios/${est.rel}?${qs('json')}`);
+      box.innerHTML = `<h2>${esc(r.titulo)}</h2><p class="sutil">${esc(r.subtitulo)} · ${r.linhas.length} registro(s)</p>
+        ${r.linhas.length ? `<div class="rolagem"><table class="tabela"><thead><tr>${r.colunas.map((c) => `<th class="${c.tipo === 'moeda' || c.tipo === 'inteiro' ? 'num' : ''}">${esc(c.nome)}</th>`).join('')}</tr></thead><tbody>
+          ${r.linhas.map((l) => `<tr>${r.colunas.map((c) => `<td class="${c.tipo === 'moeda' || c.tipo === 'inteiro' ? 'num' : ''}">${fmtCel(l[c.k], c.tipo)}</td>`).join('')}</tr>`).join('')}
+          ${r.colunas.some((c) => c.soma) ? `<tr><td><strong>TOTAL</strong></td>${r.colunas.slice(1).map((c) => `<td class="num"><strong>${c.soma ? fmtCel(r.totais[c.k], c.tipo) : ''}</strong></td>`).join('')}</tr>` : ''}
+          </tbody></table></div>` : '<div class="vazio">Nenhum registro neste período.</div>'}`;
+    } catch (e) { box.innerHTML = `<p class="erro">${esc(mensagemErro(e))}</p>`; }
+  };
+  $('#rel-csv').onclick = () => { Object.assign(est, atual()); baixar(`/api/empresas/${estado.empresaId}/relatorios/${est.rel}?${qs('csv')}`, `${est.rel}.csv`); };
+  $('#rel-pdf').onclick = () => { Object.assign(est, atual()); baixar(`/api/empresas/${estado.empresaId}/relatorios/${est.rel}?${qs('pdf')}`, `${est.rel}.pdf`); };
+}
+
 const STATUS_AGENDA = { SEM_AGENDA: ['Sem agenda', ''], AGENDADA: ['Agendada', ''], PRONTA: ['Pronta para confirmar', 'cor-ambar'], EMITIDA: ['Emitida', 'cor-verde'], ERRO: ['Com erro', 'cor-vermelho'], PULADA: ['Pulada neste mês', ''] };
 
 async function telaAgenda() {

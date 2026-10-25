@@ -9,7 +9,7 @@ export type Tipo = 'adm' | 'normal';
 /** Módulos que podem ser liberados por usuário. Configurações (usuários, e-mail, backup, licença) é sempre só do adm. */
 export const MODULOS = {
   painel: 'Painel do mês', emitir: 'Emitir nota', notas: 'Notas emitidas', cobrancas: 'Cobranças',
-  banco: 'Dados bancários', despesas: 'Despesas e balanço', tomadores: 'Clientes', servicos: 'Serviços', empresas: 'Empresas',
+  banco: 'Dados bancários', despesas: 'Despesas e balanço', tomadores: 'Clientes', servicos: 'Serviços', empresas: 'Empresas', relatorios: 'Relatórios',
 } as const;
 export type Modulo = keyof typeof MODULOS;
 export const TODOS_MODULOS = Object.keys(MODULOS) as Modulo[];
@@ -56,6 +56,7 @@ const REGRAS: Regra[] = [
   { r: /^\/api\/(empresas\/\d+\/(cobrancas|remessas|retorno|boleto-avulso)|cobrancas\/\d+\/(cancelar|pagar|reemitir)|empresas\/\d+\/modelos-whatsapp|remessas\/\d+\/arquivo)$/, mod: ['cobrancas'] },
   { m: 'GET', r: /^\/api\/cobrancas\/\d+\/boleto$/, mod: ['cobrancas', 'notas', 'emitir'] },
   { m: 'POST', r: /^\/api\/(notas|faturar)$/, mod: ['emitir'] },
+  { m: 'GET', r: /^\/api\/relatorios$|^\/api\/empresas\/\d+\/relatorios\/[a-z-]+$/, mod: ['relatorios'] },
   { m: 'GET', r: /^\/api\/empresas\/\d+\/agenda$/, mod: ['emitir', 'painel'] },
   { r: /^\/api\/empresas\/\d+\/agenda(\/.*)?$/, mod: ['emitir'] },
   { m: 'POST', r: /^\/api\/empresas\/\d+\/notas\/importar-xml$/, mod: ['notas', 'emitir'] },
