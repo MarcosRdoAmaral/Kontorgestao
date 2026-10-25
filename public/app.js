@@ -6,6 +6,8 @@ const $ = (s, el = document) => el.querySelector(s);
 const conteudo = $('#conteudo');
 const estado = { token: localStorage.getItem('token'), usuario: null, empresas: [], empresaId: Number(localStorage.getItem('empresaId')) || null };
 
+/** O usuário tem a permissão "Excluir registros"? (o servidor confere de novo) */
+const podeExcluirRegistros = () => estado.usuario.modulos.includes('excluir');
 const esc = (v) => String(v ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 const brl = (n) => Number(n ?? 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 /** Datas do banco vêm em UTC ("2026-10-24 01:25:38"); mostra no horário de Brasília. */
@@ -1186,7 +1188,7 @@ async function telaExtrato() {
         <td>${l.cobranca_id ? `<span title="Boleto com vencimento em ${dataBr(l.boleto_venc)}">✔ ${esc(l.tomador ?? 'boleto')}</span> <a href="#" data-des="${l.id}">desfazer</a>` : l.valor > 0 ? `<button data-bol="${l.id}">Ligar a boleto</button>` : ''}</td></tr>`).join('') || '<tr><td colspan="5" class="sutil">Nenhum lançamento neste filtro.</td></tr>'}
     </tbody></table></div>
     <h3>Importações</h3>
-    <table class="tabela"><tbody>${d.importacoes.map((i) => `<tr><td>${esc(i.arquivo)}</td><td>${i.periodo_ini ? dataBr(i.periodo_ini) + ' a ' + dataBr(i.periodo_fim) : ''}</td><td class="num">${i.qtd} lançamentos</td><td class="num"><a href="#" data-exi="${i.id}">excluir</a></td></tr>`).join('')}</tbody></table>`
+    <table class="tabela"><tbody>${d.importacoes.map((i) => `<tr><td>${esc(i.arquivo)}</td><td>${i.periodo_ini ? dataBr(i.periodo_ini) + ' a ' + dataBr(i.periodo_fim) : ''}</td><td class="num">${i.qtd} lançamentos</td><td class="num">${podeExcluirRegistros() ? `<a href="#" data-exi="${i.id}">excluir</a>` : ''}</td></tr>`).join('')}</tbody></table>`
     : '<div class="vazio">Nenhum lançamento neste mês. Importe o extrato em PDF (Ailos Conta Online → Extrato → Conta corrente → exportar PDF).</div>'}`;
 
   $('#mes-ext').onchange = (ev) => { telaExtrato.mes = ev.target.value || mesAtual(); telaExtrato(); };
@@ -1263,7 +1265,7 @@ async function telaDespesas() {
       <div><button id="cats">Categorias</button> <button class="primario" id="nova-desp">Lançar despesa</button></div></div>
     ${d.despesas.length ? `<div class="rolagem"><table class="tabela"><thead><tr><th>Data</th><th>Categoria</th><th>Descrição</th><th class="num">Valor</th><th></th></tr></thead><tbody>
       ${d.despesas.map((x) => `<tr><td>${dataBr(x.data)}</td><td>${esc(x.categoria)}</td><td>${esc(x.descricao ?? '')}</td><td class="num">${brl(x.valor)}</td>
-        <td class="acoes-linha"><button data-ed="${x.id}">Editar</button> <button data-ex="${x.id}">Excluir</button></td></tr>`).join('')}</tbody></table></div>
+        <td class="acoes-linha"><button data-ed="${x.id}">Editar</button> ${podeExcluirRegistros() ? `<button data-ex="${x.id}">Excluir</button>` : ''}</td></tr>`).join('')}</tbody></table></div>
       ${porCat.length > 1 ? `<p class="sutil">Por categoria: ${porCat.map(([c, v]) => `${esc(c)} ${brl(v)}`).join(' · ')}</p>` : ''}` : '<div class="vazio">Nenhuma despesa lançada neste mês.</div>'}`;
   $('#mes-desp').onchange = (ev) => { telaDespesas.mes = ev.target.value || mesAtual(); telaDespesas(); };
   const formDespesa = (x) => abrirDialogo(`
@@ -1416,7 +1418,7 @@ async function telaNota(id) {
   const n = await api('GET', `/api/notas/${id}`);
   const p = n.payload;
   const podeCancelar = n.status === 'AUTORIZADA' && estado.usuario.papel !== 'cliente';
-  const podeExcluir = ['REJEITADA', 'ERRO_COMUNICACAO', 'PENDENTE'].includes(n.status) && !n.chave_acesso && estado.usuario.papel !== 'cliente';
+  const podeExcluir = ['REJEITADA', 'ERRO_COMUNICACAO', 'PENDENTE'].includes(n.status) && !n.chave_acesso && estado.usuario.papel !== 'cliente' && podeExcluirRegistros();
   conteudo.innerHTML = `
     <div class="topo"><div>
       <h1>${n.n_nfse ? `NFS-e nº ${n.n_nfse}` : `DPS ${n.serie}/${n.n_dps}`}</h1>
@@ -1848,7 +1850,7 @@ function formServico(s) {
       </fieldset>
       <p class="erro" id="erro-servico"></p>
       <div class="acoes"><button class="primario" type="submit">Salvar serviço</button>
-        ${s.id ? '<button type="button" class="perigo" id="excluir">Desativar</button>' : ''}<button type="button" data-fechar>Fechar</button></div>
+        ${s.id && podeExcluirRegistros() ? '<button type="button" class="perigo" id="excluir">Desativar</button>' : ''}<button type="button" data-fechar>Fechar</button></div>
     </form>`, (d) => {
     const f = $('#form-servico');
     ligarBuscaServicos(f);

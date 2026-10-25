@@ -10,6 +10,7 @@ export type Tipo = 'adm' | 'normal';
 export const MODULOS = {
   painel: 'Painel do mês', emitir: 'Emitir nota', notas: 'Notas emitidas', cobrancas: 'Cobranças',
   banco: 'Dados bancários', despesas: 'Despesas e balanço', tomadores: 'Clientes', servicos: 'Serviços', empresas: 'Empresas', relatorios: 'Relatórios',
+  excluir: 'Excluir registros',
 } as const;
 export type Modulo = keyof typeof MODULOS;
 export const TODOS_MODULOS = Object.keys(MODULOS) as Modulo[];
@@ -33,7 +34,7 @@ export interface Usuario {
 /** Módulos que o usuário pode usar (adm: todos). */
 export function modulosDoUsuario(u: Pick<Usuario, 'tipo' | 'permissoes'>): Modulo[] {
   if (u.tipo === 'adm') return TODOS_MODULOS;
-  if (u.permissoes == null) return TODOS_MODULOS;
+  if (u.permissoes == null) return TODOS_MODULOS.filter((m) => m !== 'excluir'); // exclusão nunca é liberada por padrão
   try { return (JSON.parse(u.permissoes) as string[]).filter((m): m is Modulo => m in MODULOS); } catch { return []; }
 }
 
@@ -80,6 +81,8 @@ export function recusaRota(u: Usuario, metodo: string, caminho: string): string 
   if (u.tipo === 'adm') return null;
   if (regra.mod === 'adm') return 'Somente administradores podem acessar as Configurações.';
   const meus = modulosDoUsuario(u);
+  // qualquer exclusão (DELETE) exige a permissão própria "excluir", além do acesso à funcionalidade
+  if (metodo === 'DELETE' && !/\/logo$/.test(caminho) && !meus.includes('excluir')) return 'Seu usuário não tem permissão para excluir. Peça ao administrador (Configurações > Usuários e acessos).';
   return regra.mod.some((m) => meus.includes(m)) ? null : 'Seu usuário não tem acesso a esta funcionalidade.';
 }
 

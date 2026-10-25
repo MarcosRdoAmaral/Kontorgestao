@@ -4,7 +4,7 @@
  * aqui (e a data/versão em MANUAL_VERSAO) antes de publicar a versão.
  * `corpo` é HTML escrito à mão (não recebe dados de usuário).
  */
-export const MANUAL_VERSAO = '3.0.1';
+export const MANUAL_VERSAO = '3.1.0';
 
 export const MANUAL = [
   {
@@ -89,7 +89,7 @@ export const MANUAL = [
         <li><strong>Consultar no portal nacional</strong>.</li>
         <li><strong>Enviar por e-mail</strong> ou WhatsApp ao cliente (só notas de produção).</li>
         <li><strong>Cancelar nota:</strong> só para nota autorizada, com motivo de pelo menos 15 caracteres. A nota fica <em>Cancelada</em> e continua no histórico.</li>
-        <li><strong>Excluir nota:</strong> só para nota <em>não autorizada</em> (rejeitada, pendente ou sem resposta). Nota autorizada ou cancelada <u>nunca</u> pode ser excluída. Os boletos ligados continuam no sistema.</li>
+        <li><strong>Excluir nota:</strong> só para nota <em>não autorizada</em> (rejeitada, pendente ou sem resposta). Nota autorizada ou cancelada <u>nunca</u> pode ser excluída. Os boletos ligados continuam no sistema. Só aparece para o administrador e para usuários com a permissão <em>Excluir registros</em>.</li>
         <li><strong>Importar XML:</strong> traz para o sistema notas emitidas fora (por exemplo, no portal, para empresas sem certificado).</li>
         <li><strong>Baixar em lote</strong> as notas de um período (PDF e XML).</li>
       </ul>
@@ -166,7 +166,7 @@ export const MANUAL = [
     corpo: `
       <ul>
         <li><strong>Minha conta:</strong> altere sua senha.</li>
-        <li><strong>Usuários e acessos</strong> (administrador): crie usuários e libere por usuário as funcionalidades (emissão, notas, cobranças, relatórios etc.) e as empresas que cada um enxerga.</li>
+        <li><strong>Usuários e acessos</strong> (administrador): crie usuários e libere por usuário as funcionalidades (emissão, notas, cobranças, relatórios etc.) e as empresas que cada um enxerga. A permissão <strong>Excluir registros</strong> é separada das demais: sem ela o usuário não vê nem consegue usar nenhuma exclusão (nota não autorizada, serviço, despesa, importação de extrato), mesmo tendo acesso à tela. O administrador sempre pode.</li>
         <li><strong>E-mail:</strong> servidor SMTP usado para enviar notas e boletos aos clientes e para a recuperação de senha.</li>
         <li><strong>Aparência:</strong> escolha entre <em>Preto e laranja</em>, <em>Branco e laranja</em> e <em>Azul e dourado</em>. Vale para o computador.</li>
         <li><strong>Backup:</strong> o sistema faz cópia automática diária; também dá para baixar um backup quando quiser. Guarde uma cópia fora do computador.</li>

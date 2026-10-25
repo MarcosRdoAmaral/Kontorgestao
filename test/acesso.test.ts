@@ -70,6 +70,13 @@ test('acesso por usuário: master, tipos, permissões, redefinição e recupera�
     assert.equal((await call('PUT', `/api/usuarios/${idJoao}`, { nome: 'João', email: 'joao@x.com', tipo: 'normal', permissoes: ['painel', 'notas', 'servicos'], empresas: [], ativo: true }, tAdm)).status, 200);
     assert.equal((await call('GET', `/api/empresas/${emp.json.id}/servicos`, undefined, tJoao)).status, 200);
 
+    // exclusão exige a permissão própria "excluir" (mesmo com acesso à funcionalidade)
+    assert.equal((await call('DELETE', '/api/servicos/9999', undefined, tJoao)).status, 403, 'sem a permissão de excluir');
+    assert.equal((await call('DELETE', '/api/notas/9999', undefined, tJoao)).status, 403);
+    assert.equal((await call('PUT', `/api/usuarios/${idJoao}`, { nome: 'João', email: 'joao@x.com', tipo: 'normal', permissoes: ['painel', 'notas', 'servicos', 'excluir'], empresas: [], ativo: true }, tAdm)).status, 200);
+    assert.equal((await call('DELETE', '/api/servicos/9999', undefined, tJoao)).status, 404, 'com a permissão chega ao serviço (que não existe)');
+    assert.equal((await call('DELETE', '/api/notas/9999', undefined, tAdm)).status, 404, 'adm sempre pode');
+
     // adm redefine a senha de outro usuário; o master é intocável
     assert.equal((await call('POST', `/api/usuarios/${idJoao}/redefinir-senha`, {}, tJoao)).status, 403, 'normal não redefine senhas');
     assert.equal((await call('POST', `/api/usuarios/${idJoao}/redefinir-senha`, {}, tAdm)).status, 200);
