@@ -420,6 +420,10 @@ const migracoes: string[] = [
     categoria TEXT NOT NULL,
     PRIMARY KEY (empresa_id, chave)
   );`,
+  // 16: empresas que emitem pelo portal (CNPJ e senha), sem certificado digital
+  `ALTER TABLE empresas ADD COLUMN modo_emissao TEXT NOT NULL DEFAULT 'CERTIFICADO';
+  ALTER TABLE empresas ADD COLUMN portal_login TEXT;
+  ALTER TABLE empresas ADD COLUMN portal_senha_enc TEXT;`,
 ];
 
 export function migrar(): void {

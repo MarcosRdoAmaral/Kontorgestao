@@ -224,6 +224,7 @@ export async function emitir(u: Usuario, entrada: EntradaEmissao) {
   entrada = comRetencoesDoServico(entrada);
   const empresa = db.prepare('SELECT * FROM empresas WHERE id = ? AND ativo = 1').get(entrada.empresaId) as any;
   if (!empresa) throw new ErroNegocio('Empresa não encontrada.', 404);
+  if (empresa.modo_emissao === 'PORTAL') throw new ErroNegocio('Esta empresa emite as notas pelo portal (CNPJ e senha). Emita no Emissor Nacional e importe o XML em Notas emitidas.');
   certificadoDaEmpresa(empresa); // falha cedo se o certificado estiver ausente ou vencido
 
   const notaId = db.transaction(() => {
@@ -379,4 +380,29 @@ export function obterNota(id: number) {
     emails: db.prepare('SELECT id, para, status, erro, criado_em FROM emails_enviados WHERE nota_id = ? ORDER BY id DESC').all(id),
     payload_json: undefined,
   };
+}
+
+/**
+ * Importa o XML de uma NFS-e emitida no portal. Confere se a nota é da empresa, evita duplicar
+ * e liga ao cliente pelo CPF/CNPJ quando ele já estiver cadastrado.
+ */
+export function importarNotaXml(empresaId: number, usuarioId: number, xml: string) {
+  const empresa = db.prepare('SELECT * FROM empresas WHERE id = ?').get(empresaId) as any;
+  if (!empresa) throw new ErroNegocio('Empresa não encontrada.', 404);
+  let n: ReturnType<typeof lerNfse>;
+  try { n = lerNfse(xml); } catch (e: any) { throw new ErroNegocio(e.message ?? 'XML inválido.'); }
+  if (!n.chave || !n.numero) throw new ErroNegocio('O XML não traz a chave de acesso e o número da NFS-e. Baixe o XML da nota autorizada no portal.');
+  if (n.emitente.documento !== empresa.documento) throw new ErroNegocio(`Esta nota foi emitida por outro CNPJ/CPF (${n.emitente.documento}), não por ${empresa.documento}.`);
+  if (db.prepare('SELECT 1 FROM notas WHERE chave_acesso = ?').get(n.chave)) throw new ErroNegocio('Esta nota já foi importada.');
+  const tomador = n.tomador?.documento ? (db.prepare('SELECT id FROM tomadores WHERE empresa_id = ? AND documento = ?').get(empresaId, n.tomador.documento) as any) : null;
+  const cancelada = n.cStat === '101' || /cancel/i.test(String(n.cStat));
+  const idDps = n.dps.id || `IMP${n.chave}`;
+  const id = Number(db.prepare(`INSERT INTO notas (empresa_id, tomador_id, ambiente, serie, n_dps, id_dps, status, competencia, valor_servico, descricao,
+      tomador_nome, tomador_documento, payload_json, xml_nfse, chave_acesso, n_nfse, criado_por, autorizada_em)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
+    empresaId, tomador?.id ?? null, n.tpAmb === 1 ? 1 : 2, n.dps.serie ?? '', Number(n.dps.nDPS) || 0, idDps, cancelada ? 'CANCELADA' : 'AUTORIZADA',
+    n.dps.dCompet, n.valores.vServ, n.servico.descricao ?? '', n.tomador?.nome ?? null, n.tomador?.documento ?? null,
+    JSON.stringify({ importadoDoPortal: true }), xml, n.chave, n.numero, usuarioId, (n.dps.dhEmi ?? '').slice(0, 19).replace('T', ' ') || null,
+  ).lastInsertRowid);
+  return { id, numero: n.numero, valor: n.valores.vServ, tomador: n.tomador?.nome ?? null, clienteCadastrado: !!tomador };
 }

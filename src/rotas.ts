@@ -21,7 +21,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { lerPfx } from './nfse/certificado.js';
 import { codMunicipioValido, cTribNacValido, documentoValido, limparDoc, soDigitos } from './nfse/validacao.js';
-import { EntradaEmissao, ErroNegocio, cancelar, danfse, emitir, enviar, obterNota, reconciliar } from './servicos/emissao.js';
+import { EntradaEmissao, ErroNegocio, cancelar, danfse, emitir, enviar, importarNotaXml, obterNota, reconciliar } from './servicos/emissao.js';
 import { MOTIVOS_CANCELAMENTO } from './nfse/evento.js';
 
 const u = (req: FastifyRequest) => req.usuario as Usuario;
@@ -50,7 +50,11 @@ const Empresa = z.object({
   p_tot_trib_sn: z.number().min(0).max(100).nullish(),
   ambiente: z.union([z.literal(1), z.literal(2)]).default(2),
   serie: z.string().regex(/^\d{1,5}$/, 'Série deve ser numérica, até 5 dígitos').default('1'),
-});
+  /** CERTIFICADO = emite pelo sistema com A1; PORTAL = a nota é emitida no Emissor Nacional (CNPJ e senha) e importada aqui. */
+  modo_emissao: z.enum(['CERTIFICADO', 'PORTAL']).default('CERTIFICADO'),
+  portal_login: z.string().trim().max(60).nullish(),
+  portal_senha: z.string().max(200).nullish(),
+}).refine((e) => e.modo_emissao !== 'PORTAL' || !!e.portal_login, { path: ['portal_login'], message: 'Informe o usuário (CNPJ) de acesso ao portal' });
 
 const Tomador = z.object({
   tipo_doc: z.enum(['CPF', 'CNPJ', 'SEM']),
@@ -113,8 +117,8 @@ const Servico = z.object({
 }).refine((s) => !s.ibscbs || !!s.c_nbs, { path: ['c_nbs'], message: 'Com IBS/CBS o código NBS é obrigatório' });
 
 const semCert = (e: any) => {
-  const { cert_pfx_enc, cert_senha_enc, logo, ...resto } = e;
-  return { ...resto, tem_certificado: !!cert_pfx_enc, tem_logo: !!logo };
+  const { cert_pfx_enc, cert_senha_enc, logo, portal_senha_enc, ...resto } = e;
+  return { ...resto, tem_certificado: !!cert_pfx_enc, tem_logo: !!logo, tem_senha_portal: !!portal_senha_enc };
 };
 
 const VERSAO: string = (() => {
@@ -208,10 +212,11 @@ export async function rotas(app: FastifyInstance) {
     api.post('/api/empresas', { preHandler: exigirPapel('admin', 'operador') }, async (req) => {
       const d = Empresa.parse(req.body);
       const r = db.prepare(`INSERT INTO empresas (escritorio_id, documento, razao_social, nome_fantasia, inscricao_municipal, cod_municipio, uf, email,
-        op_simp_nac, reg_ap_trib_sn, reg_esp_trib, p_tot_trib_sn, ambiente, serie) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
+        op_simp_nac, reg_ap_trib_sn, reg_esp_trib, p_tot_trib_sn, ambiente, serie, modo_emissao, portal_login, portal_senha_enc) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
         .run(u(req).escritorio_id, d.documento, d.razao_social, d.nome_fantasia ?? null, d.inscricao_municipal ?? null, d.cod_municipio,
           d.uf ?? null, d.email || null, d.op_simp_nac, d.op_simp_nac === 3 ? d.reg_ap_trib_sn ?? 1 : null, d.reg_esp_trib,
-          d.p_tot_trib_sn ?? null, d.ambiente, d.serie);
+          d.p_tot_trib_sn ?? null, d.ambiente, d.serie, d.modo_emissao, d.modo_emissao === 'PORTAL' ? d.portal_login ?? null : null,
+          d.modo_emissao === 'PORTAL' && d.portal_senha ? cifrarTexto(d.portal_senha) : null);
       return { id: Number(r.lastInsertRowid) };
     });
 
@@ -220,9 +225,13 @@ export async function rotas(app: FastifyInstance) {
       checarEmpresa(req, id);
       const d = Empresa.parse(req.body);
       db.prepare(`UPDATE empresas SET documento=?, razao_social=?, nome_fantasia=?, inscricao_municipal=?, cod_municipio=?, uf=?, email=?,
-        op_simp_nac=?, reg_ap_trib_sn=?, reg_esp_trib=?, p_tot_trib_sn=?, ambiente=?, serie=? WHERE id=?`)
+        op_simp_nac=?, reg_ap_trib_sn=?, reg_esp_trib=?, p_tot_trib_sn=?, ambiente=?, serie=?, modo_emissao=?, portal_login=? WHERE id=?`)
         .run(d.documento, d.razao_social, d.nome_fantasia ?? null, d.inscricao_municipal ?? null, d.cod_municipio, d.uf ?? null, d.email || null,
-          d.op_simp_nac, d.op_simp_nac === 3 ? d.reg_ap_trib_sn ?? 1 : null, d.reg_esp_trib, d.p_tot_trib_sn ?? null, d.ambiente, d.serie, id);
+          d.op_simp_nac, d.op_simp_nac === 3 ? d.reg_ap_trib_sn ?? 1 : null, d.reg_esp_trib, d.p_tot_trib_sn ?? null, d.ambiente, d.serie,
+          d.modo_emissao, d.modo_emissao === 'PORTAL' ? d.portal_login ?? null : null, id);
+      // a senha só muda quando uma nova é digitada; ao voltar para certificado, ela é apagada
+      if (d.modo_emissao !== 'PORTAL') db.prepare('UPDATE empresas SET portal_senha_enc = NULL WHERE id = ?').run(id);
+      else if (d.portal_senha) db.prepare('UPDATE empresas SET portal_senha_enc = ? WHERE id = ?').run(cifrarTexto(d.portal_senha), id);
       return { ok: true };
     });
 
@@ -413,6 +422,14 @@ export async function rotas(app: FastifyInstance) {
       const zip = Buffer.from(zipSync(arquivos, { level: 6 }));
       const nome = `notas-${q.mes ?? 'todas'}-${q.empresaId}.zip`;
       return reply.type('application/zip').header('Content-Disposition', `attachment; filename="${nome}"`).send(zip);
+    });
+
+    /** Importa a NFS-e emitida no portal (Emissor Nacional) por empresas sem certificado. */
+    api.post('/api/empresas/:id/notas/importar-xml', { bodyLimit: 4 * 1024 * 1024 }, async (req) => {
+      const id = Number((req.params as any).id);
+      checarEmpresa(req, id);
+      const { xml } = z.object({ xml: z.string().min(200) }).parse(req.body);
+      return importarNotaXml(id, u(req).id, xml);
     });
 
     api.get('/api/notas/:id', async (req) => {

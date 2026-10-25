@@ -56,6 +56,7 @@ const REGRAS: Regra[] = [
   { r: /^\/api\/(empresas\/\d+\/(cobrancas|remessas|retorno|boleto-avulso)|cobrancas\/\d+\/(cancelar|pagar|reemitir)|empresas\/\d+\/modelos-whatsapp|remessas\/\d+\/arquivo)$/, mod: ['cobrancas'] },
   { m: 'GET', r: /^\/api\/cobrancas\/\d+\/boleto$/, mod: ['cobrancas', 'notas', 'emitir'] },
   { m: 'POST', r: /^\/api\/(notas|faturar)$/, mod: ['emitir'] },
+  { m: 'POST', r: /^\/api\/empresas\/\d+\/notas\/importar-xml$/, mod: ['notas', 'emitir'] },
   { m: 'GET', r: /^\/api\/(notas|notas-lote)$|^\/api\/notas\/\d+(\/(danfse|xml|emails))?$/, mod: LER_NOTA },
   { m: 'POST', r: /^\/api\/notas\/\d+\/(email|reenviar|reconciliar|cancelar)$/, mod: ['notas', 'emitir'] },
   { m: 'GET', r: /^\/api\/relatorios\//, mod: ['painel'] },

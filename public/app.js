@@ -414,7 +414,7 @@ async function telaEmitir(notaIdCorrecao) {
       <p class="sutil">${esc(e.razao_social)} — ${fmtDoc(e.documento)}</p>
     </div></div>
     ${e.ambiente === 2 ? '<div class="banner teste">Esta empresa está em produção restrita: as notas são de teste e não têm valor fiscal.</div>' : ''}
-    ${!e.tem_certificado ? '<div class="banner teste">Cadastre o certificado A1 da empresa antes de emitir.</div>' : ''}
+    ${e.modo_emissao === 'PORTAL' ? '<div class="banner teste">Esta empresa emite as notas pelo portal do Emissor Nacional (sem certificado). Aqui você gera o <strong>boleto</strong>; a nota é emitida no portal e importada em <a href="#/notas">Notas emitidas</a>.</div>' : !e.tem_certificado ? '<div class="banner teste">Cadastre o certificado A1 da empresa antes de emitir.</div>' : ''}
     <form id="form-emitir">
       <fieldset><legend>Tomador</legend>
         <div class="grade">
@@ -500,7 +500,9 @@ async function telaEmitir(notaIdCorrecao) {
     </form>`;
 
   const f = $('#form-emitir');
-  if (!e.tem_certificado) f.querySelector('[type=submit]').disabled = true;
+  const portal = e.modo_emissao === 'PORTAL';
+  if (!e.tem_certificado && !portal) f.querySelector('[type=submit]').disabled = true;
+  if (portal) f.acao.querySelectorAll('option:not([value=BOLETO])').forEach((o) => o.remove());
   if (p.tribISSQN) f.tribISSQN.value = p.tribISSQN;
   if (p.issRetido) f.issRetido.value = p.issRetido;
 
@@ -555,7 +557,7 @@ async function telaEmitir(notaIdCorrecao) {
   f.tomadorId.addEventListener('change', () => {
     const t = tomadores.find((x) => x.id === Number(f.tomadorId.value));
     if (t) {
-      f.acao.value = t.modo_faturamento ?? 'NOTA';
+      f.acao.value = portal ? 'BOLETO' : t.modo_faturamento ?? 'NOTA';
       f.vencimento.value = vencPadrao(t);
       if (f.enviarEmail) f.enviarEmail.checked = !!t.enviar_email_auto;
     }
@@ -658,6 +660,7 @@ async function telaEmitir(notaIdCorrecao) {
   };
   f.onsubmit = async (ev) => {
     ev.preventDefault();
+    if (portal && !f.tomadorId.value) { $('#erro-emitir').textContent = 'Escolha o cliente para gerar o boleto.'; return; }
     const d = lerForm(f);
     const corpo = {
       empresaId: e.id,
@@ -1181,6 +1184,7 @@ async function telaNotas() {
         <label>Situação <select name="status"><option value="">Todas</option>${Object.entries(STATUS).map(([k, v]) => `<option value="${k}" ${f.status === k ? 'selected' : ''}>${v}</option>`).join('')}</select></label>
         <label>Buscar <input name="q" placeholder="Tomador ou nº da nota" value="${esc(f.q)}"></label>
         <button type="submit">Filtrar</button>
+        ${empresa()?.modo_emissao === 'PORTAL' ? '<button type="button" class="primario" id="imp-xml">Importar nota do portal</button><input type="file" id="arq-xml" accept=".xml,text/xml" multiple hidden>' : ''}
         <button type="button" id="lote" ${notas.some((n) => n.chave_acesso) ? '' : 'disabled'}>Baixar em lote</button>
       </form>
     </div>
@@ -1192,6 +1196,19 @@ async function telaNotas() {
     </tbody></table></div>` : '<div class="vazio">Nenhuma nota com esses filtros. <a href="#/emitir">Emitir nota</a></div>'}`;
   $('#filtros').onsubmit = (ev) => { ev.preventDefault(); telaNotas.filtros = lerForm(ev.target); for (const k in telaNotas.filtros) telaNotas.filtros[k] ??= ''; telaNotas(); };
   conteudo.querySelectorAll('tr[data-id]').forEach((tr) => (tr.onclick = () => (location.hash = `#/nota/${tr.dataset.id}`)));
+  if ($('#imp-xml')) {
+    $('#imp-xml').onclick = () => $('#arq-xml').click();
+    $('#arq-xml').onchange = async (ev) => {
+      const ok = [], erros = [];
+      for (const arq of ev.target.files) {
+        try { const r = await api('POST', `/api/empresas/${estado.empresaId}/notas/importar-xml`, { xml: await arq.text() }); ok.push(r); }
+        catch (er) { erros.push(`${arq.name}: ${mensagemErro(er)}`); }
+      }
+      if (ok.length) aviso(`${ok.length} nota(s) importada(s).`);
+      if (erros.length) aviso(erros.join(' · '));
+      telaNotas();
+    };
+  }
   $('#lote').onclick = () => abrirDialogo(`
     <form id="form-lote"><h2>Baixar notas em lote</h2>
       <p class="sutil">Gera um arquivo ZIP com as notas emitidas de ${esc(empresa()?.razao_social ?? '')}${f.mes ? ` na competência ${f.mes.split('-').reverse().join('/')}` : ''}${f.status ? ` (situação filtrada)` : ''}.</p>
@@ -1718,12 +1735,24 @@ function formEmpresa(e) {
         <label>% aproximado de tributos (Simples) <input name="p_tot_trib_sn" data-num value="${e.p_tot_trib_sn ?? ''}"><span class="dica">Lei 12.741 — opcional</span></label>
         <label>Ambiente <select name="ambiente" data-num><option value="2">Produção restrita (testes)</option><option value="1">Produção</option></select></label>
         <label>Série da DPS <input name="serie" maxlength="5" value="${esc(e.serie)}"></label>
+        <label class="largo">Como esta empresa emite as notas?
+          <select name="modo_emissao"><option value="CERTIFICADO">Pelo sistema, com certificado digital A1</option><option value="PORTAL">Pelo portal do Emissor Nacional (CNPJ e senha), sem certificado</option></select></label>
+        <div class="largo" id="bloco-portal" hidden>
+          <p class="dica">Sem certificado o sistema não assina nem envia a nota. A nota é emitida no portal e o XML é importado aqui (Notas emitidas → Importar nota do portal), para gerar boletos, cobrança e contabilidade. A senha fica guardada criptografada neste computador e nunca aparece na tela.</p>
+          <div class="grade">
+            <label>Usuário do portal (CNPJ) <input name="portal_login" autocomplete="off" value="${esc(e.portal_login ?? '')}"></label>
+            <label>Senha do portal <input name="portal_senha" type="password" autocomplete="new-password" placeholder="${e.tem_senha_portal ? 'Senha guardada — digite só para trocar' : ''}"></label>
+          </div>
+        </div>
       </div>
       <p class="erro" id="erro-empresa"></p>
       <div class="acoes"><button class="primario" type="submit">Salvar empresa</button><button type="button" data-fechar>Fechar</button></div>
     </form>`, (d) => {
     const f = $('#form-empresa');
     for (const c of ['op_simp_nac', 'reg_ap_trib_sn', 'reg_esp_trib', 'ambiente']) if (e[c] != null) f[c].value = e[c];
+    f.modo_emissao.value = e.modo_emissao ?? 'CERTIFICADO';
+    const modo = () => ($('#bloco-portal').hidden = f.modo_emissao.value !== 'PORTAL');
+    f.modo_emissao.onchange = modo; modo();
     f.cep.onblur = () => buscarCep(f);
     ligarConsultaCnpj(f, 'empresa');
     const sn = () => (f.reg_ap_trib_sn.disabled = f.op_simp_nac.value !== '3');
@@ -1797,8 +1826,8 @@ async function telaEmpresas() {
       <button class="primario" id="novo">Cadastrar empresa</button></div>
     ${lista.length ? `<div class="rolagem"><table class="tabela"><thead><tr><th>Empresa</th><th>Documento</th><th>Regime</th><th>Ambiente</th><th>Certificado</th><th></th></tr></thead><tbody>
       ${lista.map((e, i) => `<tr><td>${esc(e.razao_social)}</td><td>${fmtDoc(e.documento)}</td><td>${['', 'Não optante', 'MEI', 'Simples ME/EPP'][e.op_simp_nac]}</td>
-        <td>${e.ambiente === 1 ? 'Produção' : 'Testes'}</td><td>${e.tem_certificado ? `até ${dataBr(e.cert_validade)}` : '<span class="pendente-txt">Falta enviar</span>'}</td>
-        <td><button data-editar="${i}">Editar</button> <button data-cert="${i}">Certificado</button> <button data-logo="${i}">${e.tem_logo ? 'Logo ✓' : 'Logo'}</button></td></tr>`).join('')}
+        <td>${e.ambiente === 1 ? 'Produção' : 'Testes'}</td><td>${e.modo_emissao === 'PORTAL' ? 'Portal (CNPJ e senha)' : e.tem_certificado ? `até ${dataBr(e.cert_validade)}` : '<span class="pendente-txt">Falta enviar</span>'}</td>
+        <td><button data-editar="${i}">Editar</button> ${e.modo_emissao === 'PORTAL' ? '' : `<button data-cert="${i}">Certificado</button>`} <button data-logo="${i}">${e.tem_logo ? 'Logo ✓' : 'Logo'}</button></td></tr>`).join('')}
     </tbody></table></div>` : '<div class="vazio">Cadastre a primeira empresa cliente do escritório.</div>'}`;
   $('#novo').onclick = () => formEmpresa();
   conteudo.querySelectorAll('[data-editar]').forEach((b) => (b.onclick = () => formEmpresa(lista[b.dataset.editar])));

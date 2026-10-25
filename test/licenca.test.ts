@@ -11,7 +11,7 @@ process.env.NFSE_MACHINE_ID = 'guid-do-computador-de-teste';
 
 const html = fs.readFileSync('ferramentas/gerador-de-licencas.html', 'utf8');
 const nucleo = /<script id="nucleo">([\s\S]*?)<\/script>/.exec(html)![1];
-const ferr = new Function(nucleo + '; return { gerarChaves, emitirCodigo, somaMeses };')();
+const ferr = new Function(nucleo + '; return { gerarChaves, emitirCodigo, somaMeses, lerChavePrivada };')();
 
 test('licença: teste de 30 dias, ativação por computador, vencimento e relógio', async () => {
   (await import('../src/db.js')).migrar();
@@ -72,3 +72,19 @@ test('licença: teste de 30 dias, ativação por computador, vencimento e relóg
   assert.equal(valorLiquido({ valor: 1000, aliquota: 2, issRetido: 2, retencoes: { irrf: 15 } } as any), 965);
 });
 
+
+test('gerador de licenças aceita a chave privada em vários formatos', async () => {
+  const k = await ferr.gerarChaves();
+  const { d, x } = JSON.parse(k.privada);
+  const base = await ferr.emitirCodigo(k.privada, 'AAAA-BBBB-CCCC-DDDD', '2027-01-01', 'Cliente');
+  assert.match(base, /^KG1\./);
+  const aspasTrocadas = k.privada.replace(/"/g, '\u201C').replace(/\u201C:/, '":');
+  for (const forma of [`  ${k.privada}\n`, aspasTrocadas, JSON.stringify({ kty: 'OKP', crv: 'Ed25519', x, d }), `"d":"${d}","x":"${x}"`]) {
+    const c = await ferr.emitirCodigo(forma, 'AAAA-BBBB-CCCC-DDDD', '2027-01-01', 'Cliente');
+    assert.equal(c, base, 'Ed25519 é determinístico: mesma chave, mesmo código');
+  }
+  // chave com só o "d": a pública esperada é a do aplicativo, que não é a deste par → recusa com mensagem clara
+  await assert.rejects(ferr.emitirCodigo(d, 'AAAA-BBBB-CCCC-DDDD', '2027-01-01', 'Cliente'), /não corresponde/);
+  await assert.rejects(ferr.emitirCodigo('{ quebrado', 'AAAA-BBBB-CCCC-DDDD', '2027-01-01', 'Cliente'), /JSON|formato/);
+  await assert.rejects(ferr.emitirCodigo('', 'AAAA-BBBB-CCCC-DDDD', '2027-01-01', 'Cliente'), /Cole a chave/);
+});
