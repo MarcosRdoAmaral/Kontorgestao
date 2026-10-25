@@ -1360,6 +1360,21 @@ async function telaDespesas() {
 // ---------------------------------------------------------------------------
 // Licença
 // ---------------------------------------------------------------------------
+/** Aviso de vencimento (15 dias antes): uma janela por dia, além do selo vermelho no menu. */
+function avisarVencimentoLicenca(s) {
+  if (!s.aviso || !s.permitido || estado.usuario?.tipo !== 'adm' && s.diasRestantes > 3) return;
+  const hoje = new Date(Date.now() - 3 * 3600e3).toISOString().slice(0, 10);
+  try { if (localStorage.getItem('avisoLicencaDia') === hoje) return; localStorage.setItem('avisoLicencaDia', hoje); } catch { /* sem armazenamento: avisa só nesta abertura */ }
+  const teste = s.estado === 'teste';
+  const prazo = s.diasRestantes === 0 ? 'vence hoje' : s.diasRestantes === 1 ? 'vence amanhã' : `vence em ${s.diasRestantes} dias`;
+  abrirDialogo(`
+    <h2>${teste ? 'Seu período de teste está acabando' : 'Sua licença está para vencer'}</h2>
+    <p>${teste ? 'O período de teste' : `A licença (até ${dataBr(s.ate)})`} <strong>${prazo}</strong>. Depois disso a emissão de notas fica bloqueada; consultas, downloads e backup continuam funcionando.</p>
+    <p>Para ${teste ? 'ativar' : 'renovar'}, envie ao suporte o código deste computador:</p>
+    <p><strong style="font-size:1.2em;letter-spacing:1px">${esc(s.codigoComputador)}</strong></p>
+    <div class="acoes"><a href="#/config/licenca"><button class="primario" data-fechar>Ir para Licença</button></a><button data-fechar>Lembrar amanhã</button></div>`);
+}
+
 async function atualizarLicenca() {
   const el = $('#licenca-info');
   try {
@@ -1368,7 +1383,8 @@ async function atualizarLicenca() {
     if (s.estado === 'livre') { el.hidden = true; return s; }
     el.hidden = false;
     el.className = 'licenca-info' + (!s.permitido ? ' bloqueada' : s.aviso ? ' aviso' : '');
-    el.textContent = !s.permitido ? 'Licença: emissão bloqueada' : s.estado === 'teste' ? `Teste: ${s.diasRestantes} dia(s)` : `Licença até ${dataBr(s.ate)}`;
+    el.textContent = !s.permitido ? 'Licença: emissão bloqueada' : s.estado === 'teste' ? `Teste: ${s.diasRestantes} dia(s)` : s.aviso ? `Licença vence em ${s.diasRestantes} dia(s)` : `Licença até ${dataBr(s.ate)}`;
+    avisarVencimentoLicenca(s);
     return s;
   } catch { return null; }
 }

@@ -4,7 +4,7 @@ import { CHAVE_PUBLICA } from './licenca-chave.js';
 import { ErroNegocio } from './servicos/emissao.js';
 
 export const DIAS_TESTE = 30;
-export const AVISO_DIAS = 14;
+export const AVISO_DIAS = 15;
 
 export type EstadoLicenca = 'livre' | 'teste' | 'ativa' | 'vencida' | 'relogio';
 

@@ -4,7 +4,7 @@
  * aqui (e a data/versão em MANUAL_VERSAO) antes de publicar a versão.
  * `corpo` é HTML escrito à mão (não recebe dados de usuário).
  */
-export const MANUAL_VERSAO = '3.1.1';
+export const MANUAL_VERSAO = '3.1.2';
 
 export const MANUAL = [
   {
@@ -170,7 +170,7 @@ export const MANUAL = [
         <li><strong>E-mail:</strong> servidor SMTP usado para enviar notas e boletos aos clientes e para a recuperação de senha.</li>
         <li><strong>Aparência:</strong> escolha entre <em>Preto e laranja</em>, <em>Branco e laranja</em> e <em>Azul e dourado</em>. Vale para o computador.</li>
         <li><strong>Backup:</strong> o sistema faz cópia automática diária; também dá para baixar um backup quando quiser. Guarde uma cópia fora do computador.</li>
-        <li><strong>Licença:</strong> mostra a situação e permite informar um novo código.</li>
+        <li><strong>Licença:</strong> mostra a situação e permite informar um novo código. Nos <strong>15 dias</strong> antes do vencimento (da licença ou do período de teste) o menu mostra "Licença vence em N dia(s)" em destaque e o sistema abre um aviso uma vez por dia, com o código do computador para pedir a renovação. Vencida a licença, só a emissão é bloqueada.</li>
         <li><strong>Atualizações:</strong> o sistema baixa novas versões e pede para reiniciar; os dados são preservados.</li>
       </ul>`,
   },
