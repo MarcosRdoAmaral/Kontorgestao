@@ -4,7 +4,7 @@
  * aqui (e a data/versão em MANUAL_VERSAO) antes de publicar a versão.
  * `corpo` é HTML escrito à mão (não recebe dados de usuário).
  */
-export const MANUAL_VERSAO = '3.6.0';
+export const MANUAL_VERSAO = '3.7.0';
 
 export const MANUAL = [
   {
@@ -58,7 +58,7 @@ export const MANUAL = [
     corpo: `
       <p>Em <strong>Serviços</strong> cadastre cada serviço prestado pela empresa selecionada: descrição que sai na nota, código de tributação nacional (cTribNac), alíquota e, se for o caso, NBS.</p>
       <h3>Tributação do serviço</h3>
-      <p>O serviço <strong>não guarda mais</strong> alíquotas nem retenções: ele apenas aponta para um <strong>tipo de documento</strong> (campo <em>Tributação &gt; Tipo de documento</em>). Alíquota do ISS, ISSQN, imunidade, retenções (PIS, COFINS, CSLL, IRRF, INSS), totais aproximados, município e IBS/CBS ficam no perfil ligado ao tipo, em <strong>Tributação</strong>. Sem tipo, vale o tipo padrão de saída da empresa. Serviços antigos foram convertidos automaticamente em perfil e tipo.</p>
+      <p>O serviço <strong>não guarda</strong> alíquotas nem retenções: ele apenas aponta para uma <strong>tributação</strong> (campo <em>Tributação</em> do cadastro). Alíquota do ISS, ISSQN, imunidade, retenções (PIS, COFINS, CSLL, IRRF, INSS), totais aproximados, município e IBS/CBS ficam na tributação, em <strong>Tributação</strong>. Sem escolha, vale a tributação padrão de saída da empresa. Serviços antigos foram convertidos automaticamente.</p>
       <p class="dica">Confira sempre o enquadramento com o contador. O sistema só repete o que foi cadastrado.</p>`,
   },
   {
@@ -67,11 +67,12 @@ export const MANUAL = [
       <ol>
         <li>Abra <strong>Emitir nota</strong> (confira a empresa no alto do menu).</li>
         <li><strong>Cliente:</strong> comece a <strong>digitar o nome</strong> (ou o CNPJ/CPF): a lista se filtra enquanto você escreve; use as setas e Enter, ou clique no cliente. Apagar o campo volta para <em>Consumidor não identificado</em>. <kbd>F2</kbd> abre a consulta completa, em janela. Também dá para cadastrar um cliente novo ali mesmo.</li>
-        <li><strong>Serviço:</strong> ao escolher, descrição e código são preenchidos e o <strong>tipo de documento</strong> do serviço é selecionado.</li>
-        <li><strong>Cliente com descrição composta:</strong> se o cliente tem esse modelo (aba <em>Descrição da nota</em> no cadastro), aparece um bloco com período, ordem de compra e o valor de cada linha (ex.: mão de obra e aluguel de máquinas). A descrição, o valor total e o INSS retido (só sobre as linhas marcadas) são calculados sozinhos; PIS, COFINS, CSLL e IR seguem o tipo de documento, sobre o total.</li>
-        <li><strong>Tipo de documento:</strong> traz alíquota, ISSQN, retenções, totais aproximados, município e informações complementares do perfil (na data da competência). Trocar o tipo refaz o preenchimento; os campos ainda podem ser ajustados na nota.</li>
+        <li><strong>Serviço:</strong> ao escolher, descrição e código são preenchidos e a <strong>tributação</strong> do serviço é selecionada.</li>
+        <li><strong>Cliente com descrição composta:</strong> se o cliente tem esse modelo (aba <em>Descrição da nota</em> no cadastro), aparece um bloco com período, ordem de compra e o valor de cada linha (ex.: mão de obra e aluguel de máquinas). A descrição, o valor total e o INSS retido (só sobre as linhas marcadas) são calculados sozinhos; PIS, COFINS, CSLL e IR seguem o tributação, sobre o total.</li>
+        <li><strong>Tributação:</strong> traz alíquota, ISSQN, retenções, totais aproximados, município e informações complementares (na data da competência). Trocar a tributação refaz o preenchimento; os campos ainda podem ser ajustados na nota.</li>
+        <li><strong>Conferência da tributação:</strong> no fim do formulário, uma tabela mostra cada imposto com base, alíquota e valor (ISS, retenções federais, IBS/CBS informativo), o total retido e o <strong>líquido a receber</strong>, atualizada conforme você digita.</li>
         <li>Informe competência, valor e, se precisar, ajuste descrição e retenções.</li>
-        <li>Se o cliente fatura com boleto, defina o vencimento (já sugerido pela regra do cliente).</li>
+        <li>Se o cliente fatura com boleto, defina o vencimento (já sugerido pela regra do cliente). Para <strong>parcelar</strong>, informe o número de parcelas: o sistema divide o valor e sugere um vencimento por mês; ajuste data e valor de cada parcela (a soma precisa fechar com o boleto). Cada parcela vira um boleto, com o seu vencimento, e todos seguem no e-mail.</li>
         <li><strong>Emitir.</strong> O sistema monta a DPS, assina com o certificado e envia à Sefin.</li>
       </ol>
       <h3>Se algo der errado</h3>
@@ -162,24 +163,24 @@ export const MANUAL = [
       <p>O aviso aparece em todas as telas para quem tem a permissão <em>Estoque de insumos</em> e pode ser dispensado com o ×; volta se a situação mudar. O <strong>Histórico</strong> de cada item mostra todos os lançamentos.</p>`,
   },
   {
-    id: 'tributacao', titulo: 'Tributação e apuração assistida', resumo: 'Impostos, perfis, tipos de documento e comparação com o que as notas declaram.',
+    id: 'tributacao', titulo: 'Tributação e apuração assistida', resumo: 'Impostos, tributações e comparação com o que as notas declaram.',
     corpo: `
-      <p>Em <strong>Tributação</strong> você cadastra os impostos uma vez, junta em <em>perfis</em>, liga cada <em>tipo de documento</em> a um perfil e só então vincula serviços e compras ao tipo.</p>
+      <p>Em <strong>Tributação</strong> você cadastra os impostos uma vez, monta cada <em>tributação</em> e só então vincula serviços e compras a ela.</p>
       <h3>1. Impostos</h3>
       <p>Catálogo pronto: ISS, ICMS, IPI, PIS, COFINS, CSLL, IRRF, INSS, IBS (estadual e municipal) e CBS. Dá para renomear e desativar o que a empresa não usa.</p>
-      <h3>2. Perfis de tributação</h3>
-      <p>Um perfil é um conjunto de linhas: imposto, alíquota, redução de base, se é <strong>retido</strong>, CST e cClassTrib (IBS/CBS) e a <strong>vigência</strong> (de/até). Como as alíquotas do IBS/CBS mudam ao longo da transição, use uma linha por período; vale a que está em vigor na data do documento.</p>
-      <h3>3. Tipos de documento</h3>
-      <p>Cada tipo define o sentido (<em>saída</em> ou <em>entrada</em>), o modelo (NFS-e, NF-e de compra, manual), a natureza (serviço, revenda, insumo, uso e consumo, ativo imobilizado, devolução), o perfil, o código padrão, se <em>gera crédito</em> e o destino financeiro. Marque um tipo como <strong>padrão</strong> do sentido para ele valer quando o serviço ou a compra não indicar nenhum.</p>
-      <p>O botão <strong>Criar a partir dos serviços</strong> converte as retenções já cadastradas nos serviços em perfis e tipos, e vincula cada serviço.</p>
+      <h3>2. Tributações</h3>
+      <p>Uma tributação é um conjunto de linhas: imposto, alíquota, redução de base, se é <strong>retido</strong>, CST e cClassTrib (IBS/CBS) e a <strong>vigência</strong> (de/até). Como as alíquotas do IBS/CBS mudam ao longo da transição, use uma linha por período; vale a que está em vigor na data do documento.</p>
+      <h3>3. Onde a tributação se aplica</h3>
+      <p>Na própria tributação você diz se ela vale para <em>serviços prestados</em> (saída) ou <em>compras</em> (entrada), a natureza (serviço, revenda, insumo, uso e consumo, ativo imobilizado, devolução), o código padrão, se <em>gera crédito</em> e o destino financeiro. Marque uma como <strong>padrão</strong> para ela valer quando o serviço ou a compra não indicar nenhuma.</p>
+      <p>O botão <strong>Criar a partir dos serviços</strong> converte as retenções já cadastradas nos serviços em tributações, e vincula cada serviço.</p>
       <h3>4. Vínculos</h3>
       <ul>
-        <li><strong>Serviço (saída):</strong> no cadastro do serviço, campo <em>Tipo de documento</em>. Com tipo, as retenções e o ISS retido passam a vir do perfil, tanto na tela de emissão quanto no XML da DPS.</li>
-        <li><strong>Compra (entrada):</strong> ao importar o XML ou lançar manualmente, escolha o tipo (ou deixe o padrão).</li>
+        <li><strong>Serviço (saída):</strong> no cadastro do serviço, campo <em>Tributação</em>. As retenções e o ISS retido passam a vir dela, tanto na tela de emissão quanto no XML da DPS.</li>
+        <li><strong>Compra (entrada):</strong> ao importar o XML ou lançar manualmente, escolha a tributação (ou deixe a padrão).</li>
       </ul>
       <h3>5. Apuração assistida</h3>
-      <p>Escolha o mês. Para cada imposto o sistema mostra <strong>débitos</strong> (notas emitidas), <strong>créditos</strong> (compras de tipos que geram crédito) e o saldo, lado a lado em <em>calculado</em> (perfil aplicado ao valor) e <em>XML</em> (o que a nota declarou, inclusive IBS e CBS). Retenções aparecem à parte. A lista de <strong>divergências</strong> aponta, documento a documento, onde o cálculo e o XML diferem em mais de R$ 0,05.</p>
-      <p>O cálculo fica gravado no documento. Mudou um perfil? Use <strong>Recalcular</strong> para refazer o mês.</p>
+      <p>Escolha o mês. Para cada imposto o sistema mostra <strong>débitos</strong> (notas emitidas), <strong>créditos</strong> (compras de tributações que geram crédito) e o saldo, lado a lado em <em>calculado</em> (tributação aplicada ao valor) e <em>XML</em> (o que a nota declarou, inclusive IBS e CBS). Retenções aparecem à parte. A lista de <strong>divergências</strong> aponta, documento a documento, onde o cálculo e o XML diferem em mais de R$ 0,05.</p>
+      <p>O cálculo fica gravado no documento. Mudou uma tributação? Use <strong>Recalcular</strong> para refazer o mês.</p>
       <p class="dica">É uma conferência assistida, não a apuração oficial: valide sempre com o contador. O acesso é liberado por usuário (permissão <em>Tributação e apuração</em>).</p>`,
   },
   {
@@ -236,6 +237,7 @@ export const MANUAL = [
   {
     id: 'atalhos', titulo: 'Atalhos e dicas', resumo: 'Atalhos de teclado e boas práticas.',
     corpo: `
+      <p><strong>Menu:</strong> as telas ficam em grupos (Faturamento, Compras e estoque, Financeiro, Cadastros). Clique no nome do grupo para abrir ou recolher; o grupo da tela atual abre sozinho.</p>
       <ul>
         <li>Em Emitir nota, digite no campo do cliente para buscar na hora; <kbd>F2</kbd> abre a consulta completa (setas, Enter para escolher, Esc para fechar).</li>
         <li>Confira sempre a <strong>empresa selecionada</strong> no alto do menu antes de emitir.</li>

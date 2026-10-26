@@ -13,7 +13,7 @@ import { Despesa, criarDespesa, editarDespesa, excluirDespesa, listarCategorias,
 import { Classificacao, balancoExtrato, candidatosBoleto, classificar, conciliar, excluirImportacao, extratoDoMes, importarExtrato } from './servicos/extrato.js';
 import { catalogo, gerarRelatorio, relatorioCsv, relatorioPdf } from './servicos/relatorios.js';
 import { configurarAgenda, executarItem, executarProntas, listarAgenda, pularItem, resumoAgenda } from './servicos/agenda.js';
-import { EdicaoImposto, Perfil, TipoDocumento, apuracaoAssistida, conferirTipoDoVinculo, criarPerfil, criarTipo, editarImposto, editarPerfil, editarTipo, excluirPerfil, excluirTipo, gerarPerfisDosServicos, listarImpostos, listarPerfis, listarTipos, tributacaoCompletaDoServico, tributacaoEfetiva, NATUREZAS } from './servicos/tributacao.js';
+import { EdicaoImposto, Tributacao, criarTributacao, editarTributacao, excluirTributacao, listarTributacoes, Perfil, TipoDocumento, apuracaoAssistida, conferirTipoDoVinculo, criarPerfil, criarTipo, editarImposto, editarPerfil, editarTipo, excluirPerfil, excluirTipo, gerarPerfisDosServicos, listarImpostos, listarPerfis, listarTipos, tributacaoCompletaDoServico, tributacaoEfetiva, NATUREZAS } from './servicos/tributacao.js';
 import { DescricaoModelo, EntradaDescricao, lerModelo, montarDescricao } from './servicos/descricao.js';
 import { ItemEstoque, LancamentoCompra, Movimento, avisos as avisosEstoque, criarItem as criarItemEstoque, editarItem as editarItemEstoque, excluirItem as excluirItemEstoque, excluirMovimento, itensDaCompra, lancarCompraNoEstoque, listarItens as listarItensEstoque, listarMovimentos, movimentar } from './servicos/estoque.js';
 import { CompraManual, OpcoesImportacao, criarCompraManual, excluirCompra, importarCompraXml, listarCompras, obterCompra, xmlDaCompra } from './servicos/compras.js';
@@ -744,10 +744,10 @@ export async function rotas(app: FastifyInstance) {
     // ---------- Tributação: impostos, perfis, tipos de documento e apuração assistida ----------
     api.get('/api/tributacao/impostos', async () => listarImpostos());
     api.put('/api/tributacao/impostos/:codigo', async (req) => { editarImposto(String((req.params as any).codigo), EdicaoImposto.parse(req.body)); return { ok: true }; });
-    api.get('/api/empresas/:id/tributacao/perfis', async (req) => { const id = Number((req.params as any).id); checarEmpresa(req, id); return listarPerfis(id); });
-    api.post('/api/empresas/:id/tributacao/perfis', async (req) => { const id = Number((req.params as any).id); checarEmpresa(req, id); return criarPerfil(id, Perfil.parse(req.body)); });
-    api.put('/api/empresas/:id/tributacao/perfis/:pid', async (req) => { const p = req.params as any; checarEmpresa(req, Number(p.id)); editarPerfil(Number(p.id), Number(p.pid), Perfil.parse(req.body)); return { ok: true }; });
-    api.delete('/api/empresas/:id/tributacao/perfis/:pid', async (req) => { const p = req.params as any; checarEmpresa(req, Number(p.id)); excluirPerfil(Number(p.id), Number(p.pid)); return { ok: true }; });
+    api.get('/api/empresas/:id/tributacao/perfis', async (req) => { const id = Number((req.params as any).id); checarEmpresa(req, id); return listarTributacoes(id); });
+    api.post('/api/empresas/:id/tributacao/perfis', async (req) => { const id = Number((req.params as any).id); checarEmpresa(req, id); return criarTributacao(id, Tributacao.parse(req.body)); });
+    api.put('/api/empresas/:id/tributacao/perfis/:pid', async (req) => { const p = req.params as any; checarEmpresa(req, Number(p.id)); editarTributacao(Number(p.id), Number(p.pid), Tributacao.parse(req.body)); return { ok: true }; });
+    api.delete('/api/empresas/:id/tributacao/perfis/:pid', async (req) => { const p = req.params as any; checarEmpresa(req, Number(p.id)); excluirTributacao(Number(p.id), Number(p.pid)); return { ok: true }; });
     api.get('/api/empresas/:id/tributacao/tipos/:tid/efetiva', async (req) => {
       const p = req.params as any; checarEmpresa(req, Number(p.id));
       const { data } = z.object({ data: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional() }).parse(req.query);

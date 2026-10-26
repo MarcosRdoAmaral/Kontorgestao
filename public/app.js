@@ -385,6 +385,13 @@ async function iniciar() {
   $('#app').hidden = false;
   $('#nome-usuario').textContent = `${estado.usuario.nome} (${estado.usuario.login})`;
   document.querySelectorAll('[data-modulo]').forEach((a) => (a.hidden = !estado.usuario.modulos.includes(a.dataset.modulo)));
+  // grupos do menu: somem se nenhum item é permitido; a abertura de cada um fica guardada neste navegador
+  document.querySelectorAll('#menu details.grupo').forEach((g) => {
+    g.hidden = ![...g.querySelectorAll('a')].some((a) => !a.hidden);
+    let guardado = null; try { guardado = localStorage.getItem('menu-' + g.dataset.grupo); } catch { /* sem armazenamento */ }
+    g.open = guardado === '1';
+    g.addEventListener('toggle', () => { try { localStorage.setItem('menu-' + g.dataset.grupo, g.open ? '1' : '0'); } catch { /* ok */ } });
+  });
   // quem não tem o acesso a Relatórios ainda enxerga o manual, por um item próprio no menu
   $('#menu-doc').hidden = estado.usuario.modulos.includes('relatorios');
   if (estado.usuario.trocar_senha) { $('#app').hidden = true; return trocarSenha({ obrigatoria: true }); }
@@ -407,6 +414,7 @@ const rotas = {
 
 function rotear() {
   const [, nome = 'painel', param] = location.hash.split('/');
+  document.querySelectorAll('#menu details.grupo').forEach((g) => { const ativo = [...g.querySelectorAll('a')].some((a) => a.getAttribute('href') === `#/${nome}` && !a.hidden); g.classList.toggle('tem-ativo', ativo); if (ativo) g.open = true; });
   document.querySelectorAll('nav a').forEach((a) => a.classList.toggle('ativo', a.getAttribute('href') === `#/${nome}` || (a.id === 'menu-doc' && nome === 'relatorios' && param === 'documentacao')));
   const manual = nome === 'relatorios' && param === 'documentacao'; // o manual é de todos os usuários
   if (['usuarios', 'email', 'backup', 'licenca'].includes(nome)) { location.hash = '#/config/' + nome; return; } // endereços antigos
@@ -529,6 +537,8 @@ async function telaEmitir(notaIdCorrecao) {
             <span class="dica" id="dica-acao"></span></label>
           <label data-boleto>Vencimento do boleto <input type="date" name="vencimento"></label>
           <label data-boleto>Valor do boleto (R$) <input name="valorBoleto" data-num inputmode="decimal" placeholder="Valor líquido da nota"><span class="dica">Preenchido sozinho com o líquido da nota (serviço menos descontos e retenções). Você pode alterar; apague o campo para voltar ao automático.</span><span class="dica" id="dica-boleto-desc"></span></label>
+          <label data-boleto>Parcelas <input type="number" name="nParcelas" min="1" max="24" value="1"><span class="dica">Mais de 1: um boleto por parcela, cada um com o seu vencimento (editável abaixo).</span></label>
+          <div data-boleto class="largo" id="lista-parcelas" hidden></div>
         </div>
       </fieldset>
 
@@ -545,11 +555,11 @@ async function telaEmitir(notaIdCorrecao) {
               ${servicos.map((s) => `<option value="${s.id}" ${p.servicoId === s.id ? 'selected' : ''}>${esc(s.nome)} (${s.c_trib_nac})</option>`).join('')}
             </select>
           </label>
-          <label class="largo">Tipo de documento
+          <label class="largo">Tributação
             <select name="tipoDocumentoId"><option value="">Padrão / do serviço</option>
               ${tiposSaida.map((t) => `<option value="${t.id}" ${p.tipoDocumentoId === t.id ? 'selected' : ''}>${esc(t.nome)}${t.padrao ? ' (padrão)' : ''}</option>`).join('')}
             </select>
-            <span class="dica">Ao escolher, alíquota, retenções, ISSQN e demais dados tributários vêm do tipo; ainda dá para ajustar abaixo.</span></label>
+            <span class="dica">Ao escolher, alíquota, retenções, ISSQN e demais dados tributários vêm da tributação; ainda dá para ajustar abaixo.</span></label>
           <label class="largo">Descrição que sai na nota <textarea name="descricao" required maxlength="2000">${esc(p.descricao ?? '')}</textarea></label>
           <label>Competência <input type="date" name="competencia" required value="${p.competencia ?? hoje()}"></label>
           <label>Valor do serviço (R$) <input name="valor" data-num required inputmode="decimal" value="${p.valor ?? ''}"></label>
@@ -598,6 +608,9 @@ async function telaEmitir(notaIdCorrecao) {
         </div>
       </fieldset>
       <p class="erro" id="erro-emitir" role="alert"></p>
+      <fieldset id="bloco-conferencia"><legend>Conferência da tributação</legend>
+        <div class="rolagem" id="conferencia"></div>
+      </fieldset>
       <div class="acoes"><button class="primario" type="submit" id="btn-emitir">${corrigindo ? 'Reenviar à Sefin' : 'Emitir nota'}</button></div>
     </form>`;
 
@@ -608,7 +621,7 @@ async function telaEmitir(notaIdCorrecao) {
   if (p.tribISSQN) f.tribISSQN.value = p.tribISSQN;
   if (p.issRetido) f.issRetido.value = p.issRetido;
 
-  let pCpServico = null, tpImunidadeServico = null, modeloComposto = null, tCompor = null;
+  let pCpServico = null, tpImunidadeServico = null, modeloComposto = null, tCompor = null, ultimoEfetivo = null, parcelasManual = false;
   f.servicoId.onchange = () => {
     const s = servicos.find((x) => x.id === Number(f.servicoId.value));
     if (!s) return;
@@ -616,7 +629,7 @@ async function telaEmitir(notaIdCorrecao) {
     if (s.aliquota != null) f.aliquota.value = s.aliquota;
     if (s.valor_padrao) f.valor.value = s.valor_padrao;
     f.cTribNac.value = '';
-    // o serviço aponta para um tipo de documento; a tributação vem dele
+    // o serviço aponta para uma tributação
     const tid = s.tipo_documento_id ?? tiposSaida.find((t) => t.padrao)?.id ?? '';
     f.tipoDocumentoId.value = String(tid);
     aplicarTipo();
@@ -625,9 +638,10 @@ async function telaEmitir(notaIdCorrecao) {
   const fmt = (n) => (n == null ? '' : String(n).replace('.', ','));
   async function aplicarTipo() {
     const tid = f.tipoDocumentoId.value;
-    if (!tid) { pCpServico = null; tpImunidadeServico = null; return; }
+    if (!tid) { pCpServico = null; tpImunidadeServico = null; ultimoEfetivo = null; renderConferencia(); return; }
     try {
       const t = await api('GET', `/api/empresas/${e.id}/tributacao/tipos/${tid}/efetiva?data=${f.competencia.value || hoje()}`);
+      ultimoEfetivo = t;
       if (t.aliquota != null) f.aliquota.value = fmt(t.aliquota);
       f.tribISSQN.value = String(t.tribISSQN ?? 1);
       f.issRetido.value = String(t.issRetido ?? 1);
@@ -638,6 +652,7 @@ async function telaEmitir(notaIdCorrecao) {
       pCpServico = t.pCp ?? null; tpImunidadeServico = t.tpImunidade ?? null;
       recalcular();
       sugerirBoleto?.();
+      renderConferencia();
       if (modeloComposto) aplicarComposta();
     } catch (err) { $('#erro-emitir').textContent = mensagemErro(err); }
   }
@@ -675,6 +690,70 @@ async function telaEmitir(notaIdCorrecao) {
     } catch (err) { $('#erro-emitir').textContent = mensagemErro(err); }
   }
   f.tomadorId.addEventListener('change', () => setTimeout(prepararComposta, 0));
+  // ---- parcelamento do boleto: uma linha por parcela (data + valor), geradas a partir do vencimento e do valor do boleto
+  const addMes = (iso, k) => {
+    const [a, m, d] = iso.split('-').map(Number);
+    const alvo = new Date(Date.UTC(a, m - 1 + k, 1)), ult = new Date(Date.UTC(alvo.getUTCFullYear(), alvo.getUTCMonth() + 1, 0)).getUTCDate();
+    return new Date(Date.UTC(alvo.getUTCFullYear(), alvo.getUTCMonth(), Math.min(d, ult))).toISOString().slice(0, 10);
+  };
+  const nParcelas = () => Math.max(1, Math.min(24, Number(f.nParcelas?.value) || 1));
+  function desenharParcelas(regerar = true) {
+    const box = $('#lista-parcelas');
+    if (!box || !f.nParcelas) return;
+    const n = nParcelas(), total = lerForm(f).valorBoleto ?? 0;
+    box.hidden = n < 2 || f.acao.value === 'NOTA';
+    if (n < 2) { box.innerHTML = ''; return; }
+    if (regerar && !parcelasManual) {
+      const base = f.vencimento.value || vencPadrao(tomadores.find((x) => x.id === Number(f.tomadorId.value)));
+      const cent = Math.round(total * 100), cada = Math.floor(cent / n);
+      box.innerHTML = Array.from({ length: n }, (_, i) => {
+        const v = (i === n - 1 ? cent - cada * (n - 1) : cada) / 100;
+        return `<div class="linha-serv"><label>Parcela ${i + 1} — vencimento <input type="date" data-pv="${i}" value="${addMes(base, i)}"></label><label>Valor (R$) <input data-pq="${i}" data-num inputmode="decimal" value="${v ? v.toFixed(2).replace('.', ',') : ''}"></label></div>`;
+      }).join('') + '<p class="dica" id="soma-parcelas"></p>';
+      box.querySelectorAll('input').forEach((el) => el.addEventListener('input', () => { parcelasManual = true; somarParcelas(); }));
+    }
+    somarParcelas();
+  }
+  function somarParcelas() {
+    const el = $('#soma-parcelas'); if (!el) return;
+    const soma = [...f.querySelectorAll('[data-pq]')].reduce((a, i) => a + (numero(i.value) ?? 0), 0), total = lerForm(f).valorBoleto ?? 0;
+    const dif = Math.round((soma - total) * 100) / 100;
+    el.textContent = dif === 0 ? `Soma das parcelas: ${brl(soma)} (confere com o boleto).` : `Soma das parcelas: ${brl(soma)} — ${dif > 0 ? 'excede' : 'falta'} ${brl(Math.abs(dif))} para o valor do boleto.`;
+  }
+  const lerParcelas = () => (nParcelas() < 2 ? null : [...f.querySelectorAll('[data-pv]')].map((el, i) => ({ vencimento: el.value, valor: numero(f.querySelector(`[data-pq="${i}"]`).value) ?? 0 })));
+  f.nParcelas?.addEventListener('input', () => { parcelasManual = false; desenharParcelas(); });
+  f.vencimento?.addEventListener('change', () => { parcelasManual = false; desenharParcelas(); });
+  f.valorBoleto?.addEventListener('input', () => { parcelasManual = false; desenharParcelas(); });
+  f.acao.addEventListener('change', () => desenharParcelas());
+  f.addEventListener('input', (ev) => { if (['valor', 'descontoIncondicionado'].includes(ev.target.name) || ev.target.name?.startsWith('comp_')) setTimeout(() => { parcelasManual = false; desenharParcelas(); }, 0); });
+
+  // ---- conferência: cada imposto com base, alíquota e valor, a partir do que está no formulário
+  function renderConferencia() {
+    const d = lerForm(f), base = Math.round(((d.valor ?? 0) - (d.descontoIncondicionado ?? 0)) * 100) / 100;
+    const v = (n) => brl(Math.round((n ?? 0) * 100) / 100);
+    const pct = (n) => (n || n === 0 ? String(n).replace('.', ',') + '%' : '—');
+    const issRet = Number(d.issRetido) === 2 || Number(d.issRetido) === 3;
+    const iss = Math.round(base * (d.aliquota ?? 0)) / 100;
+    const linhas = [];
+    if (Number(d.tribISSQN) === 1) linhas.push(['ISS', base, d.aliquota, iss, issRet ? 'Retido pelo tomador' : 'A recolher pelo prestador']);
+    else linhas.push(['ISS', base, null, 0, { 2: 'Imunidade', 3: 'Exportação', 4: 'Não incidência' }[Number(d.tribISSQN)]]);
+    const ret = [['PIS', d.pPis, d.pis], ['COFINS', d.pCofins, d.cofins], ['CSLL', d.pCsll, d.csll], ['IRRF', d.pIrrf, d.irrf], ['INSS (contrib. previdenciária)', null, d.cp]];
+    let retidas = 0;
+    for (const [n, p, val] of ret) if (val) { linhas.push([n, base, p, val, 'Retido pelo tomador']); retidas += val; }
+    const proprios = new Set(['ISS', 'PIS', 'COFINS', 'CSLL', 'IRRF', 'INSS']);
+    for (const it of ultimoEfetivo?.itens ?? []) if (!proprios.has(it.imposto)) { const b = base * (1 - (it.reducao_base || 0) / 100); linhas.push([it.imposto.replace('_', ' '), Math.round(b * 100) / 100, it.aliquota, Math.round(b * it.aliquota) / 100, 'Informativo (IBS/CBS)']); }
+    const liquido = Math.round((base - retidas - (issRet ? iss : 0)) * 100) / 100;
+    const tot = [d.tFed, d.tEst, d.tMun].some((x) => x) ? `<tr><td colspan="3">Tributos aproximados (fed ${pct(d.tFed)} · est ${pct(d.tEst)} · mun ${pct(d.tMun)})</td><td class="num">${v(base * ((d.tFed ?? 0) + (d.tEst ?? 0) + (d.tMun ?? 0)) / 100)}</td><td>Lei 12.741</td></tr>` : '';
+    $('#conferencia').innerHTML = base > 0
+      ? `<table class="tabela"><thead><tr><th>Imposto</th><th class="num">Base</th><th class="num">Alíquota</th><th class="num">Valor</th><th>Situação</th></tr></thead><tbody>
+        ${linhas.map(([n, b, p, val, sit]) => `<tr><td>${esc(n)}</td><td class="num">${v(b)}</td><td class="num">${pct(p)}</td><td class="num">${v(val)}</td><td>${esc(sit)}</td></tr>`).join('')}${tot}
+        <tr><td colspan="3"><strong>Retenções (federais${issRet ? ' + ISS' : ''})</strong></td><td class="num"><strong>${v(retidas + (issRet ? iss : 0))}</strong></td><td></td></tr>
+        <tr><td colspan="3"><strong>Líquido a receber</strong> (${v(d.valor ?? 0)}${d.descontoIncondicionado ? ` − desconto ${v(d.descontoIncondicionado)}` : ''} − retenções)</td><td class="num"><strong>${v(liquido)}</strong></td><td></td></tr></tbody></table>`
+      : '<p class="sutil">Informe o valor do serviço para conferir a tributação.</p>';
+  }
+  f.addEventListener('input', () => setTimeout(renderConferencia, 0));
+  f.addEventListener('change', () => setTimeout(renderConferencia, 0));
+  renderConferencia();
   habilitarConsultaF2($('#form-emitir'), $('#form-emitir').tomadorId, tomadores);
   ligarBuscaCliente($('#form-emitir').tomadorId, tomadores);
   $('#novo-tomador').onclick = () => formTomador(null, async (id) => { telaEmitir.prefTomador = id; await telaEmitir(notaIdCorrecao); $('#form-emitir').tomadorId.value = id; });
@@ -700,6 +779,7 @@ async function telaEmitir(notaIdCorrecao) {
     $('#dica-acao').textContent = `Padrão do cliente: ${NOME_MODO[t.modo_faturamento] ?? 'Nota'}.`;
     // só boleto: não há dados fiscais a preencher
     f.querySelectorAll('fieldset').forEach((fs) => { if (fs.querySelector('[name=tribISSQN]') && !fs.closest('fieldset#bloco-cobranca')) fs.hidden = acao === 'BOLETO'; });
+    $('#bloco-conferencia').hidden = acao === 'BOLETO';
     $('#btn-emitir').textContent = { NOTA: 'Emitir nota', NOTA_BOLETO: 'Emitir nota e boleto', BOLETO: 'Gerar boleto' }[acao];
   };
   f.tomadorId.addEventListener('change', () => {
@@ -836,6 +916,7 @@ async function telaEmitir(notaIdCorrecao) {
         acao: corpo.tomadorId ? d.acao : 'NOTA',
         vencimento: d.vencimento || null,
         valorBoleto: d.valorBoleto || null,
+        parcelas: d.acao !== 'NOTA' ? lerParcelas() : null,
         enviarEmail: f.enviarEmail ? !!f.enviarEmail.checked : null,
       });
       const partes = [];
@@ -1112,21 +1193,23 @@ async function telaBanco() {
 }
 
 // ---------------------------------------------------------------------------
-// Tributação: apuração assistida, tipos de documento, perfis e impostos
+// Tributação: apuração assistida, tributações e impostos
 // ---------------------------------------------------------------------------
 async function telaTributacao(aba) {
-  const abas = [['apuracao', 'Apuração assistida'], ['tipos', 'Tipos de documento'], ['perfis', 'Perfis de tributação'], ['impostos', 'Impostos']];
+  const abas = [['apuracao', 'Apuração assistida'], ['perfis', 'Tributações'], ['impostos', 'Impostos']];
+  if (aba === 'tipos') aba = 'perfis';
   if (!abas.some((a) => a[0] === aba)) aba = 'apuracao';
   conteudo.innerHTML = `
-    <div class="topo"><div><h1>Tributação</h1><p class="sutil">Cadastre os impostos uma vez, junte-os em perfis, ligue cada tipo de documento a um perfil e vincule serviços e compras ao tipo. A apuração assistida compara o que o perfil calcula com o que as notas declaram.</p></div></div>
+    <div class="topo"><div><h1>Tributação</h1><p class="sutil">Cadastre os impostos uma vez, monte cada tributação (alíquotas, retenções e dados da nota) e vincule serviços e compras a ela. A apuração assistida compara o que a tributação calcula com o que as notas declaram.</p></div></div>
     <nav class="abas" aria-label="Tributação">${abas.map(([k, n]) => `<a href="#/tributacao/${k}" class="${k === aba ? 'ativo' : ''}">${n}</a>`).join('')}</nav>
     <div id="trib-corpo"></div>`;
-  await { apuracao: abaApuracao, tipos: abaTipos, perfis: abaPerfis, impostos: abaImpostos }[aba]();
+  await { apuracao: abaApuracao, perfis: abaPerfis, impostos: abaImpostos }[aba]();
 }
 
 const base_trib = () => `/api/empresas/${estado.empresaId}/tributacao`;
 const NOME_NATUREZA_SENTIDO = { SAIDA: 'Saída', ENTRADA: 'Entrada' };
 const MODELOS = { NFSE: 'NFS-e', NFE: 'NF-e (compra)', MANUAL: 'Lançamento manual' };
+const NATUREZAS = ['Serviço', 'Mercadoria para revenda', 'Insumo', 'Uso e consumo', 'Ativo imobilizado', 'Devolução', 'Outra'];
 const DESTINOS = { RECEITA: 'Receita', DESPESA: 'Despesa', NENHUM: 'Nenhum' };
 
 async function abaApuracao() {
@@ -1135,13 +1218,13 @@ async function abaApuracao() {
   const v = (n) => (n ? brl(n) : '<span class="dica">—</span>');
   const dif = (a, b) => Math.abs(a - b) > 0.05;
   $('#trib-corpo').innerHTML = `
-    <div class="topo"><div><h2 style="margin-top:0">Apuração de ${nomeMes(mes)}</h2><p class="sutil">${d.documentos.notas} nota(s) de serviço e ${d.documentos.compras} compra(s) na competência. <strong>Calculado</strong> = o perfil do tipo de documento aplicado ao valor; <strong>XML</strong> = o que a nota declarou.</p></div>
+    <div class="topo"><div><h2 style="margin-top:0">Apuração de ${nomeMes(mes)}</h2><p class="sutil">${d.documentos.notas} nota(s) de serviço e ${d.documentos.compras} compra(s) na competência. <strong>Calculado</strong> = o tributação aplicada ao valor; <strong>XML</strong> = o que a nota declarou.</p></div>
       <div><label>Mês <input type="month" id="mes-ap" value="${mes}"></label> <button id="recalc" title="Refaz o cálculo com os perfis atuais">Recalcular</button></div></div>
-    ${d.semTipo.notas || d.semTipo.compras ? `<div class="banner teste">${d.semTipo.notas ? `${d.semTipo.notas} nota(s) ` : ''}${d.semTipo.notas && d.semTipo.compras ? 'e ' : ''}${d.semTipo.compras ? `${d.semTipo.compras} compra(s) ` : ''}sem perfil de tributação: ligue o serviço (ou a compra) a um tipo de documento, ou marque um tipo como padrão, para entrarem no cálculo.</div>` : ''}
+    ${d.semTipo.notas || d.semTipo.compras ? `<div class="banner teste">${d.semTipo.notas ? `${d.semTipo.notas} nota(s) ` : ''}${d.semTipo.notas && d.semTipo.compras ? 'e ' : ''}${d.semTipo.compras ? `${d.semTipo.compras} compra(s) ` : ''}sem perfil de tributação: ligue o serviço (ou a compra) a uma tributação, ou marque uma como padrão, para entrarem no cálculo.</div>` : ''}
     ${d.resumo.length ? `<div class="rolagem"><table class="tabela"><thead><tr><th>Imposto</th><th class="num">Débitos (calc.)</th><th class="num">Débitos (XML)</th><th class="num">Créditos (calc.)</th><th class="num">Créditos (XML)</th><th class="num">Saldo (calc.)</th><th class="num">Saldo (XML)</th><th class="num">Retido (calc./XML)</th></tr></thead><tbody>
       ${d.resumo.map((r) => `<tr><td>${esc(r.nome)}</td><td class="num">${v(r.debito_calc)}</td><td class="num ${dif(r.debito_calc, r.debito_xml) ? 'cor-ambar' : ''}">${v(r.debito_xml)}</td><td class="num">${v(r.credito_calc)}</td><td class="num ${dif(r.credito_calc, r.credito_xml) ? 'cor-ambar' : ''}">${v(r.credito_xml)}</td>
         <td class="num"><strong>${v(r.saldo_calc)}</strong></td><td class="num">${v(r.saldo_xml)}</td><td class="num">${r.retido_calc || r.retido_xml ? brl(r.retido_calc) + ' / ' + brl(r.retido_xml) : '<span class="dica">—</span>'}</td></tr>`).join('')}
-    </tbody></table></div>` : '<div class="vazio">Nada para apurar neste mês. Notas autorizadas e compras da competência entram aqui quando o serviço (ou a compra) está ligado a um tipo de documento com perfil.</div>'}
+    </tbody></table></div>` : '<div class="vazio">Nada para apurar neste mês. Notas autorizadas e compras da competência entram aqui quando o serviço (ou a compra) está ligado a uma tributação ou existe uma tributação padrão.</div>'}
     <h3>Divergências a conferir</h3>
     ${d.divergencias.length ? `<div class="rolagem"><table class="tabela"><thead><tr><th>Documento</th><th>Imposto</th><th class="num">Calculado</th><th class="num">XML</th><th class="num">Diferença</th><th>Situação</th></tr></thead><tbody>
       ${d.divergencias.map((x) => `<tr><td>${esc(x.documento)}</td><td>${esc(x.imposto)}</td><td class="num">${x.calculado == null ? '—' : brl(x.calculado)}</td><td class="num">${x.declarado == null ? '—' : brl(x.declarado)}</td><td class="num">${brl(x.diferenca)}</td><td>${esc(x.situacao)}</td></tr>`).join('')}</tbody></table></div>` : '<p class="sutil">Nenhuma divergência: o que o perfil calcula confere com o que os XML declaram.</p>'}
@@ -1150,70 +1233,21 @@ async function abaApuracao() {
   $('#recalc').onclick = async (e) => { e.target.disabled = true; try { await api('GET', `${base_trib()}/apuracao?mes=${mes}&recalcular=1`); aviso('Cálculo refeito.'); } catch (er) { aviso(mensagemErro(er)); } abaApuracao(); };
 }
 
-async function abaTipos() {
-  const [{ tipos, naturezas }, perfis] = await Promise.all([api('GET', `${base_trib()}/tipos`), api('GET', `${base_trib()}/perfis`)]);
-  $('#trib-corpo').innerHTML = `
-    <div class="topo"><div><h2 style="margin-top:0">Tipos de documento</h2><p class="sutil">Cada tipo diz o sentido (saída/entrada), o modelo, a natureza e qual <strong>perfil</strong> de tributação vale. Serviços e compras só precisam apontar para um tipo.</p></div>
-      <div><button class="primario" id="novo-tipo">Novo tipo</button> <button id="gerar-serv" title="Cria perfil e tipo a partir das retenções já cadastradas em cada serviço">Criar a partir dos serviços</button></div></div>
-    ${tipos.length ? `<div class="rolagem"><table class="tabela"><thead><tr><th>Tipo</th><th>Sentido</th><th>Modelo</th><th>Natureza</th><th>Perfil</th><th>Crédito</th><th>Destino</th><th>Usos</th><th></th></tr></thead><tbody>
-      ${tipos.map((t, i) => `<tr><td>${esc(t.nome)}${t.padrao ? ' <span class="dica">(padrão)</span>' : ''}</td><td>${NOME_NATUREZA_SENTIDO[t.sentido]}</td><td>${MODELOS[t.modelo]}</td><td>${esc(t.natureza ?? '')}</td><td>${esc(t.perfil_nome ?? '—')}</td><td>${t.gera_credito ? 'Sim' : '—'}</td><td>${DESTINOS[t.destino]}</td><td class="num">${t.usos}</td>
-        <td class="acoes-linha"><button data-ed="${i}">Editar</button>${podeExcluirRegistros() ? `<button data-ex="${t.id}">Excluir</button>` : ''}</td></tr>`).join('')}</tbody></table></div>`
-      : '<div class="vazio">Nenhum tipo cadastrado. Crie um perfil na aba Perfis e depois o tipo, ou use "Criar a partir dos serviços".</div>'}`;
-  const form = (t) => {
-    t ??= { sentido: 'SAIDA', modelo: 'NFSE', destino: 'RECEITA', gera_credito: false, padrao: false };
-    abrirDialogo(`<form id="form-tipo"><h2>${t.id ? 'Editar tipo de documento' : 'Novo tipo de documento'}</h2>
-      <div class="grade">
-        <label class="largo">Nome <input name="nome" required maxlength="80" value="${esc(t.nome ?? '')}" placeholder="Ex.: Serviço com retenção federal"></label>
-        <label>Sentido <select name="sentido"><option value="SAIDA" ${t.sentido === 'SAIDA' ? 'selected' : ''}>Saída (vendas/serviços prestados)</option><option value="ENTRADA" ${t.sentido === 'ENTRADA' ? 'selected' : ''}>Entrada (compras)</option></select></label>
-        <label>Modelo <select name="modelo">${Object.entries(MODELOS).map(([k, n]) => `<option value="${k}" ${t.modelo === k ? 'selected' : ''}>${n}</option>`).join('')}</select></label>
-        <label>Natureza <select name="natureza"><option value=""></option>${naturezas.map((n) => `<option ${t.natureza === n ? 'selected' : ''}>${esc(n)}</option>`).join('')}</select></label>
-        <label>Perfil de tributação <select name="perfil_id"><option value="">Sem perfil</option>${perfis.map((p) => `<option value="${p.id}" ${t.perfil_id === p.id ? 'selected' : ''}>${esc(p.nome)}</option>`).join('')}</select></label>
-        <label>Código de tributação nacional / CFOP padrão <input name="codigo" maxlength="6" value="${esc(t.sentido === 'ENTRADA' ? (t.cfop ?? '') : (t.c_trib_nac ?? ''))}"></label>
-        <label>Indicador da operação (cIndOp) <input name="ind_op" maxlength="6" value="${esc(t.ind_op ?? '')}"></label>
-        <label>Consumidor final (indFinal) <select name="ind_final"><option value="0" ${(t.ind_final ?? 0) === 0 ? 'selected' : ''}>Não</option><option value="1" ${t.ind_final === 1 ? 'selected' : ''}>Sim</option></select></label>
-        <label>Destinatário do IBS/CBS (indDest) <select name="ind_dest"><option value="0" ${t.ind_dest === 0 ? 'selected' : ''}>O próprio tomador</option><option value="1" ${(t.ind_dest ?? 0) === 1 ? "selected" : ""}>Outro destinatário</option></select></label>
-        <label>Destino financeiro <select name="destino">${Object.entries(DESTINOS).map(([k, n]) => `<option value="${k}" ${t.destino === k ? 'selected' : ''}>${n}</option>`).join('')}</select></label>
-      </div>
-      <label class="check"><input type="checkbox" name="gera_credito" ${t.gera_credito ? 'checked' : ''}> Gera crédito de impostos (entradas)</label>
-      <label class="check"><input type="checkbox" name="padrao" ${t.padrao ? 'checked' : ''}> Tipo padrão do sentido (usado quando o serviço ou a compra não indica um)</label>
-      <p class="erro" id="erro-tipo"></p>
-      <div class="acoes"><button class="primario" type="submit">Salvar</button><button type="button" data-fechar>Cancelar</button></div></form>`, (dlg) => {
-      dlg.querySelector('#form-tipo').onsubmit = async (ev) => {
-        ev.preventDefault(); const f = ev.target; const x = lerForm(f);
-        const entrada = x.sentido === 'ENTRADA';
-        const corpo = { nome: x.nome, sentido: x.sentido, modelo: x.modelo, natureza: x.natureza || null, perfil_id: x.perfil_id ? Number(x.perfil_id) : null,
-          c_trib_nac: entrada ? null : (x.codigo || null), cfop: entrada ? (x.codigo || null) : null, ind_op: x.ind_op || null, ind_final: Number(x.ind_final), ind_dest: Number(x.ind_dest), gera_credito: f.gera_credito.checked, destino: x.destino, padrao: f.padrao.checked };
-        try { t.id ? await api('PUT', `${base_trib()}/tipos/${t.id}`, corpo) : await api('POST', `${base_trib()}/tipos`, corpo); dlg.close(); aviso('Tipo salvo.'); abaTipos(); }
-        catch (e) { $('#erro-tipo').textContent = mensagemErro(e); }
-      };
-    });
-  };
-  $('#novo-tipo').onclick = () => form();
-  $('#trib-corpo').querySelectorAll('[data-ed]').forEach((b) => (b.onclick = () => form(tipos[b.dataset.ed])));
-  $('#trib-corpo').querySelectorAll('[data-ex]').forEach((b) => (b.onclick = async () => {
-    if (!confirm('Excluir este tipo de documento?')) return;
-    try { await api('DELETE', `${base_trib()}/tipos/${b.dataset.ex}`); abaTipos(); } catch (e) { aviso(mensagemErro(e)); }
-  }));
-  $('#gerar-serv').onclick = async () => {
-    try { const r = await api('POST', `${base_trib()}/gerar-dos-servicos`, {}); aviso(r.perfisCriados ? `${r.perfisCriados} perfil(is) criado(s) a partir de ${r.servicos} serviço(s).` : 'Nenhum serviço com retenções para converter.'); abaTipos(); } catch (e) { aviso(mensagemErro(e)); }
-  };
-}
-
 async function abaPerfis() {
   const [perfis, impostos] = await Promise.all([api('GET', `${base_trib()}/perfis`), api('GET', '/api/tributacao/impostos')]);
   const nomeImp = Object.fromEntries(impostos.map((i) => [i.codigo, i.nome]));
   const pct = (n) => String(n ?? 0).replace('.', ',') + '%';
   $('#trib-corpo').innerHTML = `
-    <div class="topo"><div><h2 style="margin-top:0">Perfis de tributação</h2><p class="sutil">Um perfil é um conjunto de impostos com alíquota, redução de base, retenção e vigência. As alíquotas mudam ao longo da transição do IBS/CBS: cadastre uma linha por período.</p></div>
-      <button class="primario" id="novo-perfil">Novo perfil</button></div>
-    ${perfis.length ? perfis.map((p, i) => `<div class="cartao"><div class="topo" style="margin:0"><h3 style="margin:0">${esc(p.nome)} <span class="dica">${p.usos ? p.usos + ' tipo(s)' : 'sem uso'}</span></h3><div><button data-ed="${i}">Editar</button>${podeExcluirRegistros() ? ` <button data-ex="${p.id}">Excluir</button>` : ''}</div></div>
+    <div class="topo"><div><h2 style="margin-top:0">Tributações</h2><p class="sutil">Uma tributação é um conjunto de impostos com alíquota, redução de base, retenção e vigência. As alíquotas mudam ao longo da transição do IBS/CBS: cadastre uma linha por período.</p></div>
+      <div><button class="primario" id="novo-perfil">Nova tributação</button> <button id="gerar-serv" title="Cria uma tributação a partir das retenções já cadastradas em cada serviço">Criar a partir dos serviços</button></div></div>
+    ${perfis.length ? perfis.map((p, i) => `<div class="cartao"><div class="topo" style="margin:0"><h3 style="margin:0">${esc(p.nome)} <span class="dica">${p.sentido === 'ENTRADA' ? 'Compras' : 'Serviços'}${p.padrao ? ' · padrão' : ''} · ${p.usos ? p.usos + ' vínculo(s)' : 'sem uso'}</span></h3><div><button data-ed="${i}">Editar</button>${podeExcluirRegistros() ? ` <button data-ex="${p.id}">Excluir</button>` : ''}</div></div>
       ${p.descricao ? `<p class="sutil">${esc(p.descricao)}</p>` : ''}
       <table class="tabela"><thead><tr><th>Imposto</th><th class="num">Alíquota</th><th class="num">Redução da base</th><th>Retido</th><th>CST / cClassTrib</th><th>Vigência</th></tr></thead><tbody>
       ${p.itens.map((it) => `<tr><td>${esc(nomeImp[it.imposto_codigo] ?? it.imposto_codigo)}</td><td class="num">${pct(it.aliquota)}</td><td class="num">${it.reducao_base ? pct(it.reducao_base) : '—'}</td><td>${it.retido ? 'Sim' : '—'}</td><td>${esc([it.cst, it.c_class_trib].filter(Boolean).join(' / ') || '—')}</td>
         <td>${it.vigencia_ini || it.vigencia_fim ? `${it.vigencia_ini ? dataBr(it.vigencia_ini) : 'sempre'} → ${it.vigencia_fim ? dataBr(it.vigencia_fim) : 'sem fim'}` : 'sempre'}</td></tr>`).join('') || '<tr><td colspan="6" class="dica">Sem impostos.</td></tr>'}
-      </tbody></table></div>`).join('') : '<div class="vazio">Nenhum perfil. Crie o primeiro (ex.: "Serviço — ISS 5%") ou use "Criar a partir dos serviços" na aba Tipos de documento.</div>'}`;
+      </tbody></table></div>`).join('') : '<div class="vazio">Nenhuma tributação. Crie a primeira (ex.: "Serviço — ISS 5%") ou use "Criar a partir dos serviços".</div>'}`;
   const form = (p) => {
-    p ??= { itens: [{ imposto_codigo: 'ISS', aliquota: 0, reducao_base: 0, retido: false }] };
+    p ??= { itens: [{ imposto_codigo: 'ISS', aliquota: 0, reducao_base: 0, retido: false }], sentido: 'SAIDA', destino: 'RECEITA' };
     const linha = (it) => `<tr class="it">
       <td><select name="imposto">${impostos.filter((i) => i.ativo || i.codigo === it.imposto_codigo).map((i) => `<option value="${i.codigo}" ${it.imposto_codigo === i.codigo ? 'selected' : ''}>${esc(i.nome)}</option>`).join('')}</select></td>
       <td><input name="aliquota" data-num inputmode="decimal" size="6" value="${String(it.aliquota ?? 0).replace('.', ',')}"></td>
@@ -1222,9 +1256,20 @@ async function abaPerfis() {
       <td><input name="cst" maxlength="3" size="4" placeholder="CST" value="${esc(it.cst ?? '')}"> <input name="cclass" maxlength="6" size="7" placeholder="cClassTrib" value="${esc(it.c_class_trib ?? '')}"></td>
       <td><input type="date" name="vini" value="${esc(it.vigencia_ini ?? '')}"> <input type="date" name="vfim" value="${esc(it.vigencia_fim ?? '')}"></td>
       <td><button type="button" data-rm title="Remover linha">×</button></td></tr>`;
-    abrirDialogo(`<form id="form-perfil" class="dialogo-largo"><h2>${p.id ? 'Editar perfil' : 'Novo perfil de tributação'}</h2>
+    abrirDialogo(`<form id="form-perfil" class="dialogo-largo"><h2>${p.id ? 'Editar tributação' : 'Nova tributação'}</h2>
       <label>Nome <input name="nome" required maxlength="80" value="${esc(p.nome ?? '')}" placeholder="Ex.: Serviço com retenção federal"></label>
       <label>Descrição <input name="descricao" maxlength="300" value="${esc(p.descricao ?? '')}"></label>
+      <fieldset><legend>Onde se aplica</legend><div class="grade">
+        <label>Aplica-se a <select name="sentido"><option value="SAIDA" ${p.sentido !== 'ENTRADA' ? 'selected' : ''}>Serviços prestados (emissão de notas)</option><option value="ENTRADA" ${p.sentido === 'ENTRADA' ? 'selected' : ''}>Compras (NF-e de entrada)</option></select></label>
+        <label>Natureza <select name="natureza"><option value=""></option>${NATUREZAS.map((n) => `<option ${p.natureza === n ? 'selected' : ''}>${esc(n)}</option>`).join('')}</select></label>
+        <label>Cód. tributação nacional (serviço) / CFOP (compra) <input name="codigo" maxlength="6" value="${esc(p.codigo ?? '')}"></label>
+        <label>Indicador da operação IBS/CBS (cIndOp) <input name="ind_op" maxlength="6" value="${esc(p.ind_op ?? '')}"></label>
+        <label>Consumidor final (indFinal) <select name="ind_final"><option value="0" ${(p.ind_final ?? 0) === 0 ? 'selected' : ''}>Não</option><option value="1" ${p.ind_final === 1 ? 'selected' : ''}>Sim</option></select></label>
+        <label>Destinatário do IBS/CBS (indDest) <select name="ind_dest"><option value="0" ${(p.ind_dest ?? 0) === 0 ? 'selected' : ''}>O próprio tomador</option><option value="1" ${p.ind_dest === 1 ? 'selected' : ''}>Outro destinatário</option></select></label>
+        <label>Destino financeiro <select name="destino">${Object.entries(DESTINOS).map(([k, n]) => `<option value="${k}" ${p.destino === k ? 'selected' : ''}>${n}</option>`).join('')}</select></label>
+      </div>
+      <label class="check"><input type="checkbox" name="gera_credito" ${p.gera_credito ? 'checked' : ''}> Gera crédito de impostos (compras)</label>
+      <label class="check"><input type="checkbox" name="padrao" ${p.padrao ? 'checked' : ''}> Tributação padrão (usada quando o serviço ou a compra não indica uma)</label></fieldset>
       <fieldset><legend>Dados da nota (serviços)</legend><div class="grade">
         <label>ISSQN <select name="trib_issqn">${[[1, 'Operação tributável'], [2, 'Imunidade'], [3, 'Exportação de serviço'], [4, 'Não incidência']].map(([v, n]) => `<option value="${v}" ${(p.trib_issqn ?? 1) === v ? 'selected' : ''}>${n}</option>`).join('')}</select></label>
         <label>Tipo de imunidade <select name="tp_imunidade"><option value="">—</option>${[[0, 'Imunidade não informada'], [1, 'Patrimônio, renda ou serviços'], [2, 'Templos de qualquer culto'], [3, 'Partidos, sindicatos, educação e assistência'], [4, 'Livros, jornais e periódicos'], [5, 'Fonogramas e videofonogramas musicais']].map(([v, n]) => `<option value="${v}" ${p.tp_imunidade === v ? 'selected' : ''}>${v} — ${n}</option>`).join('')}</select></label>
@@ -1254,16 +1299,21 @@ async function abaPerfis() {
         const dados = { nome: f.nome.value, descricao: f.descricao.value || null, itens,
           trib_issqn: Number(f.trib_issqn.value), tp_imunidade: Number(f.trib_issqn.value) === 2 && f.tp_imunidade.value !== '' ? Number(f.tp_imunidade.value) : null,
           p_tot_fed: opt(f.p_tot_fed.value), p_tot_est: opt(f.p_tot_est.value), p_tot_mun: opt(f.p_tot_mun.value),
-          municipio_prestacao: f.municipio_prestacao.value.trim() || null, info_complementar: f.info_complementar.value.trim() || null };
-        try { p.id ? await api('PUT', `${base_trib()}/perfis/${p.id}`, dados) : await api('POST', `${base_trib()}/perfis`, dados); dlg.close(); aviso('Perfil salvo. Use "Recalcular" na apuração para refazer meses já calculados.'); abaPerfis(); }
+          municipio_prestacao: f.municipio_prestacao.value.trim() || null, info_complementar: f.info_complementar.value.trim() || null,
+          sentido: f.sentido.value, natureza: f.natureza.value || null, codigo: f.codigo.value.trim() || null, ind_op: f.ind_op.value.trim() || null,
+          ind_final: Number(f.ind_final.value), ind_dest: Number(f.ind_dest.value), destino: f.destino.value, gera_credito: f.gera_credito.checked, padrao: f.padrao.checked };
+        try { p.id ? await api('PUT', `${base_trib()}/perfis/${p.id}`, dados) : await api('POST', `${base_trib()}/perfis`, dados); dlg.close(); aviso('Tributação salva. Use "Recalcular" na apuração para refazer meses já calculados.'); abaPerfis(); }
         catch (e) { $('#erro-perfil').textContent = mensagemErro(e); }
       };
     });
   };
   $('#novo-perfil').onclick = () => form();
+  $('#gerar-serv').onclick = async () => {
+    try { const r = await api('POST', `${base_trib()}/gerar-dos-servicos`, {}); aviso(r.perfisCriados ? `${r.perfisCriados} tributação(ões) criada(s) a partir de ${r.servicos} serviço(s).` : 'Nenhum serviço com retenções para converter.'); abaPerfis(); } catch (e) { aviso(mensagemErro(e)); }
+  };
   $('#trib-corpo').querySelectorAll('[data-ed]').forEach((b) => (b.onclick = () => form(perfis[b.dataset.ed])));
   $('#trib-corpo').querySelectorAll('[data-ex]').forEach((b) => (b.onclick = async () => {
-    if (!confirm('Excluir este perfil?')) return;
+    if (!confirm('Excluir esta tributação?')) return;
     try { await api('DELETE', `${base_trib()}/perfis/${b.dataset.ex}`); abaPerfis(); } catch (e) { aviso(mensagemErro(e)); }
   }));
 }
@@ -1290,7 +1340,7 @@ async function telaCompras() {
   const base = `/api/empresas/${estado.empresaId}`;
   const [d, cat] = await Promise.all([api('GET', `${base}/compras?mes=${mes}`), api('GET', `${base}/despesas?mes=${mes}`).then((x) => x.categorias).catch(() => ['Outras'])]);
   const tiposEntrada = await api('GET', `${base}/tributacao/tipos`).then((r) => r.tipos.filter((t) => t.sentido === 'ENTRADA')).catch(() => []);
-  const opcTipo = () => `<option value="">${tiposEntrada.some((t) => t.padrao) ? 'Tipo padrão da empresa' : 'Sem tipo'}</option>` + tiposEntrada.map((t) => `<option value="${t.id}">${esc(t.nome)}</option>`).join('');
+  const opcTipo = () => `<option value="">${tiposEntrada.some((t) => t.padrao) ? 'Tributação padrão da empresa' : 'Sem tributação'}</option>` + tiposEntrada.map((t) => `<option value="${t.id}">${esc(t.nome)}</option>`).join('');
   const opcCat = (sel) => cat.map((c) => `<option ${c === sel ? 'selected' : ''}>${esc(c)}</option>`).join('');
   conteudo.innerHTML = `
     <div class="topo"><div><h1>Compras</h1><p class="sutil">Notas fiscais de mercadorias que a empresa comprou. Importe o XML da NF-e (um ou vários arquivos) ou lance a compra manualmente.</p></div>
@@ -1318,7 +1368,7 @@ async function telaCompras() {
       <p class="dica">${arqs.map((a) => esc(a.name)).join(', ')}</p>
       <label class="check"><input type="checkbox" name="gerar" checked> Lançar as parcelas (ou o total, se à vista) nas <strong>despesas</strong>, na data de vencimento</label>
       <label>Categoria da despesa <select name="categoria">${opcCat('Material e equipamentos')}</select></label>
-      ${tiposEntrada.length ? `<label>Tipo de documento (tributação) <select name="tipo">${opcTipo()}</select></label>` : ''}
+      ${tiposEntrada.length ? `<label>Tributação <select name="tipo">${opcTipo()}</select></label>` : ''}
       <div id="res-imp"></div>
       <div class="acoes"><button class="primario" type="submit">Importar</button><button type="button" data-fechar>Fechar</button></div></form>`, (dlg) => {
       dlg.querySelector('#form-imp').onsubmit = async (e2) => {
@@ -1346,7 +1396,7 @@ async function telaCompras() {
       <label>Valor total (R$) <input name="valor_total" data-num inputmode="decimal" required></label>
       <label>Vencimento <input type="date" name="vencimento"></label>
       <label>Categoria <select name="categoria">${opcCat('Material e equipamentos')}</select></label>
-      ${tiposEntrada.length ? `<label>Tipo de documento <select name="tipo">${opcTipo()}</select></label>` : ''}
+      ${tiposEntrada.length ? `<label>Tributação <select name="tipo">${opcTipo()}</select></label>` : ''}
       <label class="largo">Observação <input name="observacao" maxlength="300"></label>
     </div>
     <label class="check"><input type="checkbox" name="gerar" checked> Lançar nas despesas</label>
@@ -2381,8 +2431,8 @@ function formServico(s) {
         <label>Valor padrão (R$) <input name="valor_padrao" data-num value="${s.valor_padrao ?? ''}"></label>
       </div>
       <fieldset style="margin-top:16px"><legend>Tributação</legend>
-        <label>Tipo de documento <select name="tipo_documento_id"><option value="">Padrão da empresa</option></select></label>
-        <p class="dica">A tributação (alíquota do ISS, retenções, ISSQN, imunidade, IBS/CBS) fica em <a href="#/tributacao/tipos">Tributação</a>: aqui só se escolhe o tipo de documento. Ao emitir, tudo vem dele e ainda pode ser trocado na nota.</p>
+        <label>Tributação <select name="tipo_documento_id"><option value="">Padrão da empresa</option></select></label>
+        <p class="dica">Alíquota do ISS, retenções, ISSQN, imunidade e IBS/CBS ficam em <a href="#/tributacao/perfis">Tributação</a>: aqui só se escolhe qual vale para este serviço. Ao emitir, tudo vem dela e ainda pode ser trocado na nota.</p>
       </fieldset>
       <p class="erro" id="erro-servico"></p>
       <div class="acoes"><button class="primario" type="submit">Salvar serviço</button>

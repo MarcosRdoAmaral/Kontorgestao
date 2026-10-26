@@ -182,6 +182,7 @@ export function tributacaoEfetiva(tipoId: number, data = hojeBr()) {
   const ibsItem = ['CBS', 'IBS_UF', 'IBS_MUN'].map(item).find((x) => x?.cst && x?.c_class_trib);
   const temTot = p && (p.p_tot_fed != null || p.p_tot_est != null || p.p_tot_mun != null);
   return {
+    itens: [...new Set(it.map((x: any) => x.imposto_codigo as string))].map((c) => { const x = item(c); return { imposto: c, aliquota: x.aliquota as number, reducao_base: x.reducao_base as number, retido: !!x.retido }; }),
     tipoId: t.id as number, tipoNome: t.nome as string, cTribNac: (t.c_trib_nac as string | null) ?? null, temPerfil: !!p,
     aliquota: (iss?.aliquota as number | undefined) ?? null,
     tribISSQN: (p?.trib_issqn ?? 1) as 1 | 2 | 3 | 4,
@@ -361,4 +362,76 @@ export function apuracaoAssistida(empresaId: number, mes: string, recalcular = f
   return { mes, resumo: resumoLista, divergencias, semTipo,
     documentos: { notas: (db.prepare("SELECT COUNT(*) AS n FROM notas WHERE empresa_id = ? AND status = 'AUTORIZADA' AND substr(competencia,1,7) = ?").get(empresaId, mes) as any).n,
       compras: (db.prepare('SELECT COUNT(*) AS n FROM compras WHERE empresa_id = ? AND substr(emissao,1,7) = ?').get(empresaId, mes) as any).n } };
+}
+
+
+// ---------------------------------------------------------------------------
+// "Tributação" = perfil + o tipo de documento que o acompanha (1:1, mantido automaticamente).
+// Serviços, compras e a emissão só enxergam a tributação; o tipo é detalhe interno.
+// ---------------------------------------------------------------------------
+export const Tributacao = Perfil.extend({
+  sentido: z.enum(['SAIDA', 'ENTRADA']).default('SAIDA'),
+  natureza: z.string().trim().max(60).nullish(),
+  /** código de tributação nacional (saída) ou CFOP (entrada) padrão */
+  codigo: z.string().trim().max(6).nullish(),
+  ind_op: z.string().trim().max(6).nullish(),
+  ind_final: z.union([z.literal(0), z.literal(1)]).default(0),
+  ind_dest: z.union([z.literal(0), z.literal(1)]).default(0),
+  gera_credito: z.boolean().default(false),
+  destino: z.enum(['RECEITA', 'DESPESA', 'NENHUM']).nullish(),
+  padrao: z.boolean().default(false),
+});
+type EntradaTributacao = z.infer<typeof Tributacao>;
+
+function tipoDoPerfil(perfilId: number) {
+  return db.prepare('SELECT id FROM tipos_documento WHERE perfil_id = ? AND ativo = 1 ORDER BY id LIMIT 1').get(perfilId) as { id: number } | undefined;
+}
+function dadosTipo(perfilId: number, d: EntradaTributacao) {
+  const entrada = d.sentido === 'ENTRADA';
+  return TipoDocumento.parse({
+    nome: d.nome, sentido: d.sentido, modelo: entrada ? 'NFE' : 'NFSE', natureza: d.natureza || null, perfil_id: perfilId,
+    c_trib_nac: entrada ? null : d.codigo || null, cfop: entrada ? d.codigo || null : null, ind_op: d.ind_op || null,
+    ind_final: d.ind_final ?? 0, ind_dest: d.ind_dest ?? 0, gera_credito: !!d.gera_credito, destino: d.destino ?? (entrada ? 'DESPESA' : 'RECEITA'), padrao: !!d.padrao,
+  });
+}
+function sincronizarTipo(empresaId: number, perfilId: number, d: EntradaTributacao) {
+  const t = tipoDoPerfil(perfilId);
+  const dados = dadosTipo(perfilId, d);
+  if (t) editarTipo(empresaId, t.id, dados); else criarTipo(empresaId, dados);
+}
+
+export function listarTributacoes(empresaId: number) {
+  return listarPerfis(empresaId).map((p: any) => {
+    const t = tipoDoPerfil(p.id);
+    const tipo = t ? (db.prepare('SELECT * FROM tipos_documento WHERE id = ?').get(t.id) as any) : null;
+    const usos = t ? (db.prepare('SELECT (SELECT COUNT(*) FROM servicos s WHERE s.tipo_documento_id = ? AND s.ativo = 1) + (SELECT COUNT(*) FROM compras c WHERE c.tipo_documento_id = ?) AS n').get(t.id, t.id) as any).n : 0;
+    return { ...p, tipo_id: tipo?.id ?? null, sentido: tipo?.sentido ?? 'SAIDA', natureza: tipo?.natureza ?? null,
+      codigo: tipo ? (tipo.sentido === 'ENTRADA' ? tipo.cfop : tipo.c_trib_nac) ?? null : null, ind_op: tipo?.ind_op ?? null, ind_final: tipo?.ind_final ?? 0, ind_dest: tipo?.ind_dest ?? 0,
+      gera_credito: !!tipo?.gera_credito, destino: tipo?.destino ?? 'RECEITA', padrao: !!tipo?.padrao, usos };
+  });
+}
+export function criarTributacao(empresaId: number, d: EntradaTributacao) {
+  const { id } = criarPerfil(empresaId, d);
+  sincronizarTipo(empresaId, id, d);
+  return { id, tipo_id: tipoDoPerfil(id)?.id ?? null };
+}
+export function editarTributacao(empresaId: number, id: number, d: EntradaTributacao) {
+  editarPerfil(empresaId, id, d);
+  sincronizarTipo(empresaId, id, d);
+}
+export function excluirTributacao(empresaId: number, id: number) {
+  const t = tipoDoPerfil(id);
+  if (t) excluirTipo(empresaId, t.id); // recusa se algum serviço/compra ainda usa
+  excluirPerfilSemTipos(empresaId, id);
+}
+function excluirPerfilSemTipos(empresaId: number, id: number) {
+  if (!db.prepare('UPDATE perfis_tributacao SET ativo = 0 WHERE id = ? AND empresa_id = ?').run(id, empresaId).changes) throw new ErroNegocio('Tributação não encontrada.', 404);
+}
+
+/** Perfis antigos sem tipo ganham um (para poderem ser vinculados a serviços e compras). */
+export function garantirTiposDosPerfis() {
+  for (const p of db.prepare('SELECT id, empresa_id, nome FROM perfis_tributacao WHERE ativo = 1').all() as any[]) {
+    if (tipoDoPerfil(p.id)) continue;
+    criarTipo(p.empresa_id, TipoDocumento.parse({ nome: p.nome, sentido: 'SAIDA', modelo: 'NFSE', perfil_id: p.id, destino: 'RECEITA' }));
+  }
 }

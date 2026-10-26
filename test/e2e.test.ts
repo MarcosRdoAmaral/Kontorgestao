@@ -271,9 +271,18 @@ test('fluxo completo: cadastro, emissão, rejeição, queda de rede, DANFSe e ca
   assert.equal(soBoleto.json.nota, undefined);
   assert.equal(soBoleto.json.cobranca.valor, 300);
   assert.equal(soBoleto.json.cobranca.vencimento, '2026-12-04');
+  // parcelamento: um boleto por parcela, cada um com o seu vencimento
+  const parc = await call('POST', '/api/faturar', { ...base, tomadorId: tFat.json.id, acao: 'BOLETO', valor: 300, enviarEmail: false,
+    parcelas: [{ vencimento: '2026-12-10', valor: 100 }, { vencimento: '2027-01-11', valor: 100 }, { vencimento: '2027-02-10', valor: 100 }] }, token);
+  assert.equal(parc.status, 200, JSON.stringify(parc.json));
+  assert.deepEqual(parc.json.cobrancas.map((c: any) => [c.vencimento, c.valor]), [['2026-12-10', 100], ['2027-01-11', 100], ['2027-02-10', 100]]);
+  assert.match(parc.json.cobrancas[1].descricao, /parcela 2\/3/);
+  const naoFecha = await call('POST', '/api/faturar', { ...base, tomadorId: tFat.json.id, acao: 'BOLETO', valor: 300, enviarEmail: false, parcelas: [{ vencimento: '2026-12-10', valor: 100 }, { vencimento: '2027-01-11', valor: 100 }] }, token);
+  assert.equal(naoFecha.status, 400);
+  assert.match(JSON.stringify(naoFecha.json), /não fecha/);
   assert.equal((await call('POST', '/api/faturar', { ...base, tomadorId: null, acao: 'BOLETO' }, token)).status, 400, 'boleto exige cliente');
   const cobs = await call('GET', `/api/empresas/${eid}/cobrancas`, undefined, token);
-  assert.equal(cobs.json.length, 2);
+  assert.equal(cobs.json.length, 5);
   assert.equal((await call('GET', `/api/empresas/${eid}/cobrancas`, undefined, tc)).status, 200);
 
   // 7c) cobrança Ailos: conta, boleto em PDF, remessa CNAB 240 e retorno

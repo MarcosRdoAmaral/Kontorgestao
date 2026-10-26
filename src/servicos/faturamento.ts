@@ -15,6 +15,8 @@ export const EntradaFaturamento = EntradaEmissao.extend({
   /** Valor do boleto; padrão = valor líquido a receber (serviço − descontos − retenções). */
   valorBoleto: z.number().positive().nullish(),
   vencimento: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullish(),
+  /** Parcelamento do boleto: um boleto por parcela, com o vencimento de cada uma. A soma deve fechar com o valor do boleto. */
+  parcelas: z.array(z.object({ vencimento: z.string().regex(/^\d{4}-\d{2}-\d{2}$/), valor: z.number().positive() })).min(1).max(24).nullish(),
   enviarEmail: z.boolean().nullish(),
 });
 export type EntradaFaturamento = z.infer<typeof EntradaFaturamento>;
@@ -57,7 +59,7 @@ export async function faturar(u: Usuario, entrada: EntradaFaturamento) {
   const fazBoleto = acao !== 'NOTA';
 
   if (fazBoleto && tomador?.desconto_valor > 0) {
-    const base = entrada.valorBoleto ?? (fazNota ? valorLiquido(entrada) : entrada.valor);
+    const base = entrada.parcelas?.[0]?.valor ?? entrada.valorBoleto ?? (fazNota ? valorLiquido(entrada) : entrada.valor);
     if (!(fazNota && (entrada.descontoIncondicionado ?? 0) >= tomador.desconto_valor) && base <= tomador.desconto_valor)
       throw new ErroNegocio(`O desconto cadastrado para ${tomador.nome} (R$ ${tomador.desconto_valor.toFixed(2).replace('.', ',')}) é maior ou igual ao valor do boleto. Ajuste o valor ou o desconto no cadastro do cliente.`);
   }
@@ -68,8 +70,15 @@ export async function faturar(u: Usuario, entrada: EntradaFaturamento) {
     const venc = entrada.vencimento ?? calcularVencimento(new Date(Date.now() - 3 * 3600e3), tomador.vencimento_tipo, tomador.vencimento_valor);
     if (venc < new Date(Date.now() - 3 * 3600e3).toISOString().slice(0, 10)) throw new ErroNegocio('O vencimento do boleto não pode estar no passado.');
   }
+  if (fazBoleto && entrada.parcelas?.length) {
+    const total = entrada.valorBoleto ?? (fazNota ? valorLiquido(entrada) : entrada.valor);
+    const soma = Math.round(entrada.parcelas.reduce((a, p) => a + p.valor, 0) * 100) / 100;
+    if (Math.abs(soma - total) > 0.01) throw new ErroNegocio(`A soma das parcelas (R$ ${soma.toFixed(2).replace('.', ',')}) não fecha com o valor do boleto (R$ ${total.toFixed(2).replace('.', ',')}).`);
+    const hojeIso = new Date(Date.now() - 3 * 3600e3).toISOString().slice(0, 10);
+    if (entrada.parcelas.some((p) => p.vencimento < hojeIso)) throw new ErroNegocio('Há parcela com vencimento no passado.');
+  }
 
-  const resultado: { acao: Acao; nota?: any; cobranca?: any; email?: { status: 'ENVIADO' | 'ERRO' | 'NAO_ENVIADO'; para?: string; erro?: string }; avisos: string[] } = { acao, avisos: [] };
+  const resultado: { acao: Acao; nota?: any; cobranca?: any; cobrancas?: any[]; email?: { status: 'ENVIADO' | 'ERRO' | 'NAO_ENVIADO'; para?: string; erro?: string }; avisos: string[] } = { acao, avisos: [] };
 
   if (fazNota) {
     resultado.nota = await emitir(u, entrada);
@@ -81,18 +90,26 @@ export async function faturar(u: Usuario, entrada: EntradaFaturamento) {
 
   if (fazBoleto) {
     const hoje = new Date(Date.now() - 3 * 3600e3);
-    const ajuste = ajustarVencimento(entrada.vencimento ?? calcularVencimento(hoje, tomador.vencimento_tipo, tomador.vencimento_valor), dataIso(hoje),
-      (db.prepare('SELECT feriados_extra FROM empresas WHERE id = ?').get(entrada.empresaId) as any)?.feriados_extra);
-    const vencimento = ajuste.data;
-    if (ajuste.aviso) resultado.avisos.push(ajuste.aviso);
-    const valor = entrada.valorBoleto ?? (fazNota ? valorLiquido(entrada) : entrada.valor);
-    if (!(valor > 0)) throw new ErroNegocio('O valor do boleto precisa ser maior que zero.');
-    // se a nota já foi emitida com desconto igual ou maior que o do cliente, o valor líquido já o contém
+    const feriados = (db.prepare('SELECT feriados_extra FROM empresas WHERE id = ?').get(entrada.empresaId) as any)?.feriados_extra;
+    const parcelas = entrada.parcelas?.length
+      ? entrada.parcelas
+      : [{ vencimento: entrada.vencimento ?? calcularVencimento(hoje, tomador.vencimento_tipo, tomador.vencimento_valor), valor: entrada.valorBoleto ?? (fazNota ? valorLiquido(entrada) : entrada.valor) }];
+    if (parcelas.some((p) => !(p.valor > 0))) throw new ErroNegocio('O valor do boleto precisa ser maior que zero.');
+    // se a nota já foi emitida com desconto igual ou maior que o do cliente, o valor líquido já o contém; no parcelamento o desconto fixo vai só na 1ª parcela
     const jaNaNota = fazNota && (entrada.descontoIncondicionado ?? 0) >= (tomador.desconto_valor ?? 0);
-    resultado.cobranca = criarCobranca({ empresaId: entrada.empresaId, tomadorId: tomador.id, notaId: resultado.nota?.id ?? null, descricao: entrada.descricao, valor, vencimento, usuarioId: u.id, semDesconto: jaNaNota });
-    if (resultado.cobranca.status === 'AGUARDANDO_BANCO') {
+    resultado.cobrancas = [];
+    parcelas.forEach((p, i) => {
+      const ajuste = ajustarVencimento(p.vencimento, dataIso(hoje), feriados);
+      if (ajuste.aviso) resultado.avisos.push(parcelas.length > 1 ? `Parcela ${i + 1}: ${ajuste.aviso}` : ajuste.aviso);
+      const c = criarCobranca({ empresaId: entrada.empresaId, tomadorId: tomador.id, notaId: resultado.nota?.id ?? null,
+        descricao: parcelas.length > 1 ? `${entrada.descricao} (parcela ${i + 1}/${parcelas.length})`.slice(0, 2000) : entrada.descricao, valor: p.valor, vencimento: ajuste.data, usuarioId: u.id, semDesconto: jaNaNota || i > 0 });
+      resultado.cobrancas!.push(c);
+    });
+    resultado.cobranca = resultado.cobrancas[0];
+    if (resultado.cobrancas.some((c) => c.status === 'AGUARDANDO_BANCO')) {
+      const c0 = resultado.cobrancas.find((c) => c.status === 'AGUARDANDO_BANCO');
       resultado.avisos.push(obterConta(entrada.empresaId)
-        ? (resultado.cobranca.observacao_banco ?? 'O boleto ficou pendente.')
+        ? (c0.observacao_banco ?? 'O boleto ficou pendente.')
         : 'Boleto registrado como "aguardando banco": cadastre os dados bancários da empresa para gerar o boleto.');
     }
   }
@@ -101,21 +118,28 @@ export async function faturar(u: Usuario, entrada: EntradaFaturamento) {
   if (queroEmail) {
     const para = [tomador?.email, ...(tomador?.email_cobranca ?? '').split(/[,;\s]+/)].filter((x): x is string => !!x && /@/.test(x));
     const unicos = [...new Set(para.map((e) => e.toLowerCase()))].slice(0, 5);
-    const cob = resultado.cobranca ? obterCobranca(resultado.cobranca.id) : null;
-    const temBoleto = !!cob?.nosso_numero;
+    const cobs = (resultado.cobrancas ?? []).map((c) => obterCobranca(c.id));
+    const cob = cobs[0] ?? null;
+    const emitidos = cobs.filter((c) => c?.nosso_numero);
+    const temBoleto = emitidos.length > 0;
     if (!unicos.length) resultado.email = { status: 'ERRO', erro: 'O cliente não tem e-mail cadastrado.' };
     else if (!resultado.nota && !temBoleto) resultado.email = { status: 'NAO_ENVIADO', erro: 'O boleto ainda não foi gerado, então não há o que enviar.' };
     else {
       try {
-        const b = temBoleto ? await boletoPdf(cob.id) : null;
-        const extras = b ? [{ filename: b.nome, content: b.pdf, contentType: 'application/pdf' }] : [];
-        const linhasExtras = temBoleto ? ['', `Boleto: vencimento em ${cob.vencimento.split('-').reverse().join('/')}, valor R$ ${cob.valor.toFixed(2).replace('.', ',')}.`, `Linha digitável: ${cob.linha_digitavel}`, 'O boleto segue em anexo (PDF).'] : [];
+        const extras: { filename: string; content: Buffer; contentType: string }[] = [];
+        const linhasExtras: string[] = temBoleto ? [''] : [];
+        for (const c of emitidos) {
+          const b = await boletoPdf(c.id);
+          extras.push({ filename: b.nome, content: b.pdf, contentType: 'application/pdf' });
+          linhasExtras.push(`Boleto${emitidos.length > 1 ? ` ${emitidos.indexOf(c) + 1}/${emitidos.length}` : ''}: vencimento em ${c.vencimento.split('-').reverse().join('/')}, valor R$ ${c.valor.toFixed(2).replace('.', ',')}.`, `Linha digitável: ${c.linha_digitavel}`);
+        }
+        if (temBoleto) linhasExtras.push(emitidos.length > 1 ? 'Os boletos seguem em anexo (PDF).' : 'O boleto segue em anexo (PDF).');
         if (resultado.nota) await enviarNotaPorEmail(resultado.nota.id, u.escritorio_id, unicos, u.id, 'emissao', { extras, linhasExtras });
         else await enviarMensagemBoleto(u.escritorio_id, unicos, cob, tomador, extras);
-        if (cob) registrarEmailCobranca(cob.id, 'ENVIADO', unicos.join(', '));
+        for (const c of cobs) registrarEmailCobranca(c.id, 'ENVIADO', unicos.join(', '));
         resultado.email = { status: 'ENVIADO', para: unicos.join(', ') };
       } catch (e: any) {
-        if (cob) registrarEmailCobranca(cob.id, 'ERRO', unicos.join(', '));
+        for (const c of cobs) registrarEmailCobranca(c.id, 'ERRO', unicos.join(', '));
         resultado.email = { status: 'ERRO', erro: String(e?.message ?? e) };
       }
     }

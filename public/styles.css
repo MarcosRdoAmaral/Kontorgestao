@@ -64,6 +64,15 @@ a { color: var(--laranja); }
 nav { display: grid; gap: 2px; }
 nav a { color: var(--menu); text-decoration: none; padding: 9px 11px; border-radius: var(--raio); border-left: 3px solid transparent; }
 nav a:hover { background: var(--superficie-2); }
+nav details.grupo { display: block; }
+nav details.grupo > summary { cursor: pointer; list-style: none; padding: 9px 11px; border-radius: var(--raio); color: var(--tinta-2); font-size: .8rem; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; display: flex; justify-content: space-between; align-items: center; }
+nav details.grupo > summary::-webkit-details-marker { display: none; }
+nav details.grupo > summary::after { content: '▸'; transition: transform .15s; }
+nav details.grupo[open] > summary::after { transform: rotate(90deg); }
+nav details.grupo > summary:hover { background: var(--superficie-2); }
+nav details.grupo[open] > summary { color: var(--laranja); }
+nav details.grupo > a { display: block; margin: 2px 0 2px 10px; }
+nav details.grupo.tem-ativo > summary { color: var(--laranja); }
 nav a.ativo { background: var(--laranja-fundo); color: var(--laranja); border-left-color: var(--laranja); font-weight: 600; }
 .usuario { margin-top: auto; font-size: .85rem; display: flex; justify-content: space-between; align-items: center; color: var(--tinta-2); gap: 8px; }
 .coluna-principal { min-width: 0; }
