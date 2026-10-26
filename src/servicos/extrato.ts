@@ -182,6 +182,7 @@ export async function importarExtrato(empresaId: number, nomeArquivo: string, pd
       novos += Number(ins.run(empresaId, imp, l.data, l.descricao, l.documento, l.valor, l.saldo, c?.categoria ?? null, c?.origem ?? null, chave).changes);
     }
     const conciliados = conciliarAutomatico(empresaId);
+    sincronizarDespesasDoExtrato(empresaId);
     return { importacaoId: imp, lidos: lido.lancamentos.length, novos, repetidos: lido.lancamentos.length - novos, conciliados, periodo: [lido.periodoIni, lido.periodoFim], avisos };
   })();
 }
@@ -243,6 +244,7 @@ export function classificar(empresaId: number, lancId: number, d: z.infer<typeof
     const outros = db.prepare(`SELECT id, descricao FROM extrato_lancamentos WHERE empresa_id = ? AND id <> ? AND valor ${sinal} 0 AND categoria_origem IS NOT 'manual'`).all(empresaId, lancId) as any[];
     for (const o of outros) if (chaveDescricao(o.descricao) === k) db.prepare('UPDATE extrato_lancamentos SET categoria = ?, categoria_origem = ? WHERE id = ?').run(d.categoria, d.categoria ? 'regra' : null, o.id);
   })();
+  sincronizarDespesasDoExtrato(empresaId);
 }
 
 // ---------------------------------------------------------------------------
@@ -278,6 +280,46 @@ export function balancoExtrato(empresaId: number, de: string, ate: string) {
 }
 
 export function excluirImportacao(empresaId: number, id: number) {
-  if (!db.prepare('DELETE FROM extrato_importacoes WHERE id = ? AND empresa_id = ?').run(id, empresaId).changes) throw new ErroNegocio('Importação não encontrada.', 404);
-  db.prepare('DELETE FROM extrato_lancamentos WHERE empresa_id = ? AND importacao_id = ?').run(empresaId, id);
+  if (!db.prepare('SELECT 1 FROM extrato_importacoes WHERE id = ? AND empresa_id = ?').get(id, empresaId)) throw new ErroNegocio('Importação não encontrada.', 404);
+  db.transaction(() => {
+    db.prepare("DELETE FROM despesas WHERE empresa_id = ? AND origem = 'EXTRATO' AND extrato_lancamento_id IN (SELECT id FROM extrato_lancamentos WHERE importacao_id = ?)").run(empresaId, id);
+    db.prepare('DELETE FROM extrato_lancamentos WHERE empresa_id = ? AND importacao_id = ?').run(empresaId, id);
+    db.prepare('DELETE FROM extrato_importacoes WHERE id = ? AND empresa_id = ?').run(id, empresaId);
+  })();
+}
+
+
+// ---------------------------------------------------------------------------
+// Espelho em Despesas e balanço: toda saída classificada do extrato vira uma despesa (origem EXTRATO)
+// ---------------------------------------------------------------------------
+/** Categorias de saída que não são despesa: a fatura do cartão (os gastos entram pela própria fatura) e transferências. */
+const NAO_E_DESPESA = new Set(['Cartão de crédito', 'Transferências']);
+
+function formaDoLancamento(descricao: string): 'PIX' | 'DEBITO' | 'CREDITO' | null {
+  const d = descricao.toUpperCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
+  if (/\bPIX\b/.test(d)) return 'PIX';
+  if (/CARTAO|\bDEB\b|DEBITO|COMPRA/.test(d)) return 'DEBITO';
+  return null;
+}
+
+/** Cria, atualiza ou remove as despesas espelho. Despesas manuais já ligadas ao lançamento (justificativa) dispensam o espelho. */
+export function sincronizarDespesasDoExtrato(empresaId: number) {
+  {
+    const lancs = db.prepare('SELECT id, data, descricao, valor, categoria FROM extrato_lancamentos WHERE empresa_id = ? AND valor < 0').all(empresaId) as any[];
+    const espelhos = new Map((db.prepare("SELECT id, extrato_lancamento_id AS lid FROM despesas WHERE empresa_id = ? AND origem = 'EXTRATO'").all(empresaId) as any[]).map((x) => [x.lid, x.id]));
+    const ligadasManual = new Set((db.prepare("SELECT extrato_lancamento_id AS lid FROM despesas WHERE empresa_id = ? AND origem <> 'EXTRATO' AND extrato_lancamento_id IS NOT NULL").all(empresaId) as any[]).map((x) => x.lid));
+    const ins = db.prepare("INSERT INTO despesas (empresa_id, data, categoria, descricao, valor, forma_pagamento, origem, extrato_lancamento_id) VALUES (?,?,?,?,?,?,'EXTRATO',?)");
+    const upd = db.prepare('UPDATE despesas SET data = ?, categoria = ?, descricao = ?, valor = ? WHERE id = ?');
+    const del = db.prepare('DELETE FROM despesas WHERE id = ?');
+    const vivos = new Set<number>();
+    for (const l of lancs) {
+      if (!l.categoria || NAO_E_DESPESA.has(l.categoria) || ligadasManual.has(l.id)) continue;
+      vivos.add(l.id);
+      const val = Math.round(-l.valor * 100) / 100;
+      const ex = espelhos.get(l.id);
+      if (ex) upd.run(l.data, l.categoria, l.descricao.slice(0, 200), val, ex);
+      else ins.run(empresaId, l.data, l.categoria, l.descricao.slice(0, 200), val, formaDoLancamento(l.descricao), l.id);
+    }
+    for (const [lid, did] of espelhos) if (!vivos.has(lid)) del.run(did);
+  }
 }

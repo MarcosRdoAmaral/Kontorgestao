@@ -1591,7 +1591,7 @@ async function telaExtrato() {
   const tabCat = (titulo, l, cor) => `<div class="cartao"><h2 style="margin-top:0">${titulo} <span class="sutil">· ${brl(soma(l))}</span></h2>
     ${l.length ? `<table class="tabela"><tbody>${agrupar(l).map(([c, v]) => `<tr><td>${esc(c)}</td><td class="num" style="color:${cor}">${brl(v)}</td><td class="num sutil">${Math.round(v / soma(l) * 100)}%</td></tr>`).join('')}</tbody></table>` : '<p class="sutil">Nada neste mês.</p>'}</div>`;
   conteudo.innerHTML = `
-    <div class="topo"><div><h1>Extrato e conciliação</h1><p class="sutil">Importe o extrato em PDF do Ailos, classifique entradas e saídas e ligue os recebimentos aos boletos.</p></div>
+    <div class="topo"><div><h1>Extrato e conciliação</h1><p class="sutil">Importe o extrato em PDF do Ailos, classifique entradas e saídas e ligue os recebimentos aos boletos. As <strong>saídas classificadas</strong> são lançadas automaticamente em <a href="#/despesas">Despesas e balanço</a> (exceto “Cartão de crédito” e “Transferências”); entradas como “Outras receitas” entram nas receitas.</p></div>
       <div><label>Mês ${d.meses.length ? `<select id="mes-ext">${[...new Set([mes, ...d.meses])].sort().reverse().map((m) => `<option value="${m}" ${m === mes ? 'selected' : ''}>${nomeMes(m)}</option>`).join('')}</select>` : `<input type="month" id="mes-ext" value="${mes}">`}</label>
         <button class="primario" id="imp-ext">Importar extrato (PDF)</button><input type="file" id="arq-ext" accept="application/pdf,.pdf" hidden></div></div>
     <div id="res-import"></div>
@@ -1664,6 +1664,7 @@ async function telaExtrato() {
   }));
 }
 
+const FORMAS_PGTO = { PIX: 'PIX', DEBITO: 'Débito', CREDITO: 'Crédito', DINHEIRO: 'Dinheiro' };
 async function telaDespesas() {
   const mes = telaDespesas.mes ?? mesAtual();
   const base = `/api/empresas/${estado.empresaId}`;
@@ -1672,7 +1673,7 @@ async function telaDespesas() {
   const porCat = Object.entries(d.despesas.reduce((a, x) => ({ ...a, [x.categoria]: (a[x.categoria] ?? 0) + x.valor }), {})).sort((a, b) => b[1] - a[1]);
   const bal = fin?.balanco.at(-1);
   conteudo.innerHTML = `
-    <div class="topo"><div><h1>Despesas e balanço</h1><p class="sutil">Receitas = boletos pagos no mês. Despesas = o que você lançar aqui.</p></div>
+    <div class="topo"><div><h1>Despesas e balanço</h1><p class="sutil">Receitas = boletos pagos no mês (mais entradas do extrato classificadas como “Outras receitas”). Despesas = o que você lançar aqui + as saídas classificadas em Extrato e conciliação.</p></div>
       <label>Mês <input type="month" id="mes-desp" value="${mes}"></label></div>
     ${bal ? `<div class="resumo">
       <div class="cartao"><div class="sutil">Receitas</div><div class="valor" style="color:${COR.verde}">${compacto(bal.receitas)}</div></div>
@@ -1689,9 +1690,9 @@ async function telaDespesas() {
     </div>` : ''}
     <div class="topo"><h2>Lançamentos de ${nomeMes(mes)} <span class="sutil">· ${brl(total)}</span></h2>
       <div><button id="cats">Categorias</button> <button class="primario" id="nova-desp">Lançar despesa</button></div></div>
-    ${d.despesas.length ? `<div class="rolagem"><table class="tabela"><thead><tr><th>Data</th><th>Categoria</th><th>Descrição</th><th class="num">Valor</th><th></th></tr></thead><tbody>
-      ${d.despesas.map((x) => `<tr><td>${dataBr(x.data)}</td><td>${esc(x.categoria)}</td><td>${esc(x.descricao ?? '')}</td><td class="num">${brl(x.valor)}</td>
-        <td class="acoes-linha"><button data-ed="${x.id}">Editar</button> ${podeExcluirRegistros() ? `<button data-ex="${x.id}">Excluir</button>` : ''}</td></tr>`).join('')}</tbody></table></div>
+    ${d.despesas.length ? `<div class="rolagem"><table class="tabela"><thead><tr><th>Data</th><th>Categoria</th><th>Descrição</th><th>Pago com</th><th class="num">Valor</th><th></th></tr></thead><tbody>
+      ${d.despesas.map((x) => `<tr><td>${dataBr(x.data)}</td><td>${esc(x.categoria)}</td><td>${esc(x.descricao ?? '')}</td><td>${x.forma_pagamento ? FORMAS_PGTO[x.forma_pagamento] : '<span class="dica">—</span>'}${x.origem === 'EXTRATO' ? ' <span class="dica">· extrato</span>' : ''}</td><td class="num">${brl(x.valor)}</td>
+        <td class="acoes-linha">${x.origem === 'EXTRATO' ? '<a href="#/extrato" class="dica">ver no extrato</a>' : `<button data-ed="${x.id}">Editar</button> ${podeExcluirRegistros() ? `<button data-ex="${x.id}">Excluir</button>` : ''}`}</td></tr>`).join('')}</tbody></table></div>
       ${porCat.length > 1 ? `<p class="sutil">Por categoria: ${porCat.map(([c, v]) => `${esc(c)} ${brl(v)}`).join(' · ')}</p>` : ''}` : '<div class="vazio">Nenhuma despesa lançada neste mês.</div>'}`;
   $('#mes-desp').onchange = (ev) => { telaDespesas.mes = ev.target.value || mesAtual(); telaDespesas(); };
   const formDespesa = (x) => abrirDialogo(`
@@ -1701,6 +1702,7 @@ async function telaDespesas() {
         <label>Valor (R$) <input name="valor" data-num required inputmode="decimal" value="${x ? String(x.valor).replace('.', ',') : ''}"></label>
         <label>Categoria <input name="categoria" required list="lista-cat" value="${esc(x?.categoria ?? '')}"><datalist id="lista-cat">${d.categorias.map((c) => `<option value="${esc(c)}">`).join('')}</datalist></label>
         <label>Descrição <input name="descricao" maxlength="200" value="${esc(x?.descricao ?? '')}"></label>
+        <label>Pago com <select name="forma_pagamento"><option value="">Não informado</option>${Object.entries(FORMAS_PGTO).map(([k, n]) => `<option value="${k}" ${x?.forma_pagamento === k ? 'selected' : ''}>${n}</option>`).join('')}</select><span class="dica">Depois serve para vincular a despesa ao extrato e justificar o gasto.</span></label>
       </div>
       <p class="erro" id="erro-desp"></p>
       <div class="acoes"><button class="primario" type="submit">Salvar</button><button type="button" data-fechar>Fechar</button></div>
@@ -1709,7 +1711,7 @@ async function telaDespesas() {
       ev.preventDefault();
       const v = lerForm(ev.target);
       try {
-        const corpo = { data: v.data, categoria: v.categoria, descricao: v.descricao, valor: v.valor };
+        const corpo = { data: v.data, categoria: v.categoria, descricao: v.descricao, valor: v.valor, forma_pagamento: v.forma_pagamento || null };
         if (x) await api('PUT', `${base}/despesas/${x.id}`, corpo); else await api('POST', `${base}/despesas`, corpo);
         dlg.close(); telaDespesas();
       } catch (e) { $('#erro-desp').textContent = mensagemErro(e); }

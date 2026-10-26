@@ -82,6 +82,21 @@ test('extrato Ailos: leitura do PDF, importação, classificação e conciliaç�
     const bal = (await call('GET', `/api/empresas/${eid}/extrato/balanco?de=2025-09-01&ate=2025-09-30`, undefined, t)).json;
     assert.equal(bal.resultado, 29.5); assert.equal(bal.saidas.find((x: any) => x.categoria === 'Fornecedores').total, 150);
 
+    // saídas classificadas viram despesas espelho (balanço), com a forma de pagamento deduzida
+    const desp = db.prepare("SELECT categoria, valor, forma_pagamento, origem FROM despesas WHERE empresa_id = ? ORDER BY valor").all(eid) as any[];
+    assert.equal(desp.length, 4); assert.ok(desp.every((x) => x.origem === 'EXTRATO'));
+    assert.deepEqual(desp.map((x) => x.valor), [20.5, 50, 100, 300]);
+    assert.equal(desp.find((x) => x.valor === 100).forma_pagamento, 'PIX');
+    assert.equal(desp.find((x) => x.valor === 100).categoria, 'Fornecedores');
+    // espelho não se edita pelas despesas
+    const idEsp = (db.prepare("SELECT id FROM despesas WHERE empresa_id = ? AND valor = 100").get(eid) as any).id;
+    assert.equal((await call('PUT', `/api/empresas/${eid}/despesas/${idEsp}`, { data: '2025-09-05', categoria: 'Outras', valor: 100 }, t)).status, 400);
+    // reclassificar como transferência tira da despesa
+    assert.equal((await call('PUT', `/api/empresas/${eid}/extrato/${pix[0].id}`, { categoria: 'Transferências', aplicarSemelhantes: true }, t)).status, 200);
+    assert.equal((db.prepare("SELECT COUNT(*) AS n FROM despesas WHERE empresa_id = ?").get(eid) as any).n, 2);
+    assert.equal((await call('PUT', `/api/empresas/${eid}/extrato/${pix[0].id}`, { categoria: 'Fornecedores', aplicarSemelhantes: true }, t)).status, 200);
+    assert.equal((db.prepare("SELECT COUNT(*) AS n FROM despesas WHERE empresa_id = ?").get(eid) as any).n, 4);
+
     // baixa do boleto ao ligar: desfaz e liga de novo dando baixa
     assert.equal((await call('POST', `/api/empresas/${eid}/extrato/${por('CRED.COBR').id}/conciliar`, { cobrancaId: null }, t)).status, 200);
     assert.equal((await call('POST', `/api/empresas/${eid}/extrato/${por('CRED.COBR').id}/conciliar`, { cobrancaId: cob, darBaixa: true }, t)).status, 200);
@@ -97,5 +112,6 @@ test('extrato Ailos: leitura do PDF, importação, classificação e conciliaç�
     assert.equal((await call('GET', `/api/empresas/${eid}/extrato`, undefined, undefined)).status, 401);
     assert.equal((await call('DELETE', `/api/empresas/${eid}/extrato/importacoes/${imp.json.importacaoId}`, undefined, t)).status, 200);
     assert.equal((await call('GET', `/api/empresas/${eid}/extrato?mes=2025-09`, undefined, t)).json.lancamentos.length, 0);
+    assert.equal((db.prepare('SELECT COUNT(*) AS n FROM despesas WHERE empresa_id = ?').get(eid) as any).n, 0, 'excluir a importação remove as despesas espelho');
   } finally { await app.close(); }
 });

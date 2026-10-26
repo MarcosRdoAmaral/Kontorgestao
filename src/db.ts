@@ -608,6 +608,11 @@ const migracoes: string[] = [
   CREATE UNIQUE INDEX idx_estoque_mov_compra ON estoque_movimentos(compra_item_id) WHERE compra_item_id IS NOT NULL;`,
   // 22: modelo de descrição composta por cliente (período, ordem de compra, linhas de valor com retenção de INSS)
   `ALTER TABLE tomadores ADD COLUMN descricao_modelo TEXT;`,
+  // 23: despesas com forma de pagamento e ligação ao extrato (origem EXTRATO = espelho do lançamento bancário; MANUAL pode ser vinculada para justificar o gasto)
+  `ALTER TABLE despesas ADD COLUMN forma_pagamento TEXT CHECK (forma_pagamento IN ('PIX','DEBITO','CREDITO','DINHEIRO'));
+  ALTER TABLE despesas ADD COLUMN origem TEXT NOT NULL DEFAULT 'MANUAL';
+  ALTER TABLE despesas ADD COLUMN extrato_lancamento_id INTEGER REFERENCES extrato_lancamentos(id) ON DELETE SET NULL;
+  CREATE UNIQUE INDEX idx_despesas_extrato ON despesas(extrato_lancamento_id) WHERE extrato_lancamento_id IS NOT NULL;`,
 ];
 
 export function migrar(): void {

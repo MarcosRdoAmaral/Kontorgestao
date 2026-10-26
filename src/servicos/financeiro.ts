@@ -17,7 +17,9 @@ export const Despesa = z.object({
   categoria: z.string().trim().min(1, 'Informe a categoria').max(60),
   descricao: z.string().trim().max(200).nullish(),
   valor: z.number().positive('O valor precisa ser maior que zero'),
+  forma_pagamento: z.enum(['PIX', 'DEBITO', 'CREDITO', 'DINHEIRO']).nullish(),
 });
+export const FORMAS_PAGAMENTO = { PIX: 'PIX', DEBITO: 'Débito', CREDITO: 'Crédito', DINHEIRO: 'Dinheiro' } as const;
 
 export function listarCategorias(empresaId: number): string[] {
   const l = db.prepare('SELECT nome FROM despesa_categorias WHERE empresa_id = ? ORDER BY nome').all(empresaId) as { nome: string }[];
@@ -34,21 +36,30 @@ export function salvarCategorias(empresaId: number, nomes: string[]) {
   })();
 }
 export const listarDespesas = (empresaId: number, mes: string) =>
-  db.prepare('SELECT id, data, categoria, descricao, valor FROM despesas WHERE empresa_id = ? AND substr(data,1,7) = ? ORDER BY data DESC, id DESC').all(empresaId, mes);
+  db.prepare('SELECT id, data, categoria, descricao, valor, forma_pagamento, origem, extrato_lancamento_id FROM despesas WHERE empresa_id = ? AND substr(data,1,7) = ? ORDER BY data DESC, id DESC').all(empresaId, mes);
 export function criarDespesa(empresaId: number, usuarioId: number, d: z.infer<typeof Despesa>) {
-  return Number(db.prepare('INSERT INTO despesas (empresa_id, data, categoria, descricao, valor, criado_por) VALUES (?,?,?,?,?,?)').run(empresaId, d.data, d.categoria, d.descricao ?? null, d.valor, usuarioId).lastInsertRowid);
+  return Number(db.prepare('INSERT INTO despesas (empresa_id, data, categoria, descricao, valor, criado_por, forma_pagamento) VALUES (?,?,?,?,?,?,?)').run(empresaId, d.data, d.categoria, d.descricao ?? null, d.valor, usuarioId, d.forma_pagamento ?? null).lastInsertRowid);
 }
 export function editarDespesa(empresaId: number, id: number, d: z.infer<typeof Despesa>) {
-  const r = db.prepare('UPDATE despesas SET data = ?, categoria = ?, descricao = ?, valor = ? WHERE id = ? AND empresa_id = ?').run(d.data, d.categoria, d.descricao ?? null, d.valor, id, empresaId);
+  conferirNaoEspelho(empresaId, id);
+  const r = db.prepare('UPDATE despesas SET data = ?, categoria = ?, descricao = ?, valor = ?, forma_pagamento = ? WHERE id = ? AND empresa_id = ?').run(d.data, d.categoria, d.descricao ?? null, d.valor, d.forma_pagamento ?? null, id, empresaId);
   if (!r.changes) throw new ErroNegocio('Despesa não encontrada.', 404);
 }
+/** Despesa espelhada do extrato bancário muda no Extrato e conciliação, não aqui. */
+function conferirNaoEspelho(empresaId: number, id: number) {
+  const x = db.prepare('SELECT origem FROM despesas WHERE id = ? AND empresa_id = ?').get(id, empresaId) as { origem: string } | undefined;
+  if (x?.origem === 'EXTRATO') throw new ErroNegocio('Este lançamento veio do extrato bancário: altere a categoria em Extrato e conciliação.');
+}
 export function excluirDespesa(empresaId: number, id: number) {
+  conferirNaoEspelho(empresaId, id);
   if (!db.prepare('DELETE FROM despesas WHERE id = ? AND empresa_id = ?').run(id, empresaId).changes) throw new ErroNegocio('Despesa não encontrada.', 404);
 }
 
 // ---------- Painel e balanço ----------
 const recebidoMes = (empresaId: number, ym: string) =>
-  (db.prepare("SELECT COALESCE(SUM(COALESCE(valor_pago, valor)),0) AS v FROM cobrancas WHERE empresa_id = ? AND status = 'PAGO' AND substr(COALESCE(pago_em, vencimento),1,7) = ?").get(empresaId, ym) as { v: number }).v;
+  (db.prepare("SELECT COALESCE(SUM(COALESCE(valor_pago, valor)),0) AS v FROM cobrancas WHERE empresa_id = ? AND status = 'PAGO' AND substr(COALESCE(pago_em, vencimento),1,7) = ?").get(empresaId, ym) as { v: number }).v
+  // entradas do extrato que o usuário classificou como "Outras receitas" (sem boleto) também são receita
+  + (db.prepare("SELECT COALESCE(SUM(valor),0) AS v FROM extrato_lancamentos WHERE empresa_id = ? AND valor > 0 AND cobranca_id IS NULL AND categoria = 'Outras receitas' AND substr(data,1,7) = ?").get(empresaId, ym) as { v: number }).v;
 const despesaMes = (empresaId: number, ym: string) =>
   (db.prepare('SELECT COALESCE(SUM(valor),0) AS v FROM despesas WHERE empresa_id = ? AND substr(data,1,7) = ?').get(empresaId, ym) as { v: number }).v;
 
