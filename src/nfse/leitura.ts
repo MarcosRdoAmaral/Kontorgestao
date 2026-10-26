@@ -13,7 +13,9 @@ const num = (v: unknown) => (v === undefined || v === null || v === '' ? undefin
 /** Grupo IBS/CBS: o que foi declarado na DPS + os valores apurados pelo sistema nacional (infNFSe/IBSCBS). */
 function lerIbsCbs(d: any, n: any) {
   if (!d && !n) return undefined;
-  const g = d?.valores?.trib?.gIBSCBS ?? {};
+  // NT 009: CST/cClassTrib ficam direto em trib; no leiaute anterior, dentro de gIBSCBS
+  const tr = d?.valores?.trib ?? {};
+  const g = tr.CST !== undefined ? tr : tr.gIBSCBS ?? {};
   const v = n?.valores ?? {};
   const tot = n?.totCIBS ?? {};
   return {
@@ -76,7 +78,8 @@ export function lerNfse(xml: string) {
       regEspTrib: prest.regTrib?.regEspTrib as string,
       regApTribSN: prest.regTrib?.regApTribSN as string | undefined,
       tpEmit: dps.tpEmit as string | undefined,
-      finNFSe: dps.IBSCBS?.finNFSe as string | undefined,
+      // NT 009 moveu finNFSe para infDPS; notas antigas o trazem dentro de IBSCBS
+      finNFSe: (dps.finNFSe ?? dps.IBSCBS?.finNFSe) as string | undefined,
     },
     ibscbs: lerIbsCbs(dps.IBSCBS, inf.IBSCBS),
     emitente: {
