@@ -305,3 +305,4 @@ label.check input { width: auto; }
 .rel-grupos details.grupo > a { padding: 6px 10px; border-radius: var(--raio); font-size: .88rem; }
 .rel-grupos details.grupo > a.ativo { background: var(--superficie-2); color: var(--laranja); font-weight: 600; }
 @media (max-width: 800px) { .rel-layout { grid-template-columns: 1fr; } .rel-grupos { position: static; } }
+.rel-grupos details.grupo > summary > .dica { margin-left: auto; margin-right: 10px; min-width: 1.2em; text-align: right; font-weight: 600; letter-spacing: 0; }
