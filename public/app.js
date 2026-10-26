@@ -1479,6 +1479,8 @@ function editorParcelas(box, parcelas, total, base, aoMudar) {
     fecha: () => Math.abs(soma() - tot()) < 0.005,
     /** À vista: uma parcela só, vencendo até a data da compra. */
     aVista: (emissao) => linhas.length === 1 && linhas[0].vencimento <= emissao,
+    /** Passa a parcelar: refaz em n parcelas a cada `dias`, a partir da data indicada. */
+    parcelar: (inicio, n = 2, dias = 30) => { if (linhas[0]) linhas[0].vencimento = inicio; dividir(n, dias); desenhar(); },
     /** O total ou a data da compra mudou: refaz as parcelas mantendo a quantidade (uma parcela à vista acompanha a data da compra). */
     recalcular: (emissao) => { if (linhas.length === 1 && emissao) linhas[0].vencimento = emissao; dividir(linhas.length, 0); desenhar(); },
   };
@@ -1546,15 +1548,19 @@ async function telaCompras() {
 function conferirNotaDialogo({ opc, pv, rotulo, origem, ultima, enviar }) {
   return new Promise((fim) => {
     const t = pv.totais;
+    const aVistaInicial = pv.parcelas.length === 1 && pv.parcelas[0].vencimento <= pv.emissao;
     abrirDialogo(`<form id="form-nota"><h2>${esc(rotulo)} — NF ${esc(pv.numero)}</h2>
       <p class="sutil">${esc(pv.fornecedor.nome)} · ${fmtDoc(pv.fornecedor.documento)}${pv.fornecedor.municipio ? ' · ' + esc(pv.fornecedor.municipio) + (pv.fornecedor.uf ? '/' + esc(pv.fornecedor.uf) : '') : ''}<br>emitida em ${dataBr(pv.emissao)}${pv.natureza ? ' · ' + esc(pv.natureza) : ''}${origem ? ' · ' + esc(origem) : ''}</p>
       ${pv.bloqueio ? `<div class="banner perigo">${esc(pv.bloqueio)}</div>` : ''}${pv.alertas.map((x) => `<div class="banner teste">⚠ ${esc(x)}</div>`).join('')}
       <dl class="dados"><dt>Produtos</dt><dd>${brl(t.produtos)}</dd>${t.frete + t.seguro ? `<dt>Frete e seguro</dt><dd>${brl(t.frete + t.seguro)}</dd>` : ''}${t.desconto ? `<dt>Desconto</dt><dd>${brl(t.desconto)}</dd>` : ''}${t.ipi ? `<dt>IPI</dt><dd>${brl(t.ipi)}</dd>` : ''}${t.icmsSt ? `<dt>ICMS-ST</dt><dd>${brl(t.icmsSt)}</dd>` : ''}<dt>Total da nota</dt><dd><strong>${brl(t.nf)}</strong></dd></dl>
       <details><summary>${pv.itens.length} item(ns)</summary><div class="rolagem"><table class="tabela"><thead><tr><th>#</th><th>Descrição</th><th>NCM</th><th class="num">Qtd</th><th class="num">Total</th></tr></thead><tbody>
         ${pv.itens.map((i) => `<tr><td>${i.n}</td><td>${esc(i.descricao)}</td><td>${esc(i.ncm ?? '')}</td><td class="num">${String(i.quantidade).replace('.', ',')} ${esc(i.unidade ?? '')}</td><td class="num">${brl(i.valor)}</td></tr>`).join('')}</tbody></table></div></details>
-      <h3>Parcelamento ${pv.parcelasDaNota ? 'da nota' : '(a nota não traz parcelas: à vista na emissão)'}</h3>
-      <p class="dica">Se o pagamento real for diferente do informado na nota, altere as datas e os valores. A soma precisa fechar com o total.</p>
-      <div id="ed-parc"></div>
+      <div class="grade"><label>Condição de pagamento <select name="condicao"><option value="AVISTA" ${aVistaInicial ? 'selected' : ''}>À vista</option><option value="PARCELADO" ${aVistaInicial ? '' : 'selected'}>Parcelado</option></select></label></div>
+      <div id="bloco-parcelas" ${aVistaInicial ? 'hidden' : ''}>
+        <h3>Parcelamento ${pv.parcelasDaNota ? 'da nota' : ''}</h3>
+        <p class="dica">Se o pagamento real for diferente do informado na nota, altere as datas e os valores. A soma precisa fechar com o total.</p>
+        <div id="ed-parc"></div>
+      </div>
       <div class="grade"><label class="check largo"><input type="checkbox" name="gerar" checked> Lançar as parcelas nas <strong>despesas</strong>, na data de vencimento</label>
         <label>Categoria da despesa <select name="categoria">${opc.opcCat('Material e equipamentos')}</select></label>
         <label>Forma de pagamento <span class="dica" id="forma-dica"></span><select name="forma">${opcForma()}</select></label>
@@ -1563,19 +1569,21 @@ function conferirNotaDialogo({ opc, pv, rotulo, origem, ultima, enviar }) {
       <div class="acoes"><button class="primario" type="submit" ${pv.bloqueio ? 'disabled' : ''}>Importar esta nota</button><button type="button" id="pular">${ultima ? 'Cancelar' : 'Pular'}</button></div></form>`, (dlg) => {
       const f = dlg.querySelector('#form-nota');
       let ed;
-      const obrigatoria = () => f.gerar.checked && ed?.aVista(pv.emissao);
-      const atualizar = () => { const o = obrigatoria(); f.forma.required = !!o; dlg.querySelector('#forma-dica').textContent = o ? '(obrigatória: compra à vista)' : '(opcional)'; };
+      const aVista = () => f.condicao.value === 'AVISTA';
+      const obrigatoria = () => f.gerar.checked && (aVista() || ed?.aVista(pv.emissao));
+      const atualizar = () => { const o = obrigatoria(); f.forma.required = !!o; dlg.querySelector('#forma-dica').textContent = o ? '(obrigatória)' : '(opcional)'; };
       ed = editorParcelas(dlg.querySelector('#ed-parc'), pv.parcelas, t.nf, pv.emissao, atualizar);
+      f.condicao.onchange = () => { dlg.querySelector('#bloco-parcelas').hidden = aVista(); if (!aVista() && ed.aVista(pv.emissao)) ed.parcelar(pv.emissao, 2, 30); atualizar(); };
       f.gerar.onchange = atualizar; atualizar();
       let feito = false; const sair = (v) => { if (!feito) { feito = true; fim(v); } };
       dlg.addEventListener('close', () => sair({ ok: false }));
       dlg.querySelector('#pular').onclick = () => { sair({ ok: false }); dlg.close(); };
       f.onsubmit = async (e2) => {
         e2.preventDefault();
-        if (!ed.fecha()) { $('#erro-nota').textContent = 'A soma das parcelas precisa fechar com o total da nota.'; return; }
+        if (!aVista() && !ed.fecha()) { $('#erro-nota').textContent = 'A soma das parcelas precisa fechar com o total da nota.'; return; }
         if (obrigatoria() && !f.forma.value) { $('#erro-nota').textContent = 'Compra à vista: selecione a forma de pagamento.'; f.forma.focus(); return; }
         try {
-          const parcelas = ed.ler();
+          const parcelas = aVista() ? [{ vencimento: pv.emissao, valor: t.nf }] : ed.ler();
           const r = await enviar(f, parcelas);
           const x = r.resultados ? r.resultados[0] : r;
           if (x.ok === false) { $('#erro-nota').textContent = x.mensagem; return; }
@@ -1602,13 +1610,16 @@ async function telaCompraManual() {
         <label>Data da compra <input type="date" name="emissao" required value="${hoje}"></label>
         <label>Valor total (R$) <input name="valor_total" data-num inputmode="decimal" required></label>
         <label>Categoria <select name="categoria">${opcCat('Material e equipamentos')}</select></label>
+        <label>Condição de pagamento <select name="condicao"><option value="AVISTA">À vista</option><option value="PARCELADO">Parcelado</option></select></label>
         <label>Forma de pagamento <span class="dica" id="forma-dica"></span><select name="forma">${opcForma()}</select></label>
         ${tiposEntrada.length ? `<label>Tributação <select name="tipo">${opcTipo()}</select></label>` : ''}
         <label class="largo">Observação <input name="observacao" maxlength="300"></label>
       </div>
-      <h3>Parcelamento</h3>
-      <p class="dica">Uma parcela vencendo na data da compra é <strong>à vista</strong> (a forma de pagamento passa a ser obrigatória). Para parcelar, use <em>Refazer em N parcelas</em> ou edite as linhas.</p>
-      <div id="ed-parc"></div>
+      <div id="bloco-parcelas" hidden>
+        <h3>Parcelamento</h3>
+        <p class="dica">Use <em>Refazer em N parcelas</em> ou edite as datas e os valores. A soma precisa fechar com o valor total.</p>
+        <div id="ed-parc"></div>
+      </div>
       <label class="check"><input type="checkbox" name="gerar" checked> Lançar as parcelas nas despesas</label>
       <p class="erro" id="erro-comp"></p>
       <div class="acoes"><button class="primario" type="submit">Salvar compra</button><button type="button" id="cancelar-comp">Cancelar</button></div></form>`;
@@ -1626,16 +1637,22 @@ async function telaCompraManual() {
   // parcelamento
   const total = () => numero(f.valor_total.value) ?? 0;
   const ed = editorParcelas($('#ed-parc'), [{ vencimento: hoje, valor: 0 }], total, hoje, () => atualizarForma());
-  function atualizarForma() { const o = f.gerar.checked && ed.aVista(f.emissao.value); f.forma.required = !!o; $('#forma-dica').textContent = o ? '(obrigatória: compra à vista)' : '(opcional)'; }
-  f.valor_total.addEventListener('input', () => { ed.recalcular(); atualizarForma(); });
-  f.emissao.addEventListener('change', () => { ed.recalcular(f.emissao.value); atualizarForma(); });
+  const aVista = () => f.condicao.value === 'AVISTA';
+  function atualizarForma() { const o = f.gerar.checked && (aVista() || ed.aVista(f.emissao.value)); f.forma.required = !!o; $('#forma-dica').textContent = o ? '(obrigatória)' : '(opcional)'; }
+  f.valor_total.addEventListener('input', () => { ed.recalcular(aVista() ? f.emissao.value : undefined); atualizarForma(); });
+  f.emissao.addEventListener('change', () => { ed.recalcular(aVista() ? f.emissao.value : undefined); atualizarForma(); });
+  f.condicao.onchange = () => {
+    $('#bloco-parcelas').hidden = aVista();
+    if (aVista()) ed.recalcular(f.emissao.value); else ed.parcelar(f.emissao.value, 2, 30);
+    atualizarForma();
+  };
   f.gerar.onchange = atualizarForma; atualizarForma();
   f.onsubmit = async (e) => {
     e.preventDefault(); const v = lerForm(f);
-    if (!ed.fecha()) { $('#erro-comp').textContent = 'A soma das parcelas precisa fechar com o valor total.'; return; }
+    if (!aVista() && !ed.fecha()) { $('#erro-comp').textContent = 'A soma das parcelas precisa fechar com o valor total.'; return; }
     if (f.forma.required && !f.forma.value) { $('#erro-comp').textContent = 'Compra à vista: selecione a forma de pagamento.'; f.forma.focus(); return; }
     try {
-      await api('POST', `${base}/compras`, { fornecedor_nome: v.nome, fornecedor_documento: v.documento, numero: v.nf_numero, emissao: v.emissao, valor_total: v.valor_total, observacao: v.observacao, gerarDespesas: v.gerar, categoria: v.categoria, tipoDocumentoId: v.tipo ? Number(v.tipo) : null, formaPagamento: v.forma || null, parcelas: ed.ler() });
+      await api('POST', `${base}/compras`, { fornecedor_nome: v.nome, fornecedor_documento: v.documento, numero: v.nf_numero, emissao: v.emissao, valor_total: v.valor_total, observacao: v.observacao, gerarDespesas: v.gerar, categoria: v.categoria, tipoDocumentoId: v.tipo ? Number(v.tipo) : null, formaPagamento: v.forma || null, parcelas: aVista() ? [{ vencimento: v.emissao, valor: v.valor_total }] : ed.ler() });
       aviso('Compra lançada.'); location.hash = '#/compras';
     } catch (err) { $('#erro-comp').textContent = mensagemErro(err); }
   };

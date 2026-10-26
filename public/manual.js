@@ -4,7 +4,7 @@
  * aqui (e a data/versão em MANUAL_VERSAO) antes de publicar a versão.
  * `corpo` é HTML escrito à mão (não recebe dados de usuário).
  */
-export const MANUAL_VERSAO = '3.17.0';
+export const MANUAL_VERSAO = '3.17.1';
 
 export const MANUAL = [
   {
@@ -135,7 +135,7 @@ export const MANUAL = [
     id: 'compras', titulo: 'Compras (NF-e de entrada)', resumo: 'Buscar na SEFAZ as NF-e emitidas contra o CNPJ, importar o XML e lançar nas despesas.',
     corpo: `
       <p>O grupo <strong>Compras</strong> tem duas telas: <strong>Compras</strong> (lançar e consultar notas, num lugar só) e <strong>Buscar NF-e (SEFAZ)</strong> (notas emitidas contra o CNPJ). Na tela Compras, busque por fornecedor, número da nota, CNPJ ou chave, no período, e use <em>Importar XML da NF-e</em> ou <em>Lançar compra manual</em>.</p>
-      <p>Toda nota que entra, pelo XML ou pela SEFAZ, abre <em>nota a nota</em> com o resumo (fornecedor, totais, itens) e o <strong>parcelamento da nota</strong>. Se o pagamento real for diferente, altere datas e valores, adicione ou remova parcelas, ou use <em>Refazer</em> em N parcelas a cada X dias; a soma precisa fechar com o total. <strong>Compra à vista</strong> (uma parcela vencendo na data da compra) exige escolher a <em>forma de pagamento</em> (PIX, débito, crédito ou dinheiro), que vai para as despesas geradas.</p>
+      <p>Toda nota que entra, pelo XML ou pela SEFAZ, abre <em>nota a nota</em> com o resumo (fornecedor, totais, itens) e o <strong>parcelamento da nota</strong>. Se o pagamento real for diferente, altere datas e valores, adicione ou remova parcelas, ou use <em>Refazer</em> em N parcelas a cada X dias; a soma precisa fechar com o total. Em <em>Condição de pagamento</em> escolha <strong>À vista</strong> (o parcelamento some e a <em>forma de pagamento</em> passa a ser obrigatória: PIX, débito, crédito ou dinheiro, que vai para as despesas geradas) ou <strong>Parcelado</strong> (abre o parcelamento).</p>
       <h3>Buscar NF-e (SEFAZ)</h3>
       <p>Com o certificado A1 da empresa cadastrado, a tela <strong>Buscar NF-e (SEFAZ)</strong> traz as NF-e emitidas contra o CNPJ direto do Ambiente Nacional, sem precisar pedir o XML ao fornecedor.</p>
       <ol>
@@ -154,7 +154,7 @@ export const MANUAL = [
       </ol>
       <p>O sistema avisa e <strong>não importa</strong> quando a nota já foi importada, quando foi emitida pela própria empresa (é uma venda), ou quando o XML é de NFS-e ou de evento. Se o destinatário da nota for outro CNPJ, importa com um alerta para você conferir a empresa selecionada.</p>
       <h3>Compra manual</h3>
-      <p><strong>Lançar compra manual</strong> registra uma compra sem XML (cupom, recibo). No fornecedor, digite para buscar ou use <strong>F2</strong> para consultar os fornecedores que já tiveram nota lançada; se for novo, informe o CNPJ e clique em <em>Buscar CNPJ</em> (ou saia do campo) para preencher o nome pela Receita. Informe o valor e o parcelamento, e a forma de pagamento (obrigatória à vista).</p>
+      <p><strong>Lançar compra manual</strong> registra uma compra sem XML (cupom, recibo). No fornecedor, digite para buscar ou use <strong>F2</strong> para consultar os fornecedores que já tiveram nota lançada; se for novo, informe o CNPJ e clique em <em>Buscar CNPJ</em> (ou saia do campo) para preencher o nome pela Receita. Informe o valor e a condição de pagamento: à vista (com a forma de pagamento) ou parcelado.</p>
       <h3>Detalhe, XML e exclusão</h3>
       <p>Clique na compra para ver itens, totais e parcelas e baixar o XML. <strong>Alterar parcelas</strong> refaz o parcelamento e acerta as despesas geradas (se uma parcela já estiver ligada ao extrato, desfaça o vínculo antes). Cada parcela vira uma despesa; quando o pagamento aparecer no extrato, ligue-o em <em>Extrato e conciliação</em>. <strong>Excluir compra</strong> (permissão <em>Excluir registros</em>) apaga também as despesas que ela gerou. O relatório <em>Compras (NF-e de entrada)</em> está em Relatórios. O acesso a Compras é liberado por usuário em Configurações &gt; Usuários e acessos.</p>`,
   },
