@@ -177,17 +177,6 @@ test('fluxo completo: cadastro, emissão, rejeição, queda de rede, DANFSe e ca
   assert.equal(ret.json.status, 'AUTORIZADA', JSON.stringify(ret.json));
   assert.match(ret.json.xml_dps, /<piscofins><CST>01<\/CST><vBCPisCofins>1000\.00<\/vBCPisCofins><pAliqPis>0\.65<\/pAliqPis><pAliqCofins>3\.00<\/pAliqCofins><vPis>6\.50<\/vPis><vCofins>30\.00<\/vCofins><tpRetPisCofins>3<\/tpRetPisCofins><\/piscofins>/);
 
-  // reembolso/repasse de terceiros: na produção restrita (NT 009) vai em valores/vAjusteBC, validado no XSD, limitado ao valor do serviço
-  const reemb = { tipo: '03', doc: { t: 'DFE', tipoChave: '2', chave: '35260512345678000195550010000012341000012345' }, fornecedorDoc: '12345678000195', fornecedorNome: 'Gráfica Exemplo Ltda', dtEmi: '2026-10-10', dtComp: '2026-10-01', valor: 300 };
-  const comReemb = await call('POST', '/api/notas', { ...base, servicoId: sIbs.json.id, valor: 1000, reembolsos: [reemb, { tipo: '99', descricao: 'Taxa paga ao cartório', doc: { t: 'OUTRO', numero: 'REC-77', descricao: 'Recibo' }, dtEmi: '2026-10-11', dtComp: '2026-10-01', valor: 50 }] }, token);
-  assert.equal(comReemb.json.status, 'AUTORIZADA', JSON.stringify(comReemb.json));
-  assert.match(comReemb.json.xml_dps, /<vAjusteBC><documentos><docAjusteBC><tpAjusteBC>103<\/tpAjusteBC><vTotDoc>300\.00<\/vTotDoc><vAjusteAplic>300\.00<\/vAjusteAplic><dtEmiDoc>2026-10-10<\/dtEmiDoc><dtCompDoc>2026-10-01<\/dtCompDoc><dFeNacional><tipoChaveDFe>2<\/tipoChaveDFe><chaveDFe>35260512345678000195550010000012341000012345<\/chaveDFe><\/dFeNacional><fornec><CNPJ>12345678000195<\/CNPJ><xNome>Gráfica Exemplo Ltda<\/xNome><\/fornec><\/docAjusteBC>/);
-  assert.match(comReemb.json.xml_dps, /<tpAjusteBC>199<\/tpAjusteBC><xTpAjusteBC>Taxa paga ao cartório<\/xTpAjusteBC>/);
-  const excede = await call('POST', '/api/notas', { ...base, servicoId: sIbs.json.id, valor: 200, reembolsos: [reemb] }, token);
-  assert.equal(excede.status, 400); assert.match(JSON.stringify(excede.json), /E0953/);
-  const semIbs = await call('POST', '/api/notas', { ...base, reembolsos: [reemb] }, token);
-  assert.equal(semIbs.status, 400); assert.match(JSON.stringify(semIbs.json), /IBS\/CBS/);
-
   const semNbs = await call('POST', `/api/empresas/${eid}/servicos`, { nome: 'IBS sem NBS', descricao: 'x', c_trib_nac: '071002', ibscbs: { indFinal: 0, cIndOp: '030102', indDest: 0, cst: '000', cClassTrib: '000001' } }, token);
   assert.equal(semNbs.status, 400);
   assert.match(JSON.stringify(semNbs.json), /NBS/);
@@ -266,7 +255,7 @@ test('fluxo completo: cadastro, emissão, rejeição, queda de rede, DANFSe e ca
   // 7) resumo mensal
   const res = (await call('GET', '/api/relatorios/resumo?mes=2026-10', undefined, token)).json;
   const e1 = res.find((x: any) => x.empresa_id === eid);
-  assert.equal(e1.autorizadas, 4); assert.equal(e1.canceladas, 1); assert.equal(e1.faturado, 5000);
+  assert.equal(e1.autorizadas, 3); assert.equal(e1.canceladas, 1); assert.equal(e1.faturado, 4000);
 
   // 7b) faturamento "um comando": nota + boleto + e-mail e só boleto
   const tFat = await call('POST', `/api/empresas/${eid}/tomadores`, { tipo_doc: 'CPF', documento: '529.982.247-25', nome: 'Cliente Mensalista', email: 'mensal@x.com', email_cobranca: 'fin@x.com; outro@x.com', modo_faturamento: 'NOTA_BOLETO', vencimento_tipo: 'PRAZO', vencimento_valor: 7, enviar_email_auto: true, cep: '88301-000', cod_municipio: '4208203', logradouro: 'Rua A', numero: '10', bairro: 'Centro' }, token);

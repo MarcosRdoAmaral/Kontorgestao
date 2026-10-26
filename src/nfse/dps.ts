@@ -17,9 +17,6 @@ export function leiauteVigente(tpAmb: 1 | 2, dhEmi: string): LeiauteDps {
   return tpAmb === 2 || dhEmi.slice(0, 10) >= PRODUCAO_NT009 ? 'nt009' : 'nt004';
 }
 
-/** Código do tipo de reembolso/repasse (NT 004: 01–04, 99) → tipo de ajuste da base (NT 009: 101–104, 199). */
-export const tipoAjusteBC = (tipoReeRepRes: string) => (tipoReeRepRes === '99' ? '199' : `1${tipoReeRepRes.padStart(2, '0')}`);
-
 export interface Endereco {
   cMun: string;      // IBGE 7 dígitos
   cep: string;
@@ -93,12 +90,6 @@ export interface DadosDPS {
     indDest: 0 | 1;
     cst: string;
     cClassTrib: string;
-    /** Reembolsos/repasses de terceiros: não entram na base do ISSQN, IBS e CBS. */
-    reeRepRes?: {
-      tipo: string; descricao?: string | null;
-      doc: { t: 'DFE'; tipoChave: string; chave: string } | { t: 'FISCAL'; cMun: string; numero: string; descricao: string } | { t: 'OUTRO'; numero: string; descricao: string };
-      fornecedorDoc?: string | null; fornecedorNome?: string | null; dtEmi: string; dtComp: string; valor: number;
-    }[];
   };
 }
 
@@ -116,35 +107,6 @@ export function gerarIdDps(cLocEmi: string, documentoPrestador: string, serie: s
 }
 
 /** Identificação de pessoa: CNPJ ou CPF conforme o tamanho do documento. */
-function reeRepResXml(l: NonNullable<DadosDPS['ibscbs']>['reeRepRes']): string {
-  if (!l?.length) return '';
-  return g('gReeRepRes', l.map((r) => {
-    const d = r.doc;
-    const doc = d.t === 'DFE' ? g('dFeNacional', t('tipoChaveDFe', d.tipoChave), d.tipoChave === '9' ? t('xTipoChaveDFe', 'Outro') : '', t('chaveDFe', d.chave))
-      : d.t === 'FISCAL' ? g('docFiscalOutro', t('cMunDocFiscal', d.cMun), t('nDocFiscal', d.numero), t('xDocFiscal', d.descricao))
-      : g('docOutro', t('nDoc', d.numero), t('xDoc', d.descricao));
-    const fd = limparDoc(r.fornecedorDoc ?? undefined);
-    const fornec = fd && r.fornecedorNome ? g('fornec', docPessoa(fd), t('xNome', r.fornecedorNome)) : '';
-    return g('documentos', doc, fornec, t('dtEmiDoc', r.dtEmi), t('dtCompDoc', r.dtComp), t('tpReeRepRes', r.tipo), r.tipo === '99' ? t('xTpReeRepRes', r.descricao ?? '') : '', t('vlrReeRepRes', dec(r.valor)));
-  }).join(''));
-}
-
-/** NT 009: reembolsos/repasses viram documentos do grupo vAjusteBC (valores), aplicados pelo valor integral. */
-function ajusteBCXml(l: NonNullable<DadosDPS['ibscbs']>['reeRepRes']): string {
-  if (!l?.length) return '';
-  return g('vAjusteBC', g('documentos', l.map((r) => {
-    const d = r.doc;
-    const tipo = tipoAjusteBC(r.tipo);
-    const doc = d.t === 'DFE' ? g('dFeNacional', t('tipoChaveDFe', d.tipoChave), d.tipoChave === '9' ? t('xTipoChaveDFe', 'Outro') : '', t('chaveDFe', d.chave))
-      : d.t === 'FISCAL' ? g('docFiscalOutro', t('cMunDocFiscal', d.cMun), t('nDocFiscal', d.numero), t('xDocFiscal', d.descricao))
-      : g('docOutro', t('nDoc', d.numero), t('xDoc', d.descricao));
-    const fd = limparDoc(r.fornecedorDoc ?? undefined);
-    const fornec = fd && r.fornecedorNome ? g('fornec', docPessoa(fd), t('xNome', texto(r.fornecedorNome, 300))) : '';
-    return g('docAjusteBC', t('tpAjusteBC', tipo), tipo === '199' ? t('xTpAjusteBC', texto(r.descricao ?? 'Outros reembolsos', 150)) : '',
-      t('vTotDoc', dec(r.valor)), t('vAjusteAplic', dec(r.valor)), t('dtEmiDoc', r.dtEmi), t('dtCompDoc', r.dtComp), doc, fornec);
-  }).join('')));
-}
-
 function docPessoa(documento?: string): string {
   const d = limparDoc(documento);
   if (!d) return '';
@@ -223,7 +185,6 @@ export function montarDps(d: DadosDPS): { xml: string; id: string; leiaute: Leia
     'valores',
     g('vServPrest', t('vServ', dec(v.vServ))),
     v.vDescIncond || v.vDescCond ? g('vDescCondIncond', t('vDescIncond', dec(v.vDescIncond || undefined)), t('vDescCond', dec(v.vDescCond || undefined))) : '',
-    nt009 ? ajusteBCXml(d.ibscbs?.reeRepRes) : '',
     g(
       'trib',
       g(
@@ -248,7 +209,7 @@ export function montarDps(d: DadosDPS): { xml: string; id: string; leiaute: Leia
           t('indFinal', ib.indFinal),
           t('cIndOp', ib.cIndOp),
           t('indDest', ib.indDest),
-          // NT 009 item 2.16: CST e cClassTrib direto em trib; reembolsos foram para valores/vAjusteBC
+          // NT 009 item 2.16: CST e cClassTrib direto em trib
           g('valores', g('trib', t('CST', ib.cst), t('cClassTrib', ib.cClassTrib))),
         )
       : g(
@@ -257,7 +218,7 @@ export function montarDps(d: DadosDPS): { xml: string; id: string; leiaute: Leia
           t('indFinal', ib.indFinal),
           t('cIndOp', ib.cIndOp),
           t('indDest', ib.indDest),
-          g('valores', reeRepResXml(ib.reeRepRes), g('trib', g('gIBSCBS', t('CST', ib.cst), t('cClassTrib', ib.cClassTrib)))),
+          g('valores', g('trib', g('gIBSCBS', t('CST', ib.cst), t('cClassTrib', ib.cClassTrib)))),
         );
 
   const inf =

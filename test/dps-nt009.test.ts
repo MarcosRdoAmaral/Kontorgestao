@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { execSync } from 'node:child_process';
-import { montarDps, leiauteVigente, tipoAjusteBC } from '../src/nfse/dps.js';
+import { montarDps, leiauteVigente } from '../src/nfse/dps.js';
 
 // Valida a DPS (sem assinatura: a Signature é opcional no XSD da DPS) contra o XSD de cada leiaute.
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'nt009-'));
@@ -29,8 +29,6 @@ const base: any = {
   valores: { vServ: 1500, tribISSQN: 1, tpRetISSQN: 1 },
   ibscbs: {
     indFinal: 0, cIndOp: '100301', indDest: 0, cst: '000', cClassTrib: '000001',
-    reeRepRes: [{ tipo: '99', descricao: 'Taxas cartoriais pagas pelo cliente', doc: { t: 'OUTRO', numero: '123', descricao: 'Recibo do cartório' },
-      fornecedorDoc: '11222333000181', fornecedorNome: 'Cartório Teste', dtEmi: '2026-10-20', dtComp: '2026-10-20', valor: 85.4 }],
   },
 };
 
@@ -40,18 +38,13 @@ test('leiaute vigente: produção restrita já na NT 009; produção só a parti
   assert.equal(leiauteVigente(1, '2026-12-01T00:00:00-03:00'), 'nt009');
 });
 
-test('tipo de reembolso → tipo de ajuste da base (NT 009)', () => {
-  assert.deepEqual(['01', '02', '03', '04', '99'].map(tipoAjusteBC), ['101', '102', '103', '104', '199']);
-});
-
 test('NT 009: valida no XSD de produção restrita de 20/10/2026', () => {
   const { xml, leiaute } = montarDps(base);
   assert.equal(leiaute, 'nt009');
   assert.match(xml, /<tpEmit>1<\/tpEmit><finNFSe>0<\/finNFSe><cLocEmi>/);
   assert.match(xml, /<cNBS>118031000<\/cNBS><xDescServ>/);
-  assert.match(xml, /<vAjusteBC><documentos><docAjusteBC><tpAjusteBC>199<\/tpAjusteBC>/);
   assert.match(xml, /<valores><trib><CST>000<\/CST><cClassTrib>000001<\/cClassTrib><\/trib><\/valores><\/IBSCBS>/);
-  assert.ok(!xml.includes('gReeRepRes') && !xml.includes('<gIBSCBS>'));
+  assert.ok(!xml.includes('gReeRepRes') && !xml.includes('vAjusteBC') && !xml.includes('<gIBSCBS>'));
   validar(xml, xsd009);
 });
 
@@ -66,6 +59,5 @@ test('NT 004 (produção até 30/11/2026) continua igual e valida no XSD 1.01', 
   assert.equal(leiaute, 'nt004');
   assert.match(xml, /<IBSCBS><finNFSe>0<\/finNFSe>/);
   assert.match(xml, /<gIBSCBS><CST>000<\/CST>/);
-  assert.match(xml, /<gReeRepRes>/);
   validar(xml, xsd004);
 });
