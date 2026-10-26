@@ -655,6 +655,39 @@ const migracoes: string[] = [
   ALTER TABLE cobrancas ADD COLUMN juros_pct_mes REAL;
   ALTER TABLE cobrancas ADD COLUMN desc_pontual_pct REAL;
   ALTER TABLE cobrancas ADD COLUMN desc_pontual_dias INTEGER;`,
+  // 26: NF-e recebidas direto da SEFAZ (Distribuição DF-e): resumo/XML por chave, controle de NSU por empresa
+  //     e parâmetros gerais do sistema (cadeia ICP-Brasil para a conexão com a SEFAZ)
+  `CREATE TABLE IF NOT EXISTS parametros (nome TEXT PRIMARY KEY, valor TEXT);
+  CREATE TABLE nfe_recebidas (
+    id INTEGER PRIMARY KEY,
+    empresa_id INTEGER NOT NULL REFERENCES empresas(id),
+    chave TEXT NOT NULL,
+    numero TEXT,
+    serie TEXT,
+    emitente_documento TEXT,
+    emitente_nome TEXT,
+    emissao TEXT,
+    valor REAL,
+    situacao TEXT NOT NULL DEFAULT 'AUTORIZADA' CHECK (situacao IN ('AUTORIZADA','DENEGADA','CANCELADA')),
+    xml TEXT,                       -- procNFe completo; NULL enquanto só há o resumo
+    ciencia_em TEXT,                -- quando a Ciência da Operação foi registrada
+    ciencia_erro TEXT,              -- recusa da SEFAZ ao registrar a ciência
+    nsu TEXT,
+    oculta INTEGER NOT NULL DEFAULT 0,
+    recebida_em TEXT NOT NULL DEFAULT (datetime('now')),
+    atualizada_em TEXT NOT NULL DEFAULT (datetime('now')),
+    UNIQUE (empresa_id, chave)
+  );
+  CREATE INDEX idx_nfe_recebidas ON nfe_recebidas(empresa_id, emissao);
+  CREATE TABLE nfe_distribuicao (
+    empresa_id INTEGER PRIMARY KEY REFERENCES empresas(id),
+    ult_nsu TEXT NOT NULL DEFAULT '0',
+    proxima_consulta TEXT,          -- ISO; a SEFAZ exige 1 hora de intervalo quando não há documentos novos
+    ultima_consulta TEXT,
+    ultimo_resultado TEXT,
+    ultimo_erro TEXT,
+    automatica INTEGER NOT NULL DEFAULT 1
+  );`,
 ];
 
 export function migrar(): void {

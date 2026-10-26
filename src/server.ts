@@ -13,6 +13,7 @@ import { sincronizarDespesasDoCartao } from './servicos/cartao.js';
 import { garantirTiposDosPerfis, migrarServicosLegados } from './servicos/tributacao.js';
 import { ErroNegocio } from './servicos/emissao.js';
 import { backupAutomatico } from './servicos/backup.js';
+import { buscarAutomaticamente } from './servicos/nfe-recebidas.js';
 
 const raiz = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -45,6 +46,11 @@ export async function criarApp() {
   backupAutomatico();
   const timer = setInterval(backupAutomatico, 3600e3);
   timer.unref();
+  // NF-e de entrada na SEFAZ: a cada 10 min verifica quais empresas já podem consultar de novo (intervalo mínimo de 1 h por empresa)
+  if (process.env.NFE_BUSCA_AUTOMATICA !== '0') {
+    const timerNfe = setInterval(() => { buscarAutomaticamente().catch((e) => app.log.error(e)); }, 10 * 60e3);
+    timerNfe.unref();
+  }
   return app;
 }
 
