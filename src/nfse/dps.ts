@@ -4,6 +4,22 @@ import { limparDoc, soDigitos } from './validacao.js';
 export const NS_NFSE = 'http://www.sped.fazenda.gov.br/nfse';
 export const VERSAO_DPS = '1.01';
 
+/**
+ * Leiaute da DPS.
+ * - 'nt004': leiaute vigente em produção até 30/11/2026 (NT 004 + tpRetPisCofins da NT 007), XSDs em schemas/1.01.
+ * - 'nt009': release 1 da NT 009 (produção restrita desde 20/10/2026; produção em 01/12/2026), XSDs em schemas/nt009-r1.
+ */
+export type LeiauteDps = 'nt004' | 'nt009';
+export const PRODUCAO_NT009 = '2026-12-01';
+
+/** Produção restrita já usa a NT 009; produção passa a usá-la a partir de 01/12/2026 (data de emissão). */
+export function leiauteVigente(tpAmb: 1 | 2, dhEmi: string): LeiauteDps {
+  return tpAmb === 2 || dhEmi.slice(0, 10) >= PRODUCAO_NT009 ? 'nt009' : 'nt004';
+}
+
+/** Código do tipo de reembolso/repasse (NT 004: 01–04, 99) → tipo de ajuste da base (NT 009: 101–104, 199). */
+export const tipoAjusteBC = (tipoReeRepRes: string) => (tipoReeRepRes === '99' ? '199' : `1${tipoReeRepRes.padStart(2, '0')}`);
+
 export interface Endereco {
   cMun: string;      // IBGE 7 dígitos
   cep: string;
@@ -14,6 +30,8 @@ export interface Endereco {
 }
 
 export interface DadosDPS {
+  /** Força um leiaute; se omitido, usa leiauteVigente(tpAmb, dhEmi). */
+  leiaute?: LeiauteDps;
   tpAmb: 1 | 2;
   dhEmi: string;
   verAplic: string;
@@ -111,6 +129,22 @@ function reeRepResXml(l: NonNullable<DadosDPS['ibscbs']>['reeRepRes']): string {
   }).join(''));
 }
 
+/** NT 009: reembolsos/repasses viram documentos do grupo vAjusteBC (valores), aplicados pelo valor integral. */
+function ajusteBCXml(l: NonNullable<DadosDPS['ibscbs']>['reeRepRes']): string {
+  if (!l?.length) return '';
+  return g('vAjusteBC', g('documentos', l.map((r) => {
+    const d = r.doc;
+    const tipo = tipoAjusteBC(r.tipo);
+    const doc = d.t === 'DFE' ? g('dFeNacional', t('tipoChaveDFe', d.tipoChave), d.tipoChave === '9' ? t('xTipoChaveDFe', 'Outro') : '', t('chaveDFe', d.chave))
+      : d.t === 'FISCAL' ? g('docFiscalOutro', t('cMunDocFiscal', d.cMun), t('nDocFiscal', d.numero), t('xDocFiscal', d.descricao))
+      : g('docOutro', t('nDoc', d.numero), t('xDoc', d.descricao));
+    const fd = limparDoc(r.fornecedorDoc ?? undefined);
+    const fornec = fd && r.fornecedorNome ? g('fornec', docPessoa(fd), t('xNome', texto(r.fornecedorNome, 300))) : '';
+    return g('docAjusteBC', t('tpAjusteBC', tipo), tipo === '199' ? t('xTpAjusteBC', texto(r.descricao ?? 'Outros reembolsos', 150)) : '',
+      t('vTotDoc', dec(r.valor)), t('vAjusteAplic', dec(r.valor)), t('dtEmiDoc', r.dtEmi), t('dtCompDoc', r.dtComp), doc, fornec);
+  }).join('')));
+}
+
 function docPessoa(documento?: string): string {
   const d = limparDoc(documento);
   if (!d) return '';
@@ -133,7 +167,9 @@ function endereco(e?: Endereco): string {
  * Monta o XML da DPS (leiaute 1.01) na ordem exata do xs:sequence do XSD oficial.
  * Retorna o XML sem assinatura; a assinatura é aplicada em seguida sobre infDPS.
  */
-export function montarDps(d: DadosDPS): { xml: string; id: string } {
+export function montarDps(d: DadosDPS): { xml: string; id: string; leiaute: LeiauteDps } {
+  const leiaute = d.leiaute ?? leiauteVigente(d.tpAmb, d.dhEmi);
+  const nt009 = leiaute === 'nt009';
   const id = gerarIdDps(d.cLocEmi, d.prestador.documento, d.serie, d.nDPS);
   const p = d.prestador;
   const v = d.valores;
@@ -168,8 +204,10 @@ export function montarDps(d: DadosDPS): { xml: string; id: string } {
       'cServ',
       t('cTribNac', soDigitos(d.servico.cTribNac)),
       t('cTribMun', d.servico.cTribMun),
+      // NT 009: cNBS passa a vir antes de xDescServ
+      nt009 ? t('cNBS', soDigitos(d.servico.cNBS) || undefined) : '',
       t('xDescServ', texto(d.servico.xDescServ, 2000)),
-      t('cNBS', soDigitos(d.servico.cNBS) || undefined),
+      nt009 ? '' : t('cNBS', soDigitos(d.servico.cNBS) || undefined),
     ),
     d.servico.xInfComp ? g('infoCompl', t('xInfComp', texto(d.servico.xInfComp, 2000))) : '',
   );
@@ -185,6 +223,7 @@ export function montarDps(d: DadosDPS): { xml: string; id: string } {
     'valores',
     g('vServPrest', t('vServ', dec(v.vServ))),
     v.vDescIncond || v.vDescCond ? g('vDescCondIncond', t('vDescIncond', dec(v.vDescIncond || undefined)), t('vDescCond', dec(v.vDescCond || undefined))) : '',
+    nt009 ? ajusteBCXml(d.ibscbs?.reeRepRes) : '',
     g(
       'trib',
       g(
@@ -201,16 +240,25 @@ export function montarDps(d: DadosDPS): { xml: string; id: string } {
   );
 
   const ib = d.ibscbs;
-  const ibscbs = ib
-    ? g(
-        'IBSCBS',
-        t('finNFSe', ib.finNFSe ?? 0),
-        t('indFinal', ib.indFinal),
-        t('cIndOp', ib.cIndOp),
-        t('indDest', ib.indDest),
-        g('valores', reeRepResXml(ib.reeRepRes), g('trib', g('gIBSCBS', t('CST', ib.cst), t('cClassTrib', ib.cClassTrib)))),
-      )
-    : '';
+  const ibscbs = !ib
+    ? ''
+    : nt009
+      ? g(
+          'IBSCBS',
+          t('indFinal', ib.indFinal),
+          t('cIndOp', ib.cIndOp),
+          t('indDest', ib.indDest),
+          // NT 009 item 2.16: CST e cClassTrib direto em trib; reembolsos foram para valores/vAjusteBC
+          g('valores', g('trib', t('CST', ib.cst), t('cClassTrib', ib.cClassTrib))),
+        )
+      : g(
+          'IBSCBS',
+          t('finNFSe', ib.finNFSe ?? 0),
+          t('indFinal', ib.indFinal),
+          t('cIndOp', ib.cIndOp),
+          t('indDest', ib.indDest),
+          g('valores', reeRepResXml(ib.reeRepRes), g('trib', g('gIBSCBS', t('CST', ib.cst), t('cClassTrib', ib.cClassTrib)))),
+        );
 
   const inf =
     `<infDPS Id="${id}">` +
@@ -221,6 +269,8 @@ export function montarDps(d: DadosDPS): { xml: string; id: string } {
     t('nDPS', d.nDPS) +
     t('dCompet', d.dCompet) +
     t('tpEmit', 1) +
+    // NT 009: finNFSe obrigatório em infDPS (0 = NFS-e regular)
+    (nt009 ? t('finNFSe', ib?.finNFSe ?? 0) : '') +
     t('cLocEmi', d.cLocEmi) +
     prest +
     toma +
@@ -229,5 +279,5 @@ export function montarDps(d: DadosDPS): { xml: string; id: string } {
     ibscbs +
     `</infDPS>`;
 
-  return { id, xml: `<DPS xmlns="${NS_NFSE}" versao="${VERSAO_DPS}">${inf}</DPS>` };
+  return { id, leiaute, xml: `<DPS xmlns="${NS_NFSE}" versao="${VERSAO_DPS}">${inf}</DPS>` };
 }

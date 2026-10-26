@@ -25,6 +25,9 @@ const XSD = path.join(tmp, 'xsd');
 fs.cpSync(path.resolve('schemas/1.01'), XSD, { recursive: true });
 const tsPath = path.join(XSD, 'tiposSimples_v1.01.xsd');
 fs.writeFileSync(tsPath, fs.readFileSync(tsPath, 'utf8').replace('^0{0,4}\\d{1,5}$', '0{0,4}\\d{1,5}'));
+// Leiaute da NT 009 (release 1): XSD oficial de produção restrita, sem ajustes.
+const XSD_NT009 = path.resolve('schemas/nt009-r1');
+const xsdDaDps = (xml: string) => (/<tpEmit>\d<\/tpEmit>(<cMotivoEmisTI>\d+<\/cMotivoEmisTI>)?<finNFSe>/.test(xml) ? XSD_NT009 : XSD);
 const recebidos: string[] = [];
 let modo: 'ok' | 'rejeitar' | 'cair' | 'cair_mas_gerar' = 'ok';
 const geradas = new Map<string, string>();
@@ -39,7 +42,7 @@ const srv = https.createServer({ key: fs.readFileSync(`${tmp}/k.pem`), cert: fs.
       if (!xml.startsWith('<?xml version="1.0" encoding="UTF-8"?>')) return json(400, { erros: [{ Codigo: 'E1229', Descricao: 'Xml não está utilizando codificação UTF-8.' }] });
       recebidos.push(xml);
       fs.writeFileSync(`${tmp}/recebida.xml`, xml);
-      try { execSync(`xmllint --noout --schema ${XSD}/DPS_v1.01.xsd ${tmp}/recebida.xml 2>&1`); }
+      try { execSync(`xmllint --noout --schema ${xsdDaDps(xml)}/DPS_v1.01.xsd ${tmp}/recebida.xml 2>&1`); }
       catch (e: any) { return json(400, { erros: [{ Codigo: 'E1235', Descricao: 'XSD: ' + e.stdout?.toString().slice(0, 300) }] }); }
       if (modo === 'rejeitar') return json(400, { erros: [{ Codigo: 'E0312', Descricao: 'Informe o desdobro municipal' }] });
       const id = xml.match(/infDPS Id="(DPS\d{42})"/)![1];
@@ -174,12 +177,12 @@ test('fluxo completo: cadastro, emissão, rejeição, queda de rede, DANFSe e ca
   assert.equal(ret.json.status, 'AUTORIZADA', JSON.stringify(ret.json));
   assert.match(ret.json.xml_dps, /<piscofins><CST>01<\/CST><vBCPisCofins>1000\.00<\/vBCPisCofins><pAliqPis>0\.65<\/pAliqPis><pAliqCofins>3\.00<\/pAliqCofins><vPis>6\.50<\/vPis><vCofins>30\.00<\/vCofins><tpRetPisCofins>3<\/tpRetPisCofins><\/piscofins>/);
 
-  // reembolso/repasse de terceiros: grupo gReeRepRes validado no XSD, limitado ao valor do serviço
+  // reembolso/repasse de terceiros: na produção restrita (NT 009) vai em valores/vAjusteBC, validado no XSD, limitado ao valor do serviço
   const reemb = { tipo: '03', doc: { t: 'DFE', tipoChave: '2', chave: '35260512345678000195550010000012341000012345' }, fornecedorDoc: '12345678000195', fornecedorNome: 'Gráfica Exemplo Ltda', dtEmi: '2026-10-10', dtComp: '2026-10-01', valor: 300 };
   const comReemb = await call('POST', '/api/notas', { ...base, servicoId: sIbs.json.id, valor: 1000, reembolsos: [reemb, { tipo: '99', descricao: 'Taxa paga ao cartório', doc: { t: 'OUTRO', numero: 'REC-77', descricao: 'Recibo' }, dtEmi: '2026-10-11', dtComp: '2026-10-01', valor: 50 }] }, token);
   assert.equal(comReemb.json.status, 'AUTORIZADA', JSON.stringify(comReemb.json));
-  assert.match(comReemb.json.xml_dps, /<gReeRepRes><documentos><dFeNacional><tipoChaveDFe>2<\/tipoChaveDFe><chaveDFe>35260512345678000195550010000012341000012345<\/chaveDFe><\/dFeNacional><fornec><CNPJ>12345678000195<\/CNPJ><xNome>Gráfica Exemplo Ltda<\/xNome><\/fornec><dtEmiDoc>2026-10-10<\/dtEmiDoc><dtCompDoc>2026-10-01<\/dtCompDoc><tpReeRepRes>03<\/tpReeRepRes><vlrReeRepRes>300\.00<\/vlrReeRepRes><\/documentos>/);
-  assert.match(comReemb.json.xml_dps, /<xTpReeRepRes>Taxa paga ao cartório<\/xTpReeRepRes>/);
+  assert.match(comReemb.json.xml_dps, /<vAjusteBC><documentos><docAjusteBC><tpAjusteBC>103<\/tpAjusteBC><vTotDoc>300\.00<\/vTotDoc><vAjusteAplic>300\.00<\/vAjusteAplic><dtEmiDoc>2026-10-10<\/dtEmiDoc><dtCompDoc>2026-10-01<\/dtCompDoc><dFeNacional><tipoChaveDFe>2<\/tipoChaveDFe><chaveDFe>35260512345678000195550010000012341000012345<\/chaveDFe><\/dFeNacional><fornec><CNPJ>12345678000195<\/CNPJ><xNome>Gráfica Exemplo Ltda<\/xNome><\/fornec><\/docAjusteBC>/);
+  assert.match(comReemb.json.xml_dps, /<tpAjusteBC>199<\/tpAjusteBC><xTpAjusteBC>Taxa paga ao cartório<\/xTpAjusteBC>/);
   const excede = await call('POST', '/api/notas', { ...base, servicoId: sIbs.json.id, valor: 200, reembolsos: [reemb] }, token);
   assert.equal(excede.status, 400); assert.match(JSON.stringify(excede.json), /E0953/);
   const semIbs = await call('POST', '/api/notas', { ...base, reembolsos: [reemb] }, token);
