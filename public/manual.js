@@ -4,7 +4,7 @@
  * aqui (e a data/versão em MANUAL_VERSAO) antes de publicar a versão.
  * `corpo` é HTML escrito à mão (não recebe dados de usuário).
  */
-export const MANUAL_VERSAO = '3.8.0';
+export const MANUAL_VERSAO = '3.9.0';
 
 export const MANUAL = [
   {
@@ -200,6 +200,17 @@ export const MANUAL = [
       </ol>
       <p><strong>Reflexo em Despesas e balanço:</strong> toda <em>saída classificada</em> vira automaticamente uma despesa (marcada como “extrato”, com o PIX/débito deduzido da descrição). Reclassificar no extrato atualiza a despesa; excluir a importação remove as despesas dela. Ficam de fora as categorias <em>Cartão de crédito</em> (os gastos entram pela própria fatura) e <em>Transferências</em>. Entradas classificadas como <em>Outras receitas</em> (sem boleto) entram nas receitas do balanço.</p>
       <p class="dica">Importar o mesmo extrato duas vezes não duplica os lançamentos. Uma importação errada pode ser excluída na lista de importações.</p>`,
+  },
+  {
+    id: 'cartao', titulo: 'Fatura do cartão de crédito', resumo: 'Importar a fatura em PDF e levar os gastos para as despesas.',
+    corpo: `
+      <p>Em <strong>Financeiro &gt; Fatura do cartão</strong> importe o PDF da fatura do <strong>Ailos Cartões</strong>. O sistema lê cada compra (data, estabelecimento, cidade, parcela e final do cartão) e confere a soma com os totais impressos na própria fatura.</p>
+      <ol>
+        <li>Clique em <em>Importar fatura (PDF)</em>. Importar o mesmo arquivo duas vezes é recusado.</li>
+        <li>Classifique cada gasto (a categoria é lembrada para compras parecidas, inclusive no extrato bancário). Anuidade e encargos já entram como <em>Tarifas e juros</em>.</li>
+        <li>Os gastos classificados aparecem em <strong>Despesas e balanço</strong> como “Crédito”, no <em>mês do vencimento da fatura</em> (quando o dinheiro sai de fato), com a data da compra na descrição.</li>
+      </ol>
+      <p>O pagamento da fatura no extrato (categoria “Cartão de crédito”) não é contado outra vez. O pagamento da fatura anterior e créditos de estorno aparecem na lista, mas não viram despesa; um desconto de anuidade cancela a própria anuidade. Excluir a fatura remove as despesas geradas.</p>`,
   },
   {
     id: 'relatorios', titulo: 'Relatórios', resumo: 'Os relatórios disponíveis e qual data cada um usa.',

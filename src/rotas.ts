@@ -10,6 +10,7 @@ import { ativarLicenca, exigirLicenca, statusLicenca } from './licenca.js';
 import { BoletoAvulso, EntradaFaturamento, faturar, gerarBoletoAvulso, listarCobrancas } from './servicos/faturamento.js';
 import { ContaBancaria, obterModelosWhatsapp, reemitirCobranca, salvarModelosWhatsapp, boletoPdf, cancelarCobranca, gerarRemessaEmpresa, listarRemessas, marcarPago, obterCobranca, obterConta, obterRemessa, processarRetorno, salvarConta } from './servicos/cobranca.js';
 import { Despesa, criarDespesa, editarDespesa, excluirDespesa, listarCategorias, listarDespesas, painelFinanceiro, salvarCategorias } from './servicos/financeiro.js';
+import { ClassificacaoCartao, classificarCartao, excluirFatura, faturasDoMes, importarFatura } from './servicos/cartao.js';
 import { Classificacao, balancoExtrato, candidatosBoleto, classificar, conciliar, excluirImportacao, extratoDoMes, importarExtrato } from './servicos/extrato.js';
 import { catalogo, gerarRelatorio, relatorioCsv, relatorioPdf } from './servicos/relatorios.js';
 import { configurarAgenda, executarItem, executarProntas, listarAgenda, pularItem, resumoAgenda } from './servicos/agenda.js';
@@ -689,6 +690,28 @@ export async function rotas(app: FastifyInstance) {
     api.delete('/api/empresas/:id/extrato/importacoes/:iid', async (req) => {
       const p = req.params as any; checarEmpresa(req, Number(p.id));
       excluirImportacao(Number(p.id), Number(p.iid)); return { ok: true };
+    });
+
+    // ---------- Fatura do cartão de crédito (PDF Ailos Cartões) ----------
+    api.post('/api/empresas/:id/cartao/importar', { bodyLimit: 12 * 1024 * 1024 }, async (req) => {
+      const id = Number((req.params as any).id); checarEmpresa(req, id);
+      const d = z.object({ nome: z.string().max(200).default('fatura.pdf'), pdfBase64: z.string().min(100) }).parse(req.body);
+      const pdf = Buffer.from(d.pdfBase64, 'base64');
+      if (pdf.subarray(0, 4).toString() !== '%PDF') throw new ErroNegocio('O arquivo não é um PDF.');
+      return importarFatura(id, d.nome, pdf);
+    });
+    api.get('/api/empresas/:id/cartao', async (req) => {
+      const id = Number((req.params as any).id); checarEmpresa(req, id);
+      const mes = (req.query as any).mes;
+      return faturasDoMes(id, /^\d{4}-\d{2}$/.test(mes) ? mes : new Date(Date.now() - 3 * 3600e3).toISOString().slice(0, 7));
+    });
+    api.put('/api/empresas/:id/cartao/:lid', async (req) => {
+      const p = req.params as any; checarEmpresa(req, Number(p.id));
+      classificarCartao(Number(p.id), Number(p.lid), ClassificacaoCartao.parse(req.body)); return { ok: true };
+    });
+    api.delete('/api/empresas/:id/cartao/faturas/:fid', async (req) => {
+      const p = req.params as any; checarEmpresa(req, Number(p.id));
+      excluirFatura(Number(p.id), Number(p.fid)); return { ok: true };
     });
 
     /** Pacote para a contabilidade: XML/PDF das notas do período e OFX da movimentação. */

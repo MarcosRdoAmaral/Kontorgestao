@@ -69,6 +69,7 @@ const REGRAS: Regra[] = [
   { m: 'GET', r: /^\/api\/empresas\/\d+\/painel$/, mod: ['painel'] },
   { r: /^\/api\/empresas\/\d+\/(despesas(\/\d+)?|despesas-categorias)$/, mod: ['despesas'] },
   { r: /^\/api\/empresas\/\d+\/extrato(\/.*)?$/, mod: ['despesas'] },
+  { r: /^\/api\/empresas\/\d+\/cartao(\/.*)?$/, mod: ['despesas'] },
   { m: 'GET', r: /^\/api\/empresas\/\d+\/tributacao\/tipos(\/\d+\/efetiva)?$/, mod: ['tributacao', 'servicos', 'compras', 'emitir'] },
   { r: /^\/api\/tributacao\/impostos(\/[A-Z_]+)?$|^\/api\/empresas\/\d+\/tributacao\/.*$/, mod: ['tributacao'] },
   { r: /^\/api\/empresas\/\d+\/compras(\/importar-xml)?$|^\/api\/compras\/\d+(\/xml)?$/, mod: ['compras'] },

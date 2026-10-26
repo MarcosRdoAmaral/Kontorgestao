@@ -9,6 +9,7 @@ import { db, migrar } from './db.js';
 import { garantirAdmin, garantirMaster } from './auth.js';
 import { rotas } from './rotas.js';
 import { sincronizarDespesasDoExtrato } from './servicos/extrato.js';
+import { sincronizarDespesasDoCartao } from './servicos/cartao.js';
 import { garantirTiposDosPerfis, migrarServicosLegados } from './servicos/tributacao.js';
 import { ErroNegocio } from './servicos/emissao.js';
 import { backupAutomatico } from './servicos/backup.js';
@@ -19,7 +20,7 @@ export async function criarApp() {
   migrar();
   migrarServicosLegados();
   garantirTiposDosPerfis();
-  for (const e of db.prepare('SELECT id FROM empresas').all() as { id: number }[]) sincronizarDespesasDoExtrato(e.id);
+  for (const e of db.prepare('SELECT id FROM empresas').all() as { id: number }[]) { sincronizarDespesasDoExtrato(e.id); sincronizarDespesasDoCartao(e.id); }
   garantirAdmin();
   garantirMaster();
 

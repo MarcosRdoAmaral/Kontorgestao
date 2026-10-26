@@ -613,6 +613,39 @@ const migracoes: string[] = [
   ALTER TABLE despesas ADD COLUMN origem TEXT NOT NULL DEFAULT 'MANUAL';
   ALTER TABLE despesas ADD COLUMN extrato_lancamento_id INTEGER REFERENCES extrato_lancamentos(id) ON DELETE SET NULL;
   CREATE UNIQUE INDEX idx_despesas_extrato ON despesas(extrato_lancamento_id) WHERE extrato_lancamento_id IS NOT NULL;`,
+  // 24: fatura de cartão de crédito importada (PDF); os gastos classificados espelham em despesas (forma CRÉDITO)
+  `CREATE TABLE cartao_faturas (
+    id INTEGER PRIMARY KEY,
+    empresa_id INTEGER NOT NULL REFERENCES empresas(id),
+    arquivo TEXT NOT NULL,
+    hash TEXT NOT NULL,
+    referencia TEXT,
+    vencimento TEXT NOT NULL,
+    titular TEXT, conta_cartao TEXT,
+    total_fatura REAL, pagamento_minimo REAL, despesas_debito REAL,
+    qtd INTEGER NOT NULL,
+    criado_em TEXT NOT NULL DEFAULT (datetime('now')),
+    UNIQUE (empresa_id, hash)
+  );
+  CREATE TABLE cartao_lancamentos (
+    id INTEGER PRIMARY KEY,
+    empresa_id INTEGER NOT NULL REFERENCES empresas(id),
+    fatura_id INTEGER NOT NULL REFERENCES cartao_faturas(id) ON DELETE CASCADE,
+    data TEXT NOT NULL,
+    descricao TEXT NOT NULL,
+    cidade TEXT,
+    parcela_atual INTEGER, parcela_total INTEGER,
+    cartao_final TEXT,
+    valor REAL NOT NULL,                      -- positivo = gasto, negativo = crédito/estorno
+    tipo TEXT NOT NULL CHECK (tipo IN ('COMPRA','ANUIDADE','ENCARGO','CREDITO','PAGAMENTO')),
+    categoria TEXT,
+    categoria_origem TEXT,
+    chave TEXT NOT NULL,
+    UNIQUE (empresa_id, chave)
+  );
+  CREATE INDEX ix_cartao_fatura ON cartao_lancamentos(fatura_id);
+  ALTER TABLE despesas ADD COLUMN cartao_lancamento_id INTEGER REFERENCES cartao_lancamentos(id) ON DELETE SET NULL;
+  CREATE UNIQUE INDEX idx_despesas_cartao ON despesas(cartao_lancamento_id) WHERE cartao_lancamento_id IS NOT NULL;`,
 ];
 
 export function migrar(): void {

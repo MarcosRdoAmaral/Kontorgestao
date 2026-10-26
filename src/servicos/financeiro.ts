@@ -36,7 +36,7 @@ export function salvarCategorias(empresaId: number, nomes: string[]) {
   })();
 }
 export const listarDespesas = (empresaId: number, mes: string) =>
-  db.prepare('SELECT id, data, categoria, descricao, valor, forma_pagamento, origem, extrato_lancamento_id FROM despesas WHERE empresa_id = ? AND substr(data,1,7) = ? ORDER BY data DESC, id DESC').all(empresaId, mes);
+  db.prepare('SELECT id, data, categoria, descricao, valor, forma_pagamento, origem, extrato_lancamento_id, cartao_lancamento_id FROM despesas WHERE empresa_id = ? AND substr(data,1,7) = ? ORDER BY data DESC, id DESC').all(empresaId, mes);
 export function criarDespesa(empresaId: number, usuarioId: number, d: z.infer<typeof Despesa>) {
   return Number(db.prepare('INSERT INTO despesas (empresa_id, data, categoria, descricao, valor, criado_por, forma_pagamento) VALUES (?,?,?,?,?,?,?)').run(empresaId, d.data, d.categoria, d.descricao ?? null, d.valor, usuarioId, d.forma_pagamento ?? null).lastInsertRowid);
 }
@@ -48,7 +48,7 @@ export function editarDespesa(empresaId: number, id: number, d: z.infer<typeof D
 /** Despesa espelhada do extrato bancário muda no Extrato e conciliação, não aqui. */
 function conferirNaoEspelho(empresaId: number, id: number) {
   const x = db.prepare('SELECT origem FROM despesas WHERE id = ? AND empresa_id = ?').get(id, empresaId) as { origem: string } | undefined;
-  if (x?.origem === 'EXTRATO') throw new ErroNegocio('Este lançamento veio do extrato bancário: altere a categoria em Extrato e conciliação.');
+  if (x && x.origem !== 'MANUAL') throw new ErroNegocio('Este lançamento veio do extrato ou da fatura do cartão: altere a categoria na tela de origem.');
 }
 export function excluirDespesa(empresaId: number, id: number) {
   conferirNaoEspelho(empresaId, id);
