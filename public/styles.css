@@ -131,6 +131,19 @@ button:disabled { opacity: .5; cursor: not-allowed; }
 .carimbo.CANCELADA { color: var(--tinta-2); background: var(--cinza-fundo); text-decoration: line-through; }
 .carimbo.REJEITADA { color: var(--vermelho); background: var(--vermelho-fundo); }
 .carimbo.ERRO_COMUNICACAO, .carimbo.PENDENTE { color: var(--ambar); background: var(--ambar-fundo); }
+.carimbo.PRONTA { color: var(--verde); background: var(--verde-fundo); }
+.carimbo.NOVA, .carimbo.AGUARDANDO_XML { color: var(--ambar); background: var(--ambar-fundo); }
+.carimbo.CIENCIA_RECUSADA, .carimbo.CANCELADA_IMPORTADA { color: var(--vermelho); background: var(--vermelho-fundo); }
+.carimbo.IMPORTADA, .carimbo.DENEGADA { color: var(--tinta-2); background: var(--cinza-fundo); }
+.cartao.sefaz { margin: 16px 0; border-bottom-width: 1px; }
+.cartao.sefaz h2 { margin: 0 0 4px; }
+.sefaz-topo { display: flex; flex-wrap: wrap; gap: 12px; justify-content: space-between; align-items: flex-start; margin-bottom: 12px; }
+.sefaz-topo > div:first-child { flex: 1 1 320px; }
+.sefaz-acoes { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.sefaz-acoes .check { margin: 0; }
+.cartao.sefaz .banner.perigo { background: var(--vermelho-fundo); color: var(--vermelho); border: 1px solid currentColor; }
+.cartao.sefaz .acoes { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 12px; }
+.conexao-sefaz h3 { margin: 18px 0 6px; font-size: .95rem; }
 .carimbo.grande { font-size: 1.1rem; padding: 6px 16px; border-width: 3px; transform: rotate(-4deg); margin: 4px 0 12px; }
 
 /* Painel */

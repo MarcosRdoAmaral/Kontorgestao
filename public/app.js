@@ -1442,7 +1442,7 @@ async function telaCompras() {
   const opcTipo = () => `<option value="">${tiposEntrada.some((t) => t.padrao) ? 'Tributação padrão da empresa' : 'Sem tributação'}</option>` + tiposEntrada.map((t) => `<option value="${t.id}">${esc(t.nome)}</option>`).join('');
   const opcCat = (sel) => cat.map((c) => `<option ${c === sel ? 'selected' : ''}>${esc(c)}</option>`).join('');
   conteudo.innerHTML = `
-    <div class="topo"><div><h1>Compras</h1><p class="sutil">Notas fiscais de mercadorias que a empresa comprou. Importe o XML da NF-e (um ou vários arquivos) ou lance a compra manualmente.</p></div>
+    <div class="topo"><div><h1>Compras</h1><p class="sutil">Notas fiscais de mercadorias que a empresa comprou. Busque as notas emitidas contra o CNPJ direto na SEFAZ, importe o XML da NF-e (um ou vários arquivos) ou lance a compra manualmente.</p></div>
       <div><label>Mês <input type="month" id="mes-comp" value="${mes}"></label>
         <button class="primario" id="imp-xml">Importar XML da NF-e</button><input type="file" id="arq-xml" accept=".xml,text/xml,application/xml" multiple hidden>
         <button id="nova-compra">Lançar compra manual</button></div></div>
@@ -1450,12 +1450,14 @@ async function telaCompras() {
       <div class="cartao"><div class="sutil">Total comprado</div><div class="valor">${compacto(d.total)}</div><div class="dica">${d.compras.length} compra(s) em ${nomeMes(mes)}</div></div>
       <div class="cartao"><div class="sutil">Maiores fornecedores</div>${d.fornecedores.length ? d.fornecedores.map((f) => `<div class="dica">${esc(f.nome)} · <strong>${brl(f.total)}</strong></div>`).join('') : '<div class="dica">—</div>'}</div>
     </div>
+    <div id="painel-sefaz"></div>
     ${d.compras.length ? `<div class="rolagem"><table class="tabela"><thead><tr><th>Emissão</th><th>Fornecedor</th><th>NF</th><th class="num">Itens</th><th class="num">Total</th><th>Despesas</th><th></th></tr></thead><tbody>
       ${d.compras.map((c) => `<tr class="clicavel" data-c="${c.id}"><td>${dataBr(c.emissao)}</td><td>${esc(c.fornecedor_nome)}${c.fornecedor_documento ? `<br><span class="dica">${fmtDoc(c.fornecedor_documento)}</span>` : ''}</td>
         <td>${esc(c.numero ?? '')}${c.origem === 'MANUAL' ? ' <span class="dica">(manual)</span>' : ''}</td><td class="num">${c.itens || ''}</td><td class="num">${brl(c.valor_total)}</td>
         <td>${c.despesas ? `<span class="cor-verde">lançadas (${esc(c.categoria ?? '')})</span>` : '<span class="dica">não lançadas</span>'}</td><td><button data-ver="${c.id}">Abrir</button></td></tr>`).join('')}
     </tbody></table></div>` : '<div class="vazio">Nenhuma compra neste mês. Importe o XML da NF-e recebida do fornecedor.</div>'}`;
   $('#mes-comp').onchange = (e) => { telaCompras.mes = e.target.value; telaCompras(); };
+  painelSefaz(base, { opcCat, opcTipo, tiposEntrada });
   conteudo.querySelectorAll('[data-ver]').forEach((b) => (b.onclick = (ev) => { ev.stopPropagation(); detalheCompra(Number(b.dataset.ver), telaCompras); }));
   conteudo.querySelectorAll('tr[data-c]').forEach((tr) => (tr.onclick = () => detalheCompra(Number(tr.dataset.c), telaCompras)));
 
@@ -1508,6 +1510,191 @@ async function telaCompras() {
         dlg.close(); aviso('Compra lançada.'); telaCompras();
       } catch (err) { $('#erro-comp').textContent = mensagemErro(err); }
     };
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Compras: NF-e emitidas contra o CNPJ, direto da SEFAZ (Distribuição DF-e)
+// ---------------------------------------------------------------------------
+const SIT_SEFAZ = {
+  PRONTA: 'Pronta para importar', NOVA: 'Ciência pendente', AGUARDANDO_XML: 'Aguardando XML', CIENCIA_RECUSADA: 'Ciência recusada',
+  CANCELADA: 'Cancelada pelo fornecedor', CANCELADA_IMPORTADA: 'Cancelada após importar', IMPORTADA: 'Importada', DENEGADA: 'Denegada',
+};
+const dataHoraBr = (iso) => (iso ? new Date(iso).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : '');
+const horaBr = (iso) => (iso ? new Date(iso).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) : '');
+
+async function painelSefaz(base, opc) {
+  const el = $('#painel-sefaz');
+  if (!el) return;
+  const url = `${base}/compras/sefaz`;
+  const adm = estado.usuario?.tipo === 'adm';
+  painelSefaz.todas ??= false;
+  let d;
+  try { d = await api('GET', `${url}${painelSefaz.todas ? '?todas=1' : ''}`); } catch (e) { el.innerHTML = `<p class="dica erro">${esc(mensagemErro(e))}</p>`; return; }
+  if (!$('#painel-sefaz')) return; // usuário trocou de tela
+  if (!d.temCertificado) {
+    el.innerHTML = `<div class="cartao sefaz"><h2>Notas na SEFAZ</h2><p class="dica">Para o sistema buscar sozinho as NF-e emitidas contra o CNPJ desta empresa, cadastre o certificado digital A1 em <a href="#/empresas">Empresas</a>.</p></div>`;
+    return;
+  }
+  const situacao = !d.iniciada
+    ? 'Ainda não buscado. Ao buscar, o sistema registra a <strong>Ciência da Operação</strong> de cada nota nova, que libera o XML completo na SEFAZ.'
+    : `Última busca ${dataHoraBr(d.ultimaConsulta) || '—'}${d.ultimoResultado ? `: ${esc(d.ultimoResultado)}` : ''}.${d.proximaConsulta ? ` A SEFAZ libera nova consulta às ${horaBr(d.proximaConsulta)}.` : ''}`;
+  const erroRecente = d.ultimoErro && (!d.ultimaConsulta || d.ultimoErro.quando > d.ultimaConsulta) ? d.ultimoErro : null;
+  const ORDEM = { CANCELADA_IMPORTADA: 0, PRONTA: 1, CIENCIA_RECUSADA: 2, NOVA: 3, AGUARDANDO_XML: 4, IMPORTADA: 5, CANCELADA: 6, DENEGADA: 7 };
+  d.notas.sort((a, b) => ORDEM[a.status] - ORDEM[b.status] || String(b.emissao).localeCompare(String(a.emissao)));
+  const selecionaveis = d.notas.filter((n) => n.status === 'PRONTA');
+  const linha = (n) => `<tr data-ch="${n.chave}">
+      <td>${n.status === 'PRONTA' ? `<input type="checkbox" class="sel-sefaz" value="${n.chave}" aria-label="Selecionar NF ${esc(n.numero ?? '')}">` : ''}</td>
+      <td>${dataBr(n.emissao)}</td>
+      <td>${esc(n.emitente_nome ?? '—')}${n.emitente_documento ? `<br><span class="dica">${fmtDoc(n.emitente_documento)}</span>` : ''}</td>
+      <td>${esc(n.numero ?? '')}${n.serie ? `<span class="dica"> série ${esc(n.serie)}</span>` : ''}</td>
+      <td class="num">${n.valor != null ? brl(n.valor) : '—'}</td>
+      <td><span class="carimbo ${n.status}" ${n.ciencia_erro ? `title="${esc(n.ciencia_erro)}"` : ''}>${SIT_SEFAZ[n.status]}</span>${n.status === 'CIENCIA_RECUSADA' ? `<br><span class="dica">${esc(n.ciencia_erro)}</span>` : ''}</td>
+      <td class="acoes-linha">${n.status === 'PRONTA' ? `<button class="primario" data-imp="${n.chave}">Importar</button>` : ''}${n.compra_id ? `<button data-abrir="${n.compra_id}">Abrir compra</button>` : ''}${n.tem_xml ? `<button data-xml="${n.chave}">XML</button>` : ''}${n.status === 'CIENCIA_RECUSADA' ? `<button data-ciencia="${n.chave}">Reenviar ciência</button>` : ''}${!n.compra_id ? `<button data-ocultar="${n.chave}" data-v="${n.oculta ? 0 : 1}" title="${n.oculta ? 'Voltar a mostrar' : 'Esconder esta nota (ex.: não é compra da empresa)'}">${n.oculta ? 'Mostrar' : 'Ocultar'}</button>` : ''}</td></tr>`;
+  el.innerHTML = `<div class="cartao sefaz">
+    <div class="sefaz-topo"><div><h2>Notas na SEFAZ</h2><p class="dica">${situacao}</p></div>
+      <div class="sefaz-acoes"><button class="primario" id="sefaz-buscar">Buscar agora</button><button id="sefaz-chave">Buscar pela chave</button>
+        <label class="check"><input type="checkbox" id="sefaz-auto" ${d.automatica ? 'checked' : ''}> Buscar automaticamente</label>
+        ${adm ? '<button id="sefaz-conexao" title="Cadeia de certificados ICP-Brasil">Conexão com a SEFAZ</button>' : ''}</div></div>
+    ${erroRecente ? `<div class="banner perigo">Erro na última busca (${dataHoraBr(erroRecente.quando)}): ${esc(erroRecente.mensagem)}</div>` : ''}
+    ${d.contagem.canceladasImportadas ? `<div class="banner perigo"><strong>Atenção:</strong> ${d.contagem.canceladasImportadas} nota(s) já importada(s) em Compras foi(ram) <strong>cancelada(s) pelo fornecedor</strong>. Confira a compra e as despesas lançadas.</div>` : ''}
+    ${d.notas.length ? `<div class="rolagem"><table class="tabela"><thead><tr><th>${selecionaveis.length ? '<input type="checkbox" id="sel-todas-sefaz" aria-label="Selecionar todas">' : ''}</th><th>Emissão</th><th>Fornecedor</th><th>NF</th><th class="num">Valor</th><th>Situação</th><th></th></tr></thead>
+      <tbody>${d.notas.map(linha).join('')}</tbody></table></div>`
+      : `<p class="dica">${d.iniciada ? 'Nenhuma nota pendente de importação.' : ''}</p>`}
+    <div class="acoes">${selecionaveis.length ? `<button class="primario" id="sefaz-importar" disabled>Importar selecionadas</button>` : ''}
+      <button id="sefaz-todas">${painelSefaz.todas ? 'Mostrar só as pendentes' : 'Mostrar também importadas e ocultas'}</button>
+      ${d.contagem.aguardando ? `<span class="dica">${d.contagem.aguardando} nota(s) aguardando o XML completo: ele chega numa próxima busca (a SEFAZ libera depois da ciência).</span>` : ''}</div>
+  </div>`;
+
+  const recarregar = () => painelSefaz(base, opc);
+  const btImp = $('#sefaz-importar');
+  const marcadas = () => [...el.querySelectorAll('.sel-sefaz:checked')].map((c) => c.value);
+  const atualizarBotao = () => { if (btImp) { const n = marcadas().length; btImp.disabled = !n; btImp.textContent = n ? `Importar selecionadas (${n})` : 'Importar selecionadas'; } };
+  el.querySelectorAll('.sel-sefaz').forEach((c) => (c.onchange = atualizarBotao));
+  const todasCb = $('#sel-todas-sefaz');
+  if (todasCb) todasCb.onchange = () => { el.querySelectorAll('.sel-sefaz').forEach((c) => (c.checked = todasCb.checked)); atualizarBotao(); };
+  if (btImp) btImp.onclick = () => importarDaSefaz(base, marcadas(), opc, recarregar);
+  el.querySelectorAll('[data-imp]').forEach((b) => (b.onclick = () => importarDaSefaz(base, [b.dataset.imp], opc, recarregar)));
+  el.querySelectorAll('[data-abrir]').forEach((b) => (b.onclick = () => detalheCompra(Number(b.dataset.abrir), telaCompras)));
+  el.querySelectorAll('[data-xml]').forEach((b) => (b.onclick = () => baixar(`${url}/xml/${b.dataset.xml}`, `NFe-${b.dataset.xml}.xml`)));
+  el.querySelectorAll('[data-ocultar]').forEach((b) => (b.onclick = async () => {
+    try { await api('POST', `${url}/ocultar`, { chave: b.dataset.ocultar, oculta: b.dataset.v === '1' }); recarregar(); } catch (e) { aviso(mensagemErro(e)); }
+  }));
+  el.querySelectorAll('[data-ciencia]').forEach((b) => (b.onclick = async () => {
+    b.disabled = true;
+    try { const r = await api('POST', `${url}/ciencia`, { chaves: [b.dataset.ciencia] }); aviso(r.ciencias ? 'Ciência registrada. O XML completo chega numa próxima busca.' : 'A SEFAZ recusou de novo a ciência desta nota.'); recarregar(); }
+    catch (e) { tratarErroSefaz(e, recarregar); b.disabled = false; }
+  }));
+  $('#sefaz-todas').onclick = () => { painelSefaz.todas = !painelSefaz.todas; recarregar(); };
+  $('#sefaz-auto').onchange = async (e) => {
+    try { await api('PUT', `${url}/config`, { automatica: e.target.checked }); aviso(e.target.checked ? 'Busca automática ligada: o sistema consulta a SEFAZ sozinho, respeitando o intervalo de 1 hora.' : 'Busca automática desligada.'); }
+    catch (err) { e.target.checked = !e.target.checked; aviso(mensagemErro(err)); }
+  };
+  $('#sefaz-conexao')?.addEventListener('click', () => dialogoConexaoSefaz(recarregar));
+  $('#sefaz-buscar').onclick = async (e) => {
+    const b = e.target; b.disabled = true; b.textContent = 'Buscando…';
+    try {
+      const r = await api('POST', `${url}/buscar`);
+      aviso(r.consultou ? `SEFAZ: ${r.resumo}.` : `A SEFAZ só libera nova consulta às ${horaBr(r.proximaConsulta)} (intervalo de 1 hora).${r.ciencias ? ` Ciência registrada em ${r.ciencias} nota(s).` : ''}`);
+      recarregar();
+    } catch (err) { tratarErroSefaz(err, recarregar); b.disabled = false; b.textContent = 'Buscar agora'; }
+  };
+  $('#sefaz-chave').onclick = () => abrirDialogo(`<form id="form-chave"><h2>Buscar NF-e pela chave</h2>
+      <p class="dica">Para uma nota específica que o fornecedor avisou. A empresa precisa ser a destinatária.</p>
+      <label>Chave de acesso (44 dígitos) <input name="chave" required inputmode="numeric" autocomplete="off" placeholder="0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000"></label>
+      <p class="erro" id="erro-chave"></p>
+      <div class="acoes"><button class="primario" type="submit">Buscar</button><button type="button" data-fechar>Cancelar</button></div></form>`, (dlg) => {
+    dlg.querySelector('#form-chave').onsubmit = async (ev) => {
+      ev.preventDefault();
+      const chave = ev.target.chave.value.replace(/\D/g, '');
+      if (chave.length !== 44) { $('#erro-chave').textContent = `A chave tem ${chave.length} dígito(s); são 44.`; return; }
+      const bt = ev.target.querySelector('[type=submit]'); bt.disabled = true; bt.textContent = 'Buscando…';
+      try {
+        const r = await api('POST', `${url}/chave`, { chave });
+        dlg.close();
+        aviso(r.nota ? `NF ${r.nota.numero} — ${r.nota.emitente_nome ?? ''}: ${SIT_SEFAZ[r.nota.status]}.` : 'Consulta feita.');
+        painelSefaz.todas = r.nota?.status === 'IMPORTADA'; recarregar();
+      } catch (err) {
+        if (err.detalhes?.cadeia) { dlg.close(); tratarErroSefaz(err, recarregar); return; }
+        $('#erro-chave').textContent = mensagemErro(err); bt.disabled = false; bt.textContent = 'Buscar';
+      }
+    };
+  });
+}
+
+function tratarErroSefaz(err, depois) {
+  if (!err.detalhes?.cadeia) { aviso(mensagemErro(err)); return; }
+  if (estado.usuario?.tipo === 'adm') dialogoConexaoSefaz(depois, err.message);
+  else aviso(`${err.message} Peça ao administrador do sistema.`);
+}
+
+function importarDaSefaz(base, chaves, opc, depois) {
+  if (!chaves.length) return;
+  abrirDialogo(`<form id="form-imp-sefaz"><h2>Importar ${chaves.length} NF-e da SEFAZ</h2>
+    <label class="check"><input type="checkbox" name="gerar" checked> <span>Lançar as parcelas (ou o total, se à vista) nas <strong>despesas</strong>, na data de vencimento</span></label>
+    <label>Categoria da despesa <select name="categoria">${opc.opcCat('Material e equipamentos')}</select></label>
+    ${opc.tiposEntrada.length ? `<label>Tributação <select name="tipo">${opc.opcTipo()}</select></label>` : ''}
+    <div id="res-imp-sefaz"></div>
+    <div class="acoes"><button class="primario" type="submit">Importar</button><button type="button" data-fechar>Fechar</button></div></form>`, (dlg) => {
+    dlg.addEventListener('close', () => { telaCompras(); }, { once: true });
+    dlg.querySelector('#form-imp-sefaz').onsubmit = async (e) => {
+      e.preventDefault();
+      const f = e.target, btn = f.querySelector('[type=submit]');
+      btn.disabled = true; btn.textContent = 'Importando…';
+      try {
+        const r = await api('POST', `${base}/compras/sefaz/importar`, { chaves, gerarDespesas: f.gerar.checked, categoria: f.categoria.value, tipoDocumentoId: f.tipo?.value ? Number(f.tipo.value) : null });
+        f.querySelector('#res-imp-sefaz').innerHTML = `<ul class="lista-simples">${r.resultados.map((x) => x.ok
+          ? `<li class="cor-verde">${esc(x.mensagem)} · ${brl(x.valor)}${(x.alertas ?? []).map((a) => `<br><span class="aviso-txt">⚠ ${esc(a)}</span>`).join('')} <button type="button" data-abrir-compra="${x.compraId}">Abrir compra</button></li>`
+          : `<li class="cor-vermelho">${esc(x.mensagem)}</li>`).join('')}</ul>`;
+        f.querySelectorAll('[data-abrir-compra]').forEach((b) => (b.onclick = () => detalheCompra(Number(b.dataset.abrirCompra), telaCompras)));
+        btn.textContent = `Concluído: ${r.importadas} de ${chaves.length}`;
+        depois?.();
+      } catch (err) { f.querySelector('#res-imp-sefaz').innerHTML = `<p class="erro">${esc(mensagemErro(err))}</p>`; btn.disabled = false; btn.textContent = 'Importar'; }
+    };
+  });
+}
+
+/** Administrador: cadeia ICP-Brasil usada só na conexão com a SEFAZ. */
+async function dialogoConexaoSefaz(depois, motivo) {
+  let s;
+  try { s = await api('GET', '/api/sefaz/conexao'); } catch (e) { aviso(mensagemErro(e)); return; }
+  abrirDialogo(`<div class="conexao-sefaz"><h2>Conexão com a SEFAZ</h2>
+    ${motivo ? `<div class="banner perigo">${esc(motivo)}</div>` : ''}
+    <p class="sutil">O servidor da SEFAZ usa certificado da <strong>ICP-Brasil</strong>, que nem todo computador reconhece. Para conectar com segurança, o sistema guarda a cadeia ICP-Brasil e a usa só na conexão com a SEFAZ.</p>
+    <dl class="dados"><dt>Cadeia ICP-Brasil guardada</dt><dd>${s.cadeiaIcp ? `${s.cadeiaIcp} certificado(s)${s.raizesIcp.length ? ` — raiz: ${s.raizesIcp.map(esc).join(', ')}` : ''}` : '<span class="cor-vermelho">nenhuma</span>'}</dd>
+      <dt>Verificar o servidor</dt><dd>${s.verificarServidor ? '<span class="cor-verde">ligado (recomendado)</span>' : '<span class="cor-vermelho">desligado</span>'}</dd></dl>
+    <h3>1. Baixar automaticamente</h3>
+    <p class="dica">Baixa a cadeia do repositório oficial do ITI (acraiz.icpbrasil.gov.br).</p>
+    <button id="cx-baixar" class="primario">Baixar cadeia ICP-Brasil</button>
+    <h3>2. Ou enviar o arquivo</h3>
+    <p class="dica">Se o download automático falhar, baixe pelo navegador o arquivo <em>ACcompactado.zip</em> (todas as ACs) ou as raízes .crt no site do ITI, ou a cadeia no Portal da NF-e, e envie aqui. Aceita .zip, .crt, .cer, .pem e .p7b.</p>
+    <input type="file" id="cx-arq" accept=".zip,.crt,.cer,.pem,.p7b,.p7c">
+    <h3>Último recurso</h3>
+    <label class="check"><input type="checkbox" id="cx-verificar" ${s.verificarServidor ? '' : 'checked'}> <span>Conectar <strong>sem verificar</strong> o certificado do servidor da SEFAZ (não recomendado; a conexão continua criptografada)</span></label>
+    <p class="erro" id="cx-erro"></p>
+    <div class="acoes">${s.cadeiaIcp ? '<button id="cx-apagar">Apagar cadeia guardada</button>' : ''}<button data-fechar>Fechar</button></div></div>`, (dlg) => {
+    const reabrir = (msg) => { dlg.close(); aviso(msg); dialogoConexaoSefaz(depois); depois?.(); };
+    const erro = (e) => { $('#cx-erro').textContent = mensagemErro(e); };
+    $('#cx-baixar').onclick = async (e) => {
+      e.target.disabled = true; e.target.textContent = 'Baixando…';
+      try { const r = await api('POST', '/api/sefaz/conexao/baixar-cadeia'); reabrir(`Cadeia ICP-Brasil atualizada: ${r.cadeiaIcp} certificado(s). Tente buscar de novo.`); }
+      catch (err) { erro(err); e.target.disabled = false; e.target.textContent = 'Baixar cadeia ICP-Brasil'; }
+    };
+    $('#cx-arq').onchange = async (e) => {
+      const arq = e.target.files[0]; if (!arq) return;
+      const fd = new FormData(); fd.append('arquivo', arq);
+      try { const r = await api('POST', '/api/sefaz/conexao/cadeia', fd); reabrir(`${r.lidos} certificado(s) lido(s); cadeia com ${r.cadeiaIcp}. Tente buscar de novo.`); }
+      catch (err) { erro(err); e.target.value = ''; }
+    };
+    $('#cx-verificar').onchange = async (e) => {
+      if (e.target.checked && !confirm('Desligar a verificação do servidor da SEFAZ? Use só se a cadeia ICP-Brasil não puder ser instalada.')) { e.target.checked = false; return; }
+      try { await api('PUT', '/api/sefaz/conexao', { verificarServidor: !e.target.checked }); reabrir(e.target.checked ? 'Verificação do servidor desligada.' : 'Verificação do servidor ligada.'); }
+      catch (err) { erro(err); e.target.checked = !e.target.checked; }
+    };
+    $('#cx-apagar')?.addEventListener('click', async () => {
+      if (!confirm('Apagar a cadeia ICP-Brasil guardada?')) return;
+      try { await api('DELETE', '/api/sefaz/conexao/cadeia'); reabrir('Cadeia apagada.'); } catch (err) { erro(err); }
+    });
   });
 }
 

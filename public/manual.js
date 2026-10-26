@@ -4,7 +4,7 @@
  * aqui (e a data/versão em MANUAL_VERSAO) antes de publicar a versão.
  * `corpo` é HTML escrito à mão (não recebe dados de usuário).
  */
-export const MANUAL_VERSAO = '3.14.0';
+export const MANUAL_VERSAO = '3.15.0';
 
 export const MANUAL = [
   {
@@ -132,9 +132,19 @@ export const MANUAL = [
       </ul>`,
   },
   {
-    id: 'compras', titulo: 'Compras (NF-e de entrada)', resumo: 'Importar o XML da NF-e de compra e lançar nas despesas.',
+    id: 'compras', titulo: 'Compras (NF-e de entrada)', resumo: 'Buscar na SEFAZ as NF-e emitidas contra o CNPJ, importar o XML e lançar nas despesas.',
     corpo: `
       <p>Em <strong>Compras</strong> ficam as notas fiscais de mercadorias que a empresa comprou. A tela mostra o mês escolhido, o total comprado e os maiores fornecedores.</p>
+      <h3>Notas na SEFAZ (busca automática)</h3>
+      <p>Com o certificado A1 da empresa cadastrado, o quadro <strong>Notas na SEFAZ</strong> traz as NF-e emitidas contra o CNPJ direto do Ambiente Nacional, sem precisar pedir o XML ao fornecedor.</p>
+      <ol>
+        <li>Clique em <strong>Buscar agora</strong>. O sistema baixa as notas novas e registra a <em>Ciência da Operação</em> em cada uma: é ela que libera o XML completo na SEFAZ.</li>
+        <li>O XML completo chega numa <strong>próxima busca</strong>. Deixe <em>Buscar automaticamente</em> marcado e o sistema consulta sozinho enquanto estiver aberto.</li>
+        <li>Quando a nota aparecer como <strong>Pronta para importar</strong>, use <strong>Importar</strong> (ou marque várias e <em>Importar selecionadas</em>). Ela entra em Compras como se o XML tivesse sido enviado, com a opção de lançar as parcelas nas despesas.</li>
+      </ol>
+      <p><strong>Intervalo da SEFAZ:</strong> quando não há documentos novos, a SEFAZ só aceita nova consulta depois de 1 hora; o sistema respeita isso e mostra o horário liberado. Para uma nota específica, use <strong>Buscar pela chave</strong>.</p>
+      <p>Notas <strong>canceladas pelo fornecedor</strong> aparecem riscadas e não podem ser importadas; se o cancelamento chegar depois da importação, um alerta em vermelho pede para conferir a compra. <strong>Ocultar</strong> esconde notas que não são compras da empresa (por exemplo, quando ela aparece só como transportadora). A Ciência da Operação não é a manifestação final: Confirmação, Desconhecimento ou Operação não Realizada continuam com o seu processo fiscal.</p>
+      <p><strong>Conexão com a SEFAZ</strong> (administrador): o servidor da SEFAZ usa certificado ICP-Brasil, que nem todo computador reconhece. Se a busca avisar disso, o sistema tenta baixar a cadeia oficial do ITI sozinho; se não conseguir, o administrador baixa o arquivo pelo navegador e envia nessa tela.</p>
       <h3>Importar o XML da NF-e</h3>
       <ol>
         <li>Clique em <strong>Importar XML da NF-e</strong> e escolha um ou <em>vários</em> arquivos de uma vez (o XML que o fornecedor envia ou que se baixa no portal da NF-e).</li>

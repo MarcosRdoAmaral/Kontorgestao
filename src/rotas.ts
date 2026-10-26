@@ -18,6 +18,8 @@ import { EdicaoImposto, Tributacao, criarTributacao, editarTributacao, excluirTr
 import { DescricaoModelo, EntradaDescricao, lerModelo, montarDescricao } from './servicos/descricao.js';
 import { CompraManual, OpcoesImportacao, criarCompraManual, excluirCompra, importarCompraXml, listarCompras, obterCompra, xmlDaCompra } from './servicos/compras.js';
 import { pacoteContabilidade } from './servicos/contabilidade.js';
+import { ImportacaoRecebidas, buscarNaSefaz, buscarPorChave, configurarBusca, importarRecebidas, liberarCiencias, listarRecebidas, ocultarRecebida, xmlRecebida } from './servicos/nfe-recebidas.js';
+import { apagarCadeiaIcp, baixarCadeiaIcp, definirVerificacaoServidor, extrairCertificadosAc, guardarCadeiaIcp, statusConfianca } from './nfe/confianca.js';
 import { criarBackup, listarBackups } from './servicos/backup.js';
 import { consultarCnpj } from './servicos/consulta-cnpj.js';
 import { strToU8, zipSync } from 'fflate';
@@ -829,6 +831,63 @@ export async function rotas(app: FastifyInstance) {
       const { xml, nome } = xmlDaCompra(id);
       return reply.header('content-type', 'application/xml; charset=utf-8').header('content-disposition', `attachment; filename="${nome}"`).send(xml);
     });
+    // ---------- Compras: NF-e recebidas direto da SEFAZ (Distribuição DF-e) ----------
+    const empresaDaRota = (req: FastifyRequest) => { const id = Number((req.params as any).id); checarEmpresa(req, id); return id; };
+    const Chave = z.string().transform((s) => s.replace(/\D/g, '')).pipe(z.string().length(44, 'A chave de acesso precisa ter 44 dígitos'));
+    api.get('/api/empresas/:id/compras/sefaz', async (req) => {
+      const { todas } = z.object({ todas: z.string().optional() }).parse(req.query);
+      return listarRecebidas(empresaDaRota(req), { todas: todas === '1' });
+    });
+    api.post('/api/empresas/:id/compras/sefaz/buscar', async (req) => buscarNaSefaz(empresaDaRota(req)));
+    api.post('/api/empresas/:id/compras/sefaz/chave', async (req) => {
+      const id = empresaDaRota(req);
+      return { nota: await buscarPorChave(id, z.object({ chave: Chave }).parse(req.body).chave) };
+    });
+    api.post('/api/empresas/:id/compras/sefaz/importar', async (req) => {
+      const id = empresaDaRota(req);
+      return importarRecebidas(id, u(req).id, ImportacaoRecebidas.parse(req.body));
+    });
+    api.post('/api/empresas/:id/compras/sefaz/ocultar', async (req) => {
+      const id = empresaDaRota(req);
+      const b = z.object({ chave: Chave, oculta: z.boolean() }).parse(req.body);
+      return ocultarRecebida(id, b.chave, b.oculta);
+    });
+    api.post('/api/empresas/:id/compras/sefaz/ciencia', async (req) => {
+      const id = empresaDaRota(req);
+      liberarCiencias(id, z.object({ chaves: z.array(Chave).max(200).optional() }).parse(req.body ?? {}).chaves);
+      return buscarNaSefaz(id);
+    });
+    api.put('/api/empresas/:id/compras/sefaz/config', async (req) => {
+      const id = empresaDaRota(req);
+      return configurarBusca(id, z.object({ automatica: z.boolean() }).parse(req.body).automatica);
+    });
+    api.get('/api/empresas/:id/compras/sefaz/xml/:chave', async (req, reply) => {
+      const id = empresaDaRota(req);
+      const { xml, nome } = xmlRecebida(id, Chave.parse((req.params as any).chave));
+      return reply.header('content-type', 'application/xml; charset=utf-8').header('content-disposition', `attachment; filename="${nome}"`).send(xml);
+    });
+    // Conexão com a SEFAZ (cadeia ICP-Brasil): só administradores
+    api.get('/api/sefaz/conexao', async () => statusConfianca());
+    api.put('/api/sefaz/conexao', async (req) => {
+      definirVerificacaoServidor(z.object({ verificarServidor: z.boolean() }).parse(req.body).verificarServidor);
+      return statusConfianca();
+    });
+    api.post('/api/sefaz/conexao/baixar-cadeia', async () => {
+      const r = await baixarCadeiaIcp();
+      if (!r.total) throw new ErroNegocio('Não foi possível baixar a cadeia ICP-Brasil do site do ITI. Baixe o arquivo pelo navegador e envie aqui.', 502, r.falhas);
+      return { ...statusConfianca(), guardados: r.guardados };
+    });
+    api.post('/api/sefaz/conexao/cadeia', async (req) => {
+      let dados: Buffer | null = null;
+      for await (const parte of req.parts({ limits: { fileSize: 10 * 1024 * 1024 } })) if (parte.type === 'file') dados = await parte.toBuffer();
+      if (!dados) throw new ErroNegocio('Envie o arquivo da cadeia de certificados.');
+      const pems = extrairCertificadosAc(dados);
+      if (!pems.length) throw new ErroNegocio('Não encontrei certificados de autoridade (AC) neste arquivo. Use o .zip ou .crt/.cer/.p7b da cadeia ICP-Brasil.');
+      guardarCadeiaIcp(pems);
+      return { ...statusConfianca(), lidos: pems.length };
+    });
+    api.delete('/api/sefaz/conexao/cadeia', async () => { apagarCadeiaIcp(); return statusConfianca(); });
+
     api.delete('/api/compras/:id', async (req) => { const id = Number((req.params as any).id); compraDoUsuario(req, id); return excluirCompra(id); });
 
     api.put('/api/empresas/:id/despesas-categorias', async (req) => {
