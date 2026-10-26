@@ -646,6 +646,15 @@ const migracoes: string[] = [
   CREATE INDEX ix_cartao_fatura ON cartao_lancamentos(fatura_id);
   ALTER TABLE despesas ADD COLUMN cartao_lancamento_id INTEGER REFERENCES cartao_lancamentos(id) ON DELETE SET NULL;
   CREATE UNIQUE INDEX idx_despesas_cartao ON despesas(cartao_lancamento_id) WHERE cartao_lancamento_id IS NOT NULL;`,
+  // 25: multa, juros e desconto por pontualidade por cliente (em branco = usa o da conta bancária); o boleto guarda o que valia na criação
+  `ALTER TABLE tomadores ADD COLUMN multa_pct REAL;
+  ALTER TABLE tomadores ADD COLUMN juros_pct_mes REAL;
+  ALTER TABLE tomadores ADD COLUMN desc_pontual_pct REAL;
+  ALTER TABLE tomadores ADD COLUMN desc_pontual_dias INTEGER;
+  ALTER TABLE cobrancas ADD COLUMN multa_pct REAL;
+  ALTER TABLE cobrancas ADD COLUMN juros_pct_mes REAL;
+  ALTER TABLE cobrancas ADD COLUMN desc_pontual_pct REAL;
+  ALTER TABLE cobrancas ADD COLUMN desc_pontual_dias INTEGER;`,
 ];
 
 export function migrar(): void {

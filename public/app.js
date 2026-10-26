@@ -2410,6 +2410,14 @@ async function formTomador(t, aoSalvar) {
           <label class="largo">Motivo do desconto <input name="desconto_motivo" maxlength="80" value="${esc(t.desconto_motivo ?? '')}" placeholder="ex.: Desconto contratual de fidelidade"></label>
         </div>
         <p class="dica">O valor é abatido de <strong>todos os boletos</strong> deste cliente (emitidos com nota, só boleto ou reemitidos), e o motivo sai nas instruções do boleto. Na emissão da NFS-e o sistema lembra que o cliente tem desconto e deixa você decidir se lança também como desconto na nota. Deixe em branco para não ter desconto.</p></fieldset>
+      
+        <fieldset class="sub"><legend>Multa, juros e desconto por pontualidade</legend><div class="grade">
+          <label>Multa após o vencimento (%) <input name="multa_pct" data-num inputmode="decimal" value="${t.multa_pct != null ? String(t.multa_pct).replace('.', ',') : ''}" placeholder="padrão da empresa"></label>
+          <label>Juros de mora ao mês (%) <input name="juros_pct_mes" data-num inputmode="decimal" value="${t.juros_pct_mes != null ? String(t.juros_pct_mes).replace('.', ',') : ''}" placeholder="padrão da empresa"></label>
+          <label>Desconto por pagamento antecipado (%) <input name="desc_pontual_pct" data-num inputmode="decimal" value="${t.desc_pontual_pct ? String(t.desc_pontual_pct).replace('.', ',') : ''}" placeholder="sem desconto"></label>
+          <label>Válido até quantos dias antes do vencimento <input name="desc_pontual_dias" type="number" min="0" max="60" value="${t.desc_pontual_dias ?? ''}" placeholder="0 = até o vencimento"></label>
+        </div>
+        <p class="dica">Em branco, valem a multa e os juros dos dados bancários da empresa. O desconto por pontualidade é calculado sobre o valor do boleto, vai na remessa ao banco (desconto até a data) e na instrução impressa; quem paga depois do prazo paga o valor cheio.</p></fieldset>
       </div>
       <div data-painel="descricao" hidden>
         <fieldset class="sub"><legend>Descrição composta (automática)</legend>
@@ -2502,6 +2510,7 @@ async function formTomador(t, aoSalvar) {
         if (corpo.descricao_modelo && !corpo.descricao_modelo.linhas.length) throw new Error('Informe ao menos uma linha de valor na aba Descrição da nota.');
         ['dm_ativo', 'dm_texto', 'dm_periodo', 'dm_oc', 'dm_cp'].forEach((k) => delete corpo[k]);
         corpo.desconto_valor = numero(f.desconto_valor.value) || null; corpo.desconto_motivo = f.desconto_motivo.value.trim() || null;
+        corpo.multa_pct = numero(f.multa_pct.value); corpo.juros_pct_mes = numero(f.juros_pct_mes.value); corpo.desc_pontual_pct = numero(f.desc_pontual_pct.value) || null; corpo.desc_pontual_dias = f.desc_pontual_dias.value === '' ? null : Number(f.desc_pontual_dias.value);
         const r = t.id ? await api('PUT', `/api/tomadores/${t.id}`, corpo) : await api('POST', `/api/empresas/${estado.empresaId}/tomadores`, corpo);
         d.close(); aviso('Cliente salvo.');
         aoSalvar?.(t.id ?? r.id);

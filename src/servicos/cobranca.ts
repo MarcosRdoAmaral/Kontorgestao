@@ -80,13 +80,13 @@ export function pendenciasPagador(t: any): string[] {
  * para valer em todo boleto dele; `semDesconto` evita abater duas vezes quando a nota já carrega o mesmo desconto.
  */
 export function criarCobranca(d: { empresaId: number; tomadorId: number; notaId: number | null; descricao: string; valor: number; vencimento: string; usuarioId: number; semDesconto?: boolean }) {
-  const t = db.prepare('SELECT desconto_valor, desconto_motivo FROM tomadores WHERE id = ?').get(d.tomadorId) as { desconto_valor: number | null; desconto_motivo: string | null } | undefined;
+  const t = db.prepare('SELECT desconto_valor, desconto_motivo, multa_pct, juros_pct_mes, desc_pontual_pct, desc_pontual_dias FROM tomadores WHERE id = ?').get(d.tomadorId) as { desconto_valor: number | null; desconto_motivo: string | null; multa_pct: number | null; juros_pct_mes: number | null; desc_pontual_pct: number | null; desc_pontual_dias: number | null } | undefined;
   const desconto = !d.semDesconto && t?.desconto_valor && t.desconto_valor > 0 ? Math.round(t.desconto_valor * 100) / 100 : 0;
   if (desconto && desconto >= d.valor) throw new ErroNegocio(`O desconto do cliente (R$ ${desconto.toFixed(2).replace('.', ',')}) é maior ou igual ao valor do boleto. Ajuste o valor ou o desconto no cadastro do cliente.`);
   const valor = Math.round((d.valor - desconto) * 100) / 100;
   if (valor > 99999999.99) throw new ErroNegocio('Valor do boleto acima do limite.');
-  const r = db.prepare(`INSERT INTO cobrancas (empresa_id, tomador_id, nota_id, descricao, valor, vencimento, emissao, criado_por, desconto, desconto_motivo) VALUES (?,?,?,?,?,?,?,?,?,?)`)
-    .run(d.empresaId, d.tomadorId, d.notaId, d.descricao, valor, d.vencimento, hojeBr(), d.usuarioId, desconto, desconto ? t!.desconto_motivo : null);
+  const r = db.prepare(`INSERT INTO cobrancas (empresa_id, tomador_id, nota_id, descricao, valor, vencimento, emissao, criado_por, desconto, desconto_motivo, multa_pct, juros_pct_mes, desc_pontual_pct, desc_pontual_dias) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
+    .run(d.empresaId, d.tomadorId, d.notaId, d.descricao, valor, d.vencimento, hojeBr(), d.usuarioId, desconto, desconto ? t!.desconto_motivo : null, t?.multa_pct ?? null, t?.juros_pct_mes ?? null, t?.desc_pontual_pct ?? null, t?.desc_pontual_dias ?? null);
   const id = Number(r.lastInsertRowid);
   if (obterConta(d.empresaId)) { try { gerarTitulo(id); } catch { /* fica pendente, com o motivo na tela */ } }
   return obterCobranca(id)!;
@@ -127,13 +127,28 @@ export function listarCobrancas(empresaId: number) {
     WHERE c.empresa_id = ? ORDER BY c.vencimento DESC, c.id DESC LIMIT 500`).all(empresaId);
 }
 
-function mensagens(conta: any, c?: { desconto?: number; desconto_motivo?: string | null }): string[] {
+/** Multa, juros e desconto por pontualidade deste boleto: o que o cliente tem cadastrado, senão o da conta bancária. */
+export function condicoesDoBoleto(conta: any, c: any) {
+  const multa = c?.multa_pct ?? conta.multa_pct ?? 0, juros = c?.juros_pct_mes ?? conta.juros_pct_mes ?? 0;
+  let pontual: { valor: number; ate: string } | null = null;
+  if (c?.desc_pontual_pct > 0 && c.valor > 0) {
+    const ate = new Date(Date.parse(c.vencimento) - (c.desc_pontual_dias ?? 0) * 86400e3).toISOString().slice(0, 10);
+    const valor = Math.round(c.valor * c.desc_pontual_pct) / 100;
+    if (valor > 0 && valor < c.valor && ate >= (c.emissao ?? c.criado_em?.slice(0, 10) ?? '0000')) pontual = { valor, ate };
+  }
+  return { multa: Number(multa), juros: Number(juros), pontual };
+}
+
+function mensagens(conta: any, c?: any): string[] {
   const m: string[] = [];
-  if (c?.desconto && c.desconto > 0) m.push(`DESCONTO CONCEDIDO R$ ${c.desconto.toFixed(2).replace('.', ',')} - ${c.desconto_motivo ?? ''}`.toUpperCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').slice(0, 40));
+  const semAcento = (x: string) => x.toUpperCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+  const cond = condicoesDoBoleto(conta, c);
+  if (cond.pontual) m.push(semAcento(`DESCONTO DE R$ ${cond.pontual.valor.toFixed(2).replace('.', ',')} SE PAGO ATE ${cond.pontual.ate.split('-').reverse().join('/')}`).slice(0, 40));
+  if (c?.desconto && c.desconto > 0) m.push(semAcento(`DESCONTO CONCEDIDO R$ ${c.desconto.toFixed(2).replace('.', ',')} - ${c.desconto_motivo ?? ''}`).slice(0, 40));
   if (conta.instrucoes) m.push(String(conta.instrucoes).slice(0, 40));
   const f = (n: number) => String(n).replace('.', ',');
-  if (conta.juros_pct_mes > 0 || conta.multa_pct > 0) {
-    const partes = [conta.juros_pct_mes > 0 && `JUROS ${f(conta.juros_pct_mes)}% AO MES`, conta.multa_pct > 0 && `MULTA ${f(conta.multa_pct)}%`].filter(Boolean);
+  if (cond.juros > 0 || cond.multa > 0) {
+    const partes = [cond.juros > 0 && `JUROS ${f(cond.juros)}% AO MES`, cond.multa > 0 && `MULTA ${f(cond.multa)}%`].filter(Boolean);
     m.push(`APOS VENCIMENTO: ${partes.join(' + ')}`.slice(0, 40));
   }
   return m;
@@ -197,7 +212,7 @@ export function gerarRemessaEmpresa(empresaId: number, usuarioId: number) {
   const titulos: Titulo[] = linhas.map((c) => ({
     idInterno: c.id, nossoNumero: c.nosso_numero, numeroDocumento: c.nota_id ? `NFSE ${(db.prepare('SELECT n_nfse FROM notas WHERE id = ?').get(c.nota_id) as any)?.n_nfse ?? c.id}` : `COB ${c.id}`,
     vencimento: c.vencimento, valor: c.valor, emissao: c.emissao ?? c.criado_em.slice(0, 10),
-    multaPct: conta.multa_pct, jurosPctMes: conta.juros_pct_mes, mensagens: mensagens(conta, c), movimento: c.status === 'A_REMETER' ? 'ENTRADA' : 'BAIXA',
+    multaPct: condicoesDoBoleto(conta, c).multa, jurosPctMes: condicoesDoBoleto(conta, c).juros, descontoPontual: condicoesDoBoleto(conta, c).pontual, mensagens: mensagens(conta, c), movimento: c.status === 'A_REMETER' ? 'ENTRADA' : 'BAIXA',
     pagador: { documento: c.t_doc, nome: c.t_nome, endereco: [c.logradouro, c.numero].filter(Boolean).join(', ') + (c.complemento ? ` - ${c.complemento}` : ''), bairro: c.bairro ?? '', cep: c.cep ?? '', cidade: c.cidade ?? '', uf: c.uf || UF_IBGE[String(c.cod_municipio ?? '').slice(0, 2)] || '' },
   }));
   const numero = conta.proxima_remessa;

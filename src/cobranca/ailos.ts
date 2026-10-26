@@ -107,6 +107,8 @@ export interface Titulo {
   emissao: string;    // AAAA-MM-DD
   multaPct: number;
   jurosPctMes: number;
+  /** Desconto fixo até a data (código 1 do segmento P), calculado do percentual do cliente. */
+  descontoPontual?: { valor: number; ate: string } | null;
   mensagens: string[];
   pagador: { documento: string; nome: string; endereco: string; bairro: string; cep: string; cidade: string; uf: string };
   /** 'ENTRADA' = 01 | 'BAIXA' = 02 */
@@ -157,7 +159,7 @@ export function gerarRemessa(d: DadosRemessa): string {
       .set(63, 77, alfa(t.numeroDocumento, 15)).set(78, 85, dataBr8(t.vencimento)).set(86, 100, moeda(t.valor, 15))
       .set(101, 105, '00000').set(106, 106, '0').set(107, 108, '04').set(109, 109, 'N').set(110, 117, dataBr8(t.emissao))
       .set(118, 118, t.jurosPctMes > 0 ? '2' : '3').set(119, 126, t.jurosPctMes > 0 ? diaSeguinte : ZERO_DATA).set(127, 141, moeda(t.jurosPctMes, 15))
-      .set(142, 142, '0').set(143, 150, ZERO_DATA).set(151, 165, moeda(0, 15)).set(166, 180, moeda(0, 15)).set(181, 195, moeda(0, 15))
+      .set(142, 142, t.descontoPontual ? '1' : '0').set(143, 150, t.descontoPontual ? dataBr8(t.descontoPontual.ate) : ZERO_DATA).set(151, 165, moeda(t.descontoPontual?.valor ?? 0, 15)).set(166, 180, moeda(0, 15)).set(181, 195, moeda(0, 15))
       .set(196, 220, alfa(`KG${t.idInterno}`, 25)).set(221, 221, '3').set(222, 223, '00').set(224, 224, '2').set(225, 227, '   ')
       .set(228, 229, '09').set(230, 239, '0'.repeat(10)).set(240, 240, ' ');
     linhas.push(p.toString());

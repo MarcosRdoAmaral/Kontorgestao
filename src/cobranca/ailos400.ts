@@ -53,7 +53,7 @@ export function gerarRemessa400(d: DadosRemessa): string {
       .set(92, 101, '0010000000').set(107, 108, '01').set(109, 110, baixa ? '02' : '01').set(111, 120, alfa(String(t.idInterno), 10))
       .set(121, 126, ddmmaa(t.vencimento)).set(127, 139, moeda(t.valor, 13)).set(140, 142, '085').set(143, 146, '0000')
       .set(148, 149, '01').set(150, 150, 'N').set(151, 156, ddmmaa(t.emissao)).set(157, 160, '0000').set(161, 173, moeda(baixa ? 0 : juros, 13))
-      .set(174, 218, '0'.repeat(45)).set(219, 220, tipo2(pg.documento)).set(221, 234, doc14(pg.documento)).set(235, 274, alfa(pg.nome, 40))
+      .set(174, 179, !baixa && t.descontoPontual ? ddmmaa(t.descontoPontual.ate) : '000000').set(180, 192, moeda(!baixa && t.descontoPontual ? t.descontoPontual.valor : 0, 13)).set(193, 218, '0'.repeat(26)).set(219, 220, tipo2(pg.documento)).set(221, 234, doc14(pg.documento)).set(235, 274, alfa(pg.nome, 40))
       .set(275, 314, alfa(pg.endereco, 40)).set(315, 326, alfa(pg.bairro, 12)).set(327, 334, num(pg.cep, 8)).set(335, 349, alfa(pg.cidade, 15)).set(350, 351, alfa(pg.uf, 2))
       .set(395, 400, num(++seq, 6)).toString());
     if (!baixa && t.multaPct > 0) {

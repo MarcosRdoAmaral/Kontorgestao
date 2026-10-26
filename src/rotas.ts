@@ -86,6 +86,12 @@ const Tomador = z.object({
   enviar_email_auto: z.union([z.boolean(), z.literal(0), z.literal(1)]).default(false).transform((v) => (v ? 1 : 0)),
   desconto_valor: z.number().min(0).max(99999999).nullish().transform((v) => (v && v > 0 ? Math.round(v * 100) / 100 : null)),
   desconto_motivo: z.string().trim().max(80).nullish().transform((v) => v || null),
+  /** Em branco = usa a multa/juros da conta bancária da empresa. */
+  multa_pct: z.number().min(0).max(20).nullish().transform((v) => v ?? null),
+  juros_pct_mes: z.number().min(0).max(20).nullish().transform((v) => v ?? null),
+  /** Desconto para pagamento antecipado: % do boleto, até N dias antes do vencimento (0 = até o vencimento). */
+  desc_pontual_pct: z.number().min(0).max(100).nullish().transform((v) => (v && v > 0 ? v : null)),
+  desc_pontual_dias: z.number().int().min(0).max(60).nullish().transform((v) => v ?? null),
   descricao_modelo: DescricaoModelo.nullish().transform((m) => (m ? JSON.stringify(m) : null)),
   /** Serviços que o sistema sempre usa com este cliente, com o valor de cada um. */
   servicos_padrao: z.array(z.object({
@@ -311,10 +317,10 @@ export async function rotas(app: FastifyInstance) {
       const d = Tomador.parse(req.body);
       conferirServicosPadrao(id, d.servicos_padrao);
       const r = db.prepare(`INSERT INTO tomadores (empresa_id, tipo_doc, documento, nome, inscricao_municipal, email, fone, cep, cod_municipio, logradouro, numero, complemento, bairro,
-        modo_faturamento, vencimento_tipo, vencimento_valor, email_cobranca, enviar_email_auto, cidade, uf, desconto_valor, desconto_motivo, descricao_modelo)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(id, d.tipo_doc, d.documento, d.nome, d.inscricao_municipal ?? null, d.email || null, d.fone, d.cep,
+        modo_faturamento, vencimento_tipo, vencimento_valor, email_cobranca, enviar_email_auto, cidade, uf, desconto_valor, desconto_motivo, descricao_modelo, multa_pct, juros_pct_mes, desc_pontual_pct, desc_pontual_dias)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(id, d.tipo_doc, d.documento, d.nome, d.inscricao_municipal ?? null, d.email || null, d.fone, d.cep,
         d.cod_municipio ?? null, d.logradouro ?? null, d.numero ?? null, d.complemento ?? null, d.bairro ?? null,
-        d.modo_faturamento, d.vencimento_tipo, d.vencimento_valor, d.email_cobranca || null, d.enviar_email_auto, d.cidade || null, d.uf || null, d.desconto_valor, d.desconto_motivo, d.descricao_modelo);
+        d.modo_faturamento, d.vencimento_tipo, d.vencimento_valor, d.email_cobranca || null, d.enviar_email_auto, d.cidade || null, d.uf || null, d.desconto_valor, d.desconto_motivo, d.descricao_modelo, d.multa_pct, d.juros_pct_mes, d.desc_pontual_pct, d.desc_pontual_dias);
       salvarServicosPadrao(id, Number(r.lastInsertRowid), d.servicos_padrao);
       return { id: Number(r.lastInsertRowid) };
     });
@@ -326,10 +332,10 @@ export async function rotas(app: FastifyInstance) {
       const d = Tomador.parse(req.body);
       conferirServicosPadrao(t.empresa_id, d.servicos_padrao);
       db.prepare(`UPDATE tomadores SET tipo_doc=?, documento=?, nome=?, inscricao_municipal=?, email=?, fone=?, cep=?, cod_municipio=?, logradouro=?, numero=?, complemento=?, bairro=?,
-        modo_faturamento=?, vencimento_tipo=?, vencimento_valor=?, email_cobranca=?, enviar_email_auto=?, cidade=?, uf=?, desconto_valor=?, desconto_motivo=?, descricao_modelo=? WHERE id=?`)
+        modo_faturamento=?, vencimento_tipo=?, vencimento_valor=?, email_cobranca=?, enviar_email_auto=?, cidade=?, uf=?, desconto_valor=?, desconto_motivo=?, descricao_modelo=?, multa_pct=?, juros_pct_mes=?, desc_pontual_pct=?, desc_pontual_dias=? WHERE id=?`)
         .run(d.tipo_doc, d.documento, d.nome, d.inscricao_municipal ?? null, d.email || null, d.fone, d.cep, d.cod_municipio ?? null,
           d.logradouro ?? null, d.numero ?? null, d.complemento ?? null, d.bairro ?? null,
-          d.modo_faturamento, d.vencimento_tipo, d.vencimento_valor, d.email_cobranca || null, d.enviar_email_auto, d.cidade || null, d.uf || null, d.desconto_valor, d.desconto_motivo, d.descricao_modelo, id);
+          d.modo_faturamento, d.vencimento_tipo, d.vencimento_valor, d.email_cobranca || null, d.enviar_email_auto, d.cidade || null, d.uf || null, d.desconto_valor, d.desconto_motivo, d.descricao_modelo, d.multa_pct, d.juros_pct_mes, d.desc_pontual_pct, d.desc_pontual_dias, id);
       salvarServicosPadrao(t.empresa_id, id, d.servicos_padrao);
       return { ok: true };
     });
