@@ -1549,6 +1549,7 @@ async function telaDocumentacao() {
   pintar();
 }
 
+const GRUPOS_REL = ['Faturamento', 'Contas a receber', 'Despesas e pagamentos', 'Fiscal e retenções', 'Resultado e caixa', 'Clientes', 'Estoque'];
 async function telaRelatorios(aba) {
   if (aba === 'documentacao') return telaDocumentacao();
   const cat = await api('GET', '/api/relatorios');
@@ -1559,19 +1560,30 @@ async function telaRelatorios(aba) {
   conteudo.innerHTML = `
     <div class="topo"><div><h1>Relatórios</h1><p class="sutil">A nota e o boleto têm datas diferentes (emissão, vencimento, pagamento). Cada relatório diz qual data usa no filtro e mostra as outras nas colunas.</p></div></div>
     <nav class="abas" aria-label="Relatórios"><a href="#/relatorios" class="ativo">Relatórios</a><a href="#/relatorios/documentacao">Documentação</a></nav>
+    <div class="rel-layout">
+    <nav class="rel-grupos" aria-label="Tipos de relatório">${GRUPOS_REL.filter((g) => cat.some((c) => c.grupo === g)).map((g) => `<details class="grupo" ${cat.some((c) => c.grupo === g && c.id === est.rel) ? 'open' : ''}><summary>${esc(g)} <span class="dica">${cat.filter((c) => c.grupo === g).length}</span></summary>
+      ${cat.filter((c) => c.grupo === g).map((c) => `<a href="#" data-rel="${c.id}" class="${c.id === est.rel ? 'ativo' : ''}">${esc(c.titulo)}</a>`).join('')}</details>`).join('')}</nav>
+    <div class="rel-corpo">
     <form id="form-rel" class="filtros grade">
-      <label class="largo">Relatório <select name="rel">${cat.map((c) => `<option value="${c.id}" ${c.id === est.rel ? 'selected' : ''}>${esc(c.titulo)}</option>`).join('')}</select><span class="dica" id="desc-rel"></span></label>
+      <input type="hidden" name="rel" value="${esc(est.rel)}">
+      <div class="largo"><strong id="tit-rel"></strong><span class="dica" id="desc-rel" style="display:block"></span></div>
       <label>De <input type="date" name="de" required value="${est.de}"></label>
       <label>Até <input type="date" name="ate" required value="${est.ate}"></label>
       <label>Cliente <select name="tomadorId"><option value="">Todos</option>${clientes.map((c) => `<option value="${c.id}" ${String(c.id) === String(est.tomadorId) ? 'selected' : ''}>${esc(c.nome)}</option>`).join('')}</select></label>
       <label id="lbl-sit">Situação <select name="situacao"><option value="">Todas</option><option>Vencido</option><option>A vencer</option></select></label>
       <div class="acoes"><button class="primario" type="submit">Gerar</button> <button type="button" id="rel-csv">Excel (CSV)</button> <button type="button" id="rel-pdf">PDF</button></div>
     </form>
-    <div id="res-rel"><div class="vazio">Escolha o relatório e o período e clique em Gerar.</div></div>`;
+    <div id="res-rel"><div class="vazio">Escolha o relatório ao lado, ajuste o período e clique em Gerar.</div></div>
+    </div></div>`;
   const f = $('#form-rel');
   const atual = () => ({ rel: f.rel.value, de: f.de.value, ate: f.ate.value, tomadorId: f.tomadorId.value, situacao: f.situacao.value });
-  const ajustar = () => { const c = cat.find((x) => x.id === f.rel.value); $('#desc-rel').textContent = `${c.descricao} Filtra por: ${c.filtroData}.`; $('#lbl-sit').hidden = !c.situacoes; if (!c.situacoes) f.situacao.value = ''; };
-  f.rel.onchange = ajustar; ajustar(); f.situacao.value = est.situacao;
+  const ajustar = () => { const c = cat.find((x) => x.id === f.rel.value); $('#tit-rel').textContent = c.titulo; $('#desc-rel').textContent = `${c.descricao} Filtra por: ${c.filtroData}.`; $('#lbl-sit').hidden = !c.situacoes; if (!c.situacoes) f.situacao.value = ''; };
+  ajustar(); f.situacao.value = est.situacao;
+  conteudo.querySelectorAll('[data-rel]').forEach((a) => (a.onclick = (ev) => {
+    ev.preventDefault(); f.rel.value = a.dataset.rel; est.rel = a.dataset.rel;
+    conteudo.querySelectorAll('[data-rel]').forEach((x) => x.classList.toggle('ativo', x === a));
+    ajustar(); $('#res-rel').innerHTML = '<div class="vazio">Ajuste o período e clique em Gerar.</div>';
+  }));
   const qs = (formato) => { const a = atual(); return new URLSearchParams({ de: a.de, ate: a.ate, formato, ...(a.tomadorId && { tomadorId: a.tomadorId }), ...(a.situacao && { situacao: a.situacao }) }).toString(); };
   f.onsubmit = async (ev) => {
     ev.preventDefault(); Object.assign(est, atual());

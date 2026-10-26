@@ -56,11 +56,11 @@ export function excluirDespesa(empresaId: number, id: number) {
 }
 
 // ---------- Painel e balanço ----------
-const recebidoMes = (empresaId: number, ym: string) =>
+export const recebidoMes = (empresaId: number, ym: string) =>
   (db.prepare("SELECT COALESCE(SUM(COALESCE(valor_pago, valor)),0) AS v FROM cobrancas WHERE empresa_id = ? AND status = 'PAGO' AND substr(COALESCE(pago_em, vencimento),1,7) = ?").get(empresaId, ym) as { v: number }).v
   // entradas do extrato que o usuário classificou como "Outras receitas" (sem boleto) também são receita
   + (db.prepare("SELECT COALESCE(SUM(valor),0) AS v FROM extrato_lancamentos WHERE empresa_id = ? AND valor > 0 AND cobranca_id IS NULL AND categoria = 'Outras receitas' AND substr(data,1,7) = ?").get(empresaId, ym) as { v: number }).v;
-const despesaMes = (empresaId: number, ym: string) =>
+export const despesaMes = (empresaId: number, ym: string) =>
   (db.prepare('SELECT COALESCE(SUM(valor),0) AS v FROM despesas WHERE empresa_id = ? AND substr(data,1,7) = ?').get(empresaId, ym) as { v: number }).v;
 
 export function painelFinanceiro(empresaId: number, mes: string, hoje = hojeBr()) {

@@ -4,7 +4,7 @@
  * aqui (e a data/versão em MANUAL_VERSAO) antes de publicar a versão.
  * `corpo` é HTML escrito à mão (não recebe dados de usuário).
  */
-export const MANUAL_VERSAO = '3.10.0';
+export const MANUAL_VERSAO = '3.11.0';
 
 export const MANUAL = [
   {
@@ -217,17 +217,17 @@ export const MANUAL = [
     id: 'relatorios', titulo: 'Relatórios', resumo: 'Os relatórios disponíveis e qual data cada um usa.',
     corpo: `
       <p>A nota é emitida em um dia, o boleto vence em outro e é pago em outro. Por isso cada relatório informa <strong>qual data filtra o período</strong> e mostra as demais nas colunas.</p>
+      <p>Os relatórios ficam em <strong>grupos</strong>, na lista à esquerda da tela:</p>
       <ul>
-        <li><strong>Receitas emitidas:</strong> por data de emissão da nota.</li>
-        <li><strong>Contas a receber por vencimento.</strong></li>
-        <li><strong>Em aberto por data de emissão.</strong></li>
-        <li><strong>Recebimentos:</strong> por data de pagamento.</li>
-        <li><strong>Saldo vencido por cliente</strong> (faixas de atraso) e <strong>Posição por cliente</strong>.</li>
-        <li><strong>Notas emitidas e tributos:</strong> ISS e retenções.</li>
-        <li><strong>Fluxo de caixa por categoria:</strong> a partir do extrato importado.</li>
-        <li><strong>Compras (NF-e de entrada):</strong> por data de emissão da nota.</li>
+        <li><strong>Faturamento:</strong> Receitas emitidas (por data de emissão) e Faturamento por mês (notas, canceladas e recebido).</li>
+        <li><strong>Contas a receber:</strong> por vencimento, em aberto por emissão, recebimentos (data do pagamento), saldo vencido por cliente (faixas de atraso), posição por cliente e prazo de recebimento por cliente (prazo e atraso médios, % pago em dia).</li>
+        <li><strong>Despesas e pagamentos:</strong> despesas lançadas (com forma de pagamento e origem), por categoria, por forma de pagamento (PIX, débito, crédito, dinheiro), parcelas do cartão a vencer e compras (NF-e de entrada).</li>
+        <li><strong>Fiscal e retenções:</strong> notas emitidas e tributos, livro de serviços prestados (ISS a recolher e ISS retido pelo tomador) e retenções por cliente (PIS, COFINS, CSLL, IRRF, INSS e ISS).</li>
+        <li><strong>Resultado e caixa:</strong> resultado mensal (o balanço mês a mês), fluxo de caixa por categoria e pendências do extrato (sem classificação ou crédito sem boleto ligado).</li>
+        <li><strong>Clientes:</strong> curva ABC (classes A, B e C pelo faturamento) e clientes sem faturamento no período.</li>
+        <li><strong>Estoque:</strong> posição do estoque de insumos e movimentos do período.</li>
       </ul>
-      <p>Escolha o relatório, o período, o cliente e a situação (quando houver) e clique em <em>Gerar</em>. Exporte para <strong>Excel (CSV)</strong> ou <strong>PDF</strong>.</p>`,
+      <p>Clique no relatório na lista, escolha o período, o cliente e a situação (quando houver) e clique em <em>Gerar</em>. Exporte para <strong>Excel (CSV)</strong> ou <strong>PDF</strong>.</p>`,
   },
   {
     id: 'contabilidade', titulo: 'Exportar para a contabilidade', resumo: 'Pacote com extrato em OFX, PDF e XML das notas.',

@@ -298,3 +298,10 @@ label.check input { width: auto; }
 
 .tabela.estoque .acoes-linha { white-space: normal; min-width: 260px; }
 .tabela.estoque .acoes-linha button { padding: 4px 10px; margin: 2px; }
+
+/* Relatórios: lista de relatórios por grupo ao lado do filtro */
+.rel-layout { display: grid; grid-template-columns: 250px minmax(0, 1fr); gap: 20px; align-items: start; margin-top: 12px; }
+.rel-grupos { position: sticky; top: 8px; border: 1px solid var(--borda-leve); border-radius: var(--raio); padding: 6px; background: var(--superficie); }
+.rel-grupos details.grupo > a { padding: 6px 10px; border-radius: var(--raio); font-size: .88rem; }
+.rel-grupos details.grupo > a.ativo { background: var(--superficie-2); color: var(--laranja); font-weight: 600; }
+@media (max-width: 800px) { .rel-layout { grid-template-columns: 1fr; } .rel-grupos { position: static; } }

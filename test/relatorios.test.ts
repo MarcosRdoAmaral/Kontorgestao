@@ -71,6 +71,25 @@ test('relatórios: nota emitida em uma data e boleto com vencimento em outra', a
     assert.equal((await rel('inexistente', 'de=2026-10-01&ate=2026-10-31')).status, 404);
     assert.equal((await rel('a-receber', 'de=2026-10-31&ate=2026-10-01')).status, 400);
     assert.equal((await call('GET', `/api/empresas/${eid}/relatorios/a-receber?de=2026-10-01&ate=2026-10-31`)).status, 401);
-    assert.equal((await call('GET', '/api/relatorios', t)).json.length, 9);
+    const cat = (await call('GET', '/api/relatorios', t)).json;
+    assert.equal(cat.length, 23);
+    assert.ok(cat.every((c: any) => c.grupo), 'todo relatório tem grupo');
+    assert.deepEqual([...new Set(cat.map((c: any) => c.grupo))].sort(), ['Clientes', 'Contas a receber', 'Despesas e pagamentos', 'Estoque', 'Faturamento', 'Fiscal e retenções', 'Resultado e caixa']);
+    // todos os relatórios rodam, em JSON e PDF, sem erro
+    for (const c of cat) {
+      const r = await rel(c.id, 'de=2026-10-01&ate=2026-10-31');
+      assert.equal(r.status, 200, `${c.id}: ${JSON.stringify(r.json)}`);
+      assert.equal(Buffer.from((await rel(c.id, 'de=2026-10-01&ate=2026-10-31&formato=pdf')).raw).subarray(0, 4).toString(), '%PDF', c.id);
+    }
+    // faturamento por mês e curva ABC conferem com as notas (set: 1000 · out: 500 + 300 + 200)
+    const fm = (await rel('faturamento-mensal', 'de=2026-09-01&ate=2026-10-31')).json;
+    assert.deepEqual(fm.linhas.map((l: any) => [l.mes, l.faturado]), [['09/2026', 1000], ['10/2026', 1000]]);
+    const abc = (await rel('curva-abc', 'de=2026-09-01&ate=2026-10-31')).json;
+    assert.equal(abc.totais.valor, 2000); assert.equal(abc.linhas[0].classe, 'A');
+    // despesas por categoria/forma
+    db.prepare("INSERT INTO despesas (empresa_id, data, categoria, descricao, valor, forma_pagamento) VALUES (?,?,?,?,?,?)").run(eid, '2026-10-05', 'Material', 'Papel', 40, 'PIX');
+    db.prepare("INSERT INTO despesas (empresa_id, data, categoria, descricao, valor, forma_pagamento) VALUES (?,?,?,?,?,?)").run(eid, '2026-10-06', 'Material', 'Caneta', 10, null);
+    const dc = (await rel('despesas-categoria', 'de=2026-10-01&ate=2026-10-31')).json; assert.deepEqual(dc.linhas.map((l: any) => [l.categoria, l.valor, l.pct]), [['Material', 50, 100]]);
+    const df = (await rel('despesas-forma', 'de=2026-10-01&ate=2026-10-31')).json; assert.deepEqual(df.linhas.map((l: any) => [l.forma, l.valor]), [['PIX', 40], ['Não informado', 10]]);
   } finally { await app.close(); }
 });
