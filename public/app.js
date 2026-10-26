@@ -603,6 +603,12 @@ async function telaEmitir(notaIdCorrecao) {
           <label class="largo">Informações complementares <textarea name="infoComplementar" maxlength="2000">${esc(p.infoComplementar ?? '')}</textarea></label>
         </div>
       </fieldset>
+      <fieldset id="bloco-reembolso"><legend>Reembolsos e repasses de terceiros</legend>
+        <p class="dica">Valores pagos por conta e ordem do cliente, com documento em nome dele, e repassados sem acréscimo. Ficam dentro do valor da nota, mas <strong>não entram na base do ISS, IBS e CBS</strong>. Exige tributação com IBS/CBS.</p>
+        <div id="lista-reembolso"></div>
+        <div class="acoes"><button type="button" id="add-reembolso">Adicionar reembolso</button></div>
+      </fieldset>
+
       <fieldset id="bloco-pagamento" hidden><legend>Pagamento / parcelamento</legend>
         <p class="dica">O valor do boleto parte do líquido da NFS-e (serviço menos descontos e retenções), já calculado acima.</p>
         <div class="grade">
@@ -627,6 +633,69 @@ async function telaEmitir(notaIdCorrecao) {
   if (p.issRetido) f.issRetido.value = p.issRetido;
 
   let pCpServico = null, tpImunidadeServico = null, modeloComposto = null, tCompor = null, ultimoEfetivo = null, parcelasManual = false;
+  let reembolsos = Array.isArray(p.reembolsos) ? [...p.reembolsos] : [];
+  const TIPOS_REEMB = { '01': 'Repasse a corretores (intermediação de imóveis)', '02': 'Repasse a fornecedor (agência de turismo)', '03': 'Reembolso de produção externa (propaganda)', '04': 'Reembolso de mídia (propaganda)', '99': 'Outros reembolsos ou ressarcimentos' };
+  const somaReemb = () => Math.round(reembolsos.reduce((t, r) => t + r.valor, 0) * 100) / 100;
+  function desenharReembolsos() {
+    $('#lista-reembolso').innerHTML = reembolsos.length
+      ? `<table class="tabela"><thead><tr><th>Tipo</th><th>Documento</th><th>Fornecedor</th><th class="num">Valor</th><th></th></tr></thead><tbody>${reembolsos.map((r, i) => `<tr>
+          <td>${esc(r.tipo === '99' && r.descricao ? r.descricao : TIPOS_REEMB[r.tipo])}</td>
+          <td>${r.doc.t === 'DFE' ? 'Chave ' + esc(r.doc.chave.slice(0, 8)) + '…' + esc(r.doc.chave.slice(-6)) : esc(r.doc.numero)} <span class="dica">${dataBr(r.dtEmi)}</span></td>
+          <td>${esc(r.fornecedorNome ?? '')}</td><td class="num">${brl(r.valor)}</td>
+          <td class="acoes-linha"><button type="button" data-ered="${i}">Editar</button> <button type="button" data-erem="${i}">Remover</button></td></tr>`).join('')}
+          <tr><td colspan="3"><strong>Fora da base do ISS/IBS/CBS</strong></td><td class="num"><strong>${brl(somaReemb())}</strong></td><td></td></tr></tbody></table>` : '';
+    $('#lista-reembolso').querySelectorAll('[data-erem]').forEach((b) => (b.onclick = () => { reembolsos.splice(Number(b.dataset.erem), 1); desenharReembolsos(); renderConferencia(); }));
+    $('#lista-reembolso').querySelectorAll('[data-ered]').forEach((b) => (b.onclick = () => formReembolso(Number(b.dataset.ered))));
+  }
+  function formReembolso(idx) {
+    const r = idx != null ? reembolsos[idx] : null;
+    const hoje = new Date(Date.now() - 3 * 3600e3).toISOString().slice(0, 10);
+    abrirDialogo(`<form id="form-reemb"><h2>${r ? 'Editar' : 'Adicionar'} reembolso ou repasse</h2>
+      <div class="grade">
+        <label class="largo">Tipo <select name="tipo">${Object.entries(TIPOS_REEMB).map(([k, n]) => `<option value="${k}" ${r?.tipo === k ? 'selected' : ''}>${n}</option>`).join('')}</select></label>
+        <label class="largo" data-r99>Descrição (obrigatória em “Outros”) <input name="descricao" maxlength="150" value="${esc(r?.descricao ?? '')}"></label>
+        <label class="largo">Documento de origem <select name="dt"><option value="DFE">NF-e, NFS-e ou CT-e (chave de acesso)</option><option value="FISCAL">Outro documento fiscal</option><option value="OUTRO">Documento não fiscal (recibo, fatura…)</option></select></label>
+        <label data-r-dfe>Tipo da chave <select name="tipoChave"><option value="1">NFS-e</option><option value="2">NF-e</option><option value="3">CT-e</option><option value="9">Outro</option></select></label>
+        <label class="largo" data-r-dfe>Chave de acesso (só números) <input name="chave" inputmode="numeric" maxlength="50" placeholder="44 a 50 dígitos"></label>
+        <label data-r-fiscal>Município do documento (IBGE) <input name="cMun" inputmode="numeric" maxlength="7"></label>
+        <label data-r-num>Número do documento <input name="numero" maxlength="255"></label>
+        <label class="largo" data-r-num>Descrição do documento <input name="ddesc" maxlength="255" placeholder="Ex.: Nota de serviço, recibo, guia"></label>
+        <label>CNPJ/CPF do fornecedor <input name="fdoc" inputmode="numeric" maxlength="18" value="${esc(r?.fornecedorDoc ?? '')}"></label>
+        <label>Nome do fornecedor <input name="fnome" maxlength="150" value="${esc(r?.fornecedorNome ?? '')}"></label>
+        <label>Emissão do documento <input type="date" name="dtEmi" required value="${r?.dtEmi ?? hoje}"></label>
+        <label>Competência do documento <input type="date" name="dtComp" required value="${r?.dtComp ?? hoje}"></label>
+        <label>Valor (R$) <input name="valor" data-num inputmode="decimal" required value="${r ? String(r.valor).replace('.', ',') : ''}"></label>
+      </div>
+      <p class="dica">Só pode ser reembolso sem acréscimo: o valor é o que foi pago ao fornecedor, com a nota emitida em nome do cliente. Taxa de administração ou margem entra na base normalmente.</p>
+      <p class="erro" id="erro-reemb"></p><div class="acoes"><button class="primario" type="submit">Salvar</button><button type="button" data-fechar>Cancelar</button></div></form>`, (dlg) => {
+      const F = $('#form-reemb');
+      if (r) { F.dt.value = r.doc.t; if (r.doc.t === 'DFE') { F.tipoChave.value = r.doc.tipoChave; F.chave.value = r.doc.chave; } else { F.numero.value = r.doc.numero; F.ddesc.value = r.doc.descricao; if (r.doc.t === 'FISCAL') F.cMun.value = r.doc.cMun; } }
+      const ajustar = () => {
+        dlg.querySelectorAll('[data-r99]').forEach((x) => (x.hidden = F.tipo.value !== '99'));
+        dlg.querySelectorAll('[data-r-dfe]').forEach((x) => (x.hidden = F.dt.value !== 'DFE'));
+        dlg.querySelectorAll('[data-r-fiscal]').forEach((x) => (x.hidden = F.dt.value !== 'FISCAL'));
+        dlg.querySelectorAll('[data-r-num]').forEach((x) => (x.hidden = F.dt.value === 'DFE'));
+      };
+      F.tipo.onchange = ajustar; F.dt.onchange = ajustar; ajustar();
+      F.onsubmit = (ev) => {
+        ev.preventDefault();
+        const d = lerForm(F), erro = (m) => ($('#erro-reemb').textContent = m);
+        if (!d.valor || d.valor <= 0) return erro('Informe o valor.');
+        if (d.tipo === '99' && !d.descricao) return erro('Descreva o reembolso (tipo “Outros”).');
+        const chave = String(d.chave ?? '').replace(/\D/g, '');
+        const doc = d.dt === 'DFE' ? { t: 'DFE', tipoChave: d.tipoChave, chave } : d.dt === 'FISCAL' ? { t: 'FISCAL', cMun: String(d.cMun ?? '').replace(/\D/g, ''), numero: d.numero ?? '', descricao: d.ddesc ?? '' } : { t: 'OUTRO', numero: d.numero ?? '', descricao: d.ddesc ?? '' };
+        if (doc.t === 'DFE' && !/^\d{44,50}$/.test(chave)) return erro('A chave de acesso tem de 44 a 50 dígitos.');
+        if (doc.t !== 'DFE' && (!doc.numero || !doc.descricao)) return erro('Informe o número e a descrição do documento.');
+        if (doc.t === 'FISCAL' && !/^\d{7}$/.test(doc.cMun)) return erro('Município do documento: código IBGE de 7 dígitos.');
+        if ((d.fdoc && !d.fnome) || (!d.fdoc && d.fnome)) return erro('Para informar o fornecedor, preencha o CNPJ/CPF e o nome.');
+        const novo = { tipo: d.tipo, descricao: d.tipo === '99' ? d.descricao : null, doc, fornecedorDoc: d.fdoc ? d.fdoc.replace(/\D/g, '') : null, fornecedorNome: d.fnome || null, dtEmi: d.dtEmi, dtComp: d.dtComp, valor: d.valor };
+        idx != null ? (reembolsos[idx] = novo) : reembolsos.push(novo);
+        dlg.close(); desenharReembolsos(); renderConferencia();
+      };
+    });
+  }
+  $('#add-reembolso').onclick = () => formReembolso(null);
+  desenharReembolsos();
   f.servicoId.onchange = () => {
     const s = servicos.find((x) => x.id === Number(f.servicoId.value));
     if (!s) return;
@@ -738,15 +807,16 @@ async function telaEmitir(notaIdCorrecao) {
     const v = (n) => brl(Math.round((n ?? 0) * 100) / 100);
     const pct = (n) => (n || n === 0 ? String(n).replace('.', ',') + '%' : '—');
     const issRet = Number(d.issRetido) === 2 || Number(d.issRetido) === 3;
-    const iss = Math.round(base * (d.aliquota ?? 0)) / 100;
+    const baseTrib = Math.round((base - somaReemb()) * 100) / 100; // reembolsos de terceiros ficam fora da base do ISS/IBS/CBS
+    const iss = Math.round(baseTrib * (d.aliquota ?? 0)) / 100;
     const linhas = [];
-    if (Number(d.tribISSQN) === 1) linhas.push(['ISS', base, d.aliquota, iss, issRet ? 'Retido pelo tomador' : 'A recolher pelo prestador']);
+    if (Number(d.tribISSQN) === 1) linhas.push(['ISS', baseTrib, d.aliquota, iss, issRet ? 'Retido pelo tomador' : 'A recolher pelo prestador']);
     else linhas.push(['ISS', base, null, 0, { 2: 'Imunidade', 3: 'Exportação', 4: 'Não incidência' }[Number(d.tribISSQN)]]);
     const ret = [['PIS', d.pPis, d.pis], ['COFINS', d.pCofins, d.cofins], ['CSLL', d.pCsll, d.csll], ['IRRF', d.pIrrf, d.irrf], ['INSS (contrib. previdenciária)', null, d.cp]];
     let retidas = 0;
     for (const [n, p, val] of ret) if (val) { linhas.push([n, base, p, val, 'Retido pelo tomador']); retidas += val; }
     const proprios = new Set(['ISS', 'PIS', 'COFINS', 'CSLL', 'IRRF', 'INSS']);
-    for (const it of ultimoEfetivo?.itens ?? []) if (!proprios.has(it.imposto)) { const b = base * (1 - (it.reducao_base || 0) / 100); linhas.push([it.imposto.replace('_', ' '), Math.round(b * 100) / 100, it.aliquota, Math.round(b * it.aliquota) / 100, 'Informativo (IBS/CBS)']); }
+    for (const it of ultimoEfetivo?.itens ?? []) if (!proprios.has(it.imposto)) { const b = baseTrib * (1 - (it.reducao_base || 0) / 100); linhas.push([it.imposto.replace('_', ' '), Math.round(b * 100) / 100, it.aliquota, Math.round(b * it.aliquota) / 100, 'Informativo (IBS/CBS)']); }
     const liquido = Math.round((base - retidas - (issRet ? iss : 0)) * 100) / 100;
     const tot = [d.tFed, d.tEst, d.tMun].some((x) => x) ? `<tr><td colspan="3">Tributos aproximados (fed ${pct(d.tFed)} · est ${pct(d.tEst)} · mun ${pct(d.tMun)})</td><td class="num">${v(base * ((d.tFed ?? 0) + (d.tEst ?? 0) + (d.tMun ?? 0)) / 100)}</td><td>Lei 12.741</td></tr>` : '';
     $('#conferencia').innerHTML = base > 0
@@ -905,6 +975,7 @@ async function telaEmitir(notaIdCorrecao) {
       aliquota: d.aliquota, tribISSQN: Number(d.tribISSQN), issRetido: Number(d.issRetido), tpImunidade: Number(d.tribISSQN) === 2 ? tpImunidadeServico : null,
       retencoes: { irrf: d.irrf, cp: d.cp, csll: d.csll, pis: d.pis, cofins: d.cofins, pPis: d.pPis, pCofins: d.pCofins }, infoComplementar: d.infoComplementar,
       pTotTrib: empresa()?.op_simp_nac === 1 ? { fed: d.tFed, est: d.tEst, mun: d.tMun } : undefined,
+      reembolsos: reembolsos.length ? reembolsos : undefined,
     };
     const botao = f.querySelector('[type=submit]');
     botao.disabled = true; botao.textContent = 'Enviando à Sefin…';

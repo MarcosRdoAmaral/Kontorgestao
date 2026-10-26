@@ -4,7 +4,7 @@
  * aqui (e a data/versão em MANUAL_VERSAO) antes de publicar a versão.
  * `corpo` é HTML escrito à mão (não recebe dados de usuário).
  */
-export const MANUAL_VERSAO = '3.9.1';
+export const MANUAL_VERSAO = '3.10.0';
 
 export const MANUAL = [
   {
@@ -75,6 +75,7 @@ export const MANUAL = [
         <li>Se o cliente fatura com boleto, no bloco <strong>Pagamento / parcelamento</strong> (logo depois de Serviço e retenções, onde já está o líquido da NFS-e) defina o vencimento (já sugerido pela regra do cliente). Para <strong>parcelar</strong>, informe o número de parcelas: o sistema divide o valor e sugere um vencimento por mês; ajuste data e valor de cada parcela (a soma precisa fechar com o boleto). Cada parcela vira um boleto, com o seu vencimento, e todos seguem no e-mail.</li>
         <li><strong>Emitir.</strong> O sistema monta a DPS, assina com o certificado e envia à Sefin.</li>
       </ol>
+      <p><strong>Reembolsos e repasses de terceiros:</strong> quando você paga algo por conta e ordem do cliente (documento em nome dele) e repassa sem acréscimo, use <em>Adicionar reembolso</em> no bloco <em>Reembolsos e repasses de terceiros</em>. Informe o tipo, o documento de origem (chave de acesso ou número), o fornecedor e o valor. Esse valor continua dentro do valor da nota, mas <strong>não entra na base do ISS, do IBS e da CBS</strong>; a conferência já mostra a base reduzida. Exige uma tributação com IBS/CBS e a soma não pode passar do valor do serviço. Taxa de administração ou margem sobre o repasse entra na base normalmente.</p>
       <h3>Se algo der errado</h3>
       <ul>
         <li><strong>Rejeitada:</strong> a tela da nota mostra o código e o motivo. Use <em>Corrigir e reenviar</em>; o número da DPS é mantido.</li>

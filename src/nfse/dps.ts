@@ -75,6 +75,12 @@ export interface DadosDPS {
     indDest: 0 | 1;
     cst: string;
     cClassTrib: string;
+    /** Reembolsos/repasses de terceiros: não entram na base do ISSQN, IBS e CBS. */
+    reeRepRes?: {
+      tipo: string; descricao?: string | null;
+      doc: { t: 'DFE'; tipoChave: string; chave: string } | { t: 'FISCAL'; cMun: string; numero: string; descricao: string } | { t: 'OUTRO'; numero: string; descricao: string };
+      fornecedorDoc?: string | null; fornecedorNome?: string | null; dtEmi: string; dtComp: string; valor: number;
+    }[];
   };
 }
 
@@ -92,6 +98,19 @@ export function gerarIdDps(cLocEmi: string, documentoPrestador: string, serie: s
 }
 
 /** Identificação de pessoa: CNPJ ou CPF conforme o tamanho do documento. */
+function reeRepResXml(l: NonNullable<DadosDPS['ibscbs']>['reeRepRes']): string {
+  if (!l?.length) return '';
+  return g('gReeRepRes', l.map((r) => {
+    const d = r.doc;
+    const doc = d.t === 'DFE' ? g('dFeNacional', t('tipoChaveDFe', d.tipoChave), d.tipoChave === '9' ? t('xTipoChaveDFe', 'Outro') : '', t('chaveDFe', d.chave))
+      : d.t === 'FISCAL' ? g('docFiscalOutro', t('cMunDocFiscal', d.cMun), t('nDocFiscal', d.numero), t('xDocFiscal', d.descricao))
+      : g('docOutro', t('nDoc', d.numero), t('xDoc', d.descricao));
+    const fd = limparDoc(r.fornecedorDoc ?? undefined);
+    const fornec = fd && r.fornecedorNome ? g('fornec', docPessoa(fd), t('xNome', r.fornecedorNome)) : '';
+    return g('documentos', doc, fornec, t('dtEmiDoc', r.dtEmi), t('dtCompDoc', r.dtComp), t('tpReeRepRes', r.tipo), r.tipo === '99' ? t('xTpReeRepRes', r.descricao ?? '') : '', t('vlrReeRepRes', dec(r.valor)));
+  }).join(''));
+}
+
 function docPessoa(documento?: string): string {
   const d = limparDoc(documento);
   if (!d) return '';
@@ -189,7 +208,7 @@ export function montarDps(d: DadosDPS): { xml: string; id: string } {
         t('indFinal', ib.indFinal),
         t('cIndOp', ib.cIndOp),
         t('indDest', ib.indDest),
-        g('valores', g('trib', g('gIBSCBS', t('CST', ib.cst), t('cClassTrib', ib.cClassTrib)))),
+        g('valores', reeRepResXml(ib.reeRepRes), g('trib', g('gIBSCBS', t('CST', ib.cst), t('cClassTrib', ib.cClassTrib)))),
       )
     : '';
 

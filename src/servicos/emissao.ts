@@ -61,6 +61,23 @@ function arquivar(empresa: any, competencia: string, nome: string, conteudo: str
 
 // ---------- Entrada da emissão ----------
 
+/** Reembolso, repasse ou ressarcimento de operação de terceiro: vai no grupo gReeRepRes e não entra na base do ISSQN, IBS e CBS. */
+export const Reembolso = z.object({
+  tipo: z.enum(['01', '02', '03', '04', '99']),
+  descricao: z.string().trim().max(150).nullish(),
+  doc: z.discriminatedUnion('t', [
+    z.object({ t: z.literal('DFE'), tipoChave: z.enum(['1', '2', '3', '9']), chave: z.string().regex(/^\d{44,50}$/, 'A chave do documento tem 44 a 50 dígitos') }),
+    z.object({ t: z.literal('FISCAL'), cMun: z.string().regex(/^\d{7}$/, 'Município do documento: código IBGE de 7 dígitos'), numero: z.string().trim().min(1).max(255), descricao: z.string().trim().min(1).max(255) }),
+    z.object({ t: z.literal('OUTRO'), numero: z.string().trim().min(1).max(255), descricao: z.string().trim().min(1).max(255) }),
+  ]),
+  fornecedorDoc: z.string().nullish(),
+  fornecedorNome: z.string().trim().max(150).nullish(),
+  dtEmi: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Data de emissão do documento inválida'),
+  dtComp: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Competência do documento inválida'),
+  valor: z.number().positive('Informe o valor do reembolso').max(999999999999),
+});
+export type Reembolso = z.infer<typeof Reembolso>;
+
 export const EntradaEmissao = z.object({
   empresaId: z.number().int(),
   tomadorId: z.number().int().nullish(),
@@ -88,6 +105,8 @@ export const EntradaEmissao = z.object({
   /** Tipo de documento (tributação) usado nesta nota; em branco vale o do serviço ou o padrão da empresa. */
   tipoDocumentoId: z.number().int().nullish(),
   ibscbs: z.object({ indFinal: z.union([z.literal(0), z.literal(1)]), cIndOp: z.string(), indDest: z.union([z.literal(0), z.literal(1)]), cst: z.string(), cClassTrib: z.string() }).nullish(),
+  /** Reembolsos/repasses recebidos por conta de terceiros (fora da base do ISSQN, IBS e CBS). */
+  reembolsos: z.array(Reembolso).max(50).nullish(),
   /** Totais aproximados de tributos (Lei 12.741) — usado por empresas não optantes do Simples. */
   pTotTrib: z.object({ fed: z.number().min(0).max(100).nullish(), est: z.number().min(0).max(100).nullish(), mun: z.number().min(0).max(100).nullish() }).nullish(),
 });
@@ -126,6 +145,13 @@ function montarDadosDps(empresa: any, e: EntradaEmissao, nDPS: number, ambiente:
   const ibscbs = e.ibscbs ?? (servico?.ibscbs_json ? JSON.parse(servico.ibscbs_json) : undefined);
   if (ibscbs && !(e.cNBS ?? servico?.c_nbs)) {
     throw new ErroNegocio('Com IBS/CBS a Sefin exige o código NBS do serviço (E0322). Edite o serviço em Serviços e escolha o NBS na busca.');
+  }
+  const reembolsos = e.reembolsos ?? [];
+  if (reembolsos.length) {
+    if (!ibscbs) throw new ErroNegocio('Reembolso e repasse são informados no grupo IBS/CBS da nota. Escolha uma tributação que tenha IBS/CBS (regime regular) ou retire os reembolsos.');
+    for (const r of reembolsos) if (r.tipo === '99' && !r.descricao?.trim()) throw new ErroNegocio('Reembolso do tipo "Outros" exige a descrição.');
+    const soma = Math.round(reembolsos.reduce((a, r) => a + r.valor, 0) * 100) / 100;
+    if (soma > e.valor + 0.005) throw new ErroNegocio(`Os reembolsos (${soma.toFixed(2)}) não podem passar do valor do serviço (${e.valor.toFixed(2)}) — E0953.`);
   }
   if (ibscbs && tomador) {
     const falta = [['cep', 'CEP'], ['logradouro', 'logradouro'], ['cod_municipio', 'município']].filter(([c]) => !tomador[c]).map(([, n]) => n);
@@ -188,7 +214,7 @@ function montarDadosDps(empresa: any, e: EntradaEmissao, nDPS: number, ambiente:
       pTotTrib: e.pTotTrib ? { fed: e.pTotTrib.fed ?? 0, est: e.pTotTrib.est ?? 0, mun: e.pTotTrib.mun ?? 0 } : undefined,
       pTotTribSN: empresa.op_simp_nac === 3 && empresa.p_tot_trib_sn != null ? empresa.p_tot_trib_sn : undefined,
     },
-    ibscbs,
+    ibscbs: ibscbs && reembolsos.length ? { ...ibscbs, reeRepRes: reembolsos } : ibscbs,
   };
 }
 
