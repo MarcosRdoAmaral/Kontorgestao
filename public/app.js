@@ -2509,6 +2509,7 @@ async function formTomador(t, aoSalvar) {
     <form id="form-tomador"><h2>${t.id ? 'Editar cliente' : 'Novo cliente'}</h2>
       <nav class="abas" id="abas-cliente"><a href="#" data-aba="cadastro" class="ativo">Cadastro</a><a href="#" data-aba="servicos">Serviços padrão${t.servicos_padrao?.length ? ' •' : ''}</a><a href="#" data-aba="descontos">Descontos${t.desconto_valor ? ' •' : ''}</a><a href="#" data-aba="descricao">Descrição da nota${t.descricao_modelo ? ' •' : ''}</a></nav>
       <div data-painel="cadastro">
+      ${t.conferir ? `<div class="banner teste"><strong>Falta conferir:</strong> ${esc(t.conferir_motivo ?? 'cadastro criado por planilha')}.<br>Complete o que faltar e marque <label class="check" style="display:inline-flex;gap:6px"><input type="checkbox" name="conferido"> Cadastro conferido</label> para tirar a marca.</div>` : ''}
       <fieldset class="sub"><legend>Identificação</legend><div class="grade">
         <label>Tipo <select name="tipo_doc">${['CNPJ', 'CPF', 'SEM'].map((v) => `<option value="${v}" ${t.tipo_doc === v ? 'selected' : ''}>${v === 'SEM' ? 'Sem documento' : v}</option>`).join('')}</select></label>
         <label>CNPJ / CPF <span class="linha-campo"><input name="documento" value="${esc(t.documento ?? '')}"><button type="button" data-buscar-cnpj>Buscar CNPJ</button></span><span class="dica" data-cnpj-info>Digite o CNPJ e clique em Buscar para preencher os dados.</span></label>
@@ -2668,14 +2669,60 @@ async function formTomador(t, aoSalvar) {
 
 async function telaTomadores() {
   const lista = await api('GET', `/api/empresas/${estado.empresaId}/tomadores`);
+  const aConferir = lista.filter((t) => t.conferir).length;
+  const filtro = aConferir ? (telaTomadores.filtro ?? 'todos') : 'todos';
+  const vis = filtro === 'conferir' ? lista.filter((t) => t.conferir) : lista;
   conteudo.innerHTML = `
     <div class="topo"><div><h1>Clientes (tomadores)</h1><p class="sutil">Clientes de ${esc(empresa().razao_social)}.</p></div>
-      <button class="primario" id="novo">Cadastrar cliente</button></div>
-    ${lista.length ? `<div class="rolagem"><table class="tabela"><thead><tr><th>Nome</th><th>Documento</th><th>E-mail</th><th>Faturamento</th><th>Desconto</th></tr></thead><tbody>
-      ${lista.map((t, i) => `<tr class="clicavel" data-i="${i}"><td>${esc(t.nome)}</td><td>${fmtDoc(t.documento)}</td><td>${esc(t.email ?? '')}</td><td>${NOME_MODO[t.modo_faturamento] ?? 'Nota'}</td><td>${t.desconto_valor ? `${brl(t.desconto_valor)}<br><span class="dica">${esc(t.desconto_motivo ?? '')}</span>` : ''}</td></tr>`).join('')}
+      <div><button id="imp-planilha">Importar planilha</button> <button class="primario" id="novo">Cadastrar cliente</button></div></div>
+    ${aConferir ? `<nav class="abas" id="filtros-cli"><a href="#" data-f="todos" class="${filtro === 'todos' ? 'ativo' : ''}">Todos (${lista.length})</a><a href="#" data-f="conferir" class="${filtro === 'conferir' ? 'ativo' : ''}">Falta conferir (${aConferir})</a></nav>` : ''}
+    ${vis.length ? `<div class="rolagem"><table class="tabela"><thead><tr><th>Nome</th><th>Documento</th><th>E-mail</th><th>Faturamento</th><th>Desconto</th></tr></thead><tbody>
+      ${vis.map((t, i) => `<tr class="clicavel" data-i="${i}"><td>${esc(t.nome)}${t.conferir ? ` <span class="selo-conferir" title="${esc(t.conferir_motivo ?? '')}">Conferir</span>` : ''}</td><td>${fmtDoc(t.documento)}</td><td>${esc(t.email ?? '')}</td><td>${NOME_MODO[t.modo_faturamento] ?? 'Nota'}</td><td>${t.desconto_valor ? brl(t.desconto_valor) : '<span class="dica">—</span>'}</td></tr>`).join('')}
     </tbody></table></div>` : '<div class="vazio">Nenhum tomador cadastrado.</div>'}`;
   $('#novo').onclick = () => formTomador(null, telaTomadores);
-  conteudo.querySelectorAll('tr[data-i]').forEach((tr) => (tr.onclick = () => formTomador(lista[tr.dataset.i], telaTomadores)));
+  $('#imp-planilha').onclick = () => importarPlanilhaClientes();
+  conteudo.querySelectorAll('#filtros-cli a').forEach((a) => (a.onclick = (ev) => { ev.preventDefault(); telaTomadores.filtro = a.dataset.f; telaTomadores(); }));
+  conteudo.querySelectorAll('tr[data-i]').forEach((tr) => (tr.onclick = () => formTomador(vis[tr.dataset.i], telaTomadores)));
+}
+
+/** Importa clientes de uma planilha (xlsx/csv) com CNPJ e, se houver, o nome; o sistema consulta cada CNPJ e deixa o cadastro marcado para conferir. */
+function importarPlanilhaClientes() {
+  const base = `/api/empresas/${estado.empresaId}/tomadores/planilha`;
+  abrirDialogo(`<div class="imp-planilha"><h2>Importar clientes de planilha</h2>
+    <p class="sutil">Envie um arquivo Excel (.xlsx) ou .csv com o <strong>CNPJ</strong> (ou CPF) e, se quiser, o nome do cliente, em qualquer coluna. Para cada CNPJ o sistema consulta a Receita Federal e preenche o cadastro, que fica marcado como <em>Falta conferir</em>. CPF precisa do nome na planilha.</p>
+    <input type="file" id="pl-arq" accept=".xlsx,.csv,.txt,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet">
+    <div id="pl-corpo"></div>
+    <div class="acoes"><button type="button" data-fechar>Fechar</button></div></div>`, (dlg) => {
+    const corpo = dlg.querySelector('#pl-corpo');
+    dlg.querySelector('#pl-arq').onchange = async (ev) => {
+      const f = ev.target.files[0]; if (!f) return;
+      corpo.innerHTML = '<p class="sutil">Lendo a planilha…</p>';
+      try {
+        const b64 = await new Promise((ok, no) => { const r = new FileReader(); r.onload = () => ok(String(r.result).split(',')[1]); r.onerror = no; r.readAsDataURL(f); });
+        const a = await api('POST', `${base}/analisar`, { nome: f.name, base64: b64 });
+        const r = a.resumo, novos = a.linhas.filter((l) => l.situacao === 'NOVO');
+        const ROT = { NOVO: 'Novo', EXISTE: 'Já cadastrado', REPETIDO: 'Repetido', INVALIDO: 'Inválido' };
+        corpo.innerHTML = `<p><strong>${r.novos}</strong> novo(s) · ${r.existentes} já cadastrado(s) · ${r.repetidos} repetido(s) · ${r.invalidos} inválido(s)</p>
+          ${a.linhas.length ? `<div class="rolagem" style="max-height:260px"><table class="tabela"><thead><tr><th>Linha</th><th>Documento</th><th>Nome na planilha</th><th>Situação</th></tr></thead><tbody>
+            ${a.linhas.map((l) => `<tr><td>${l.linha}</td><td>${l.documento ? fmtDoc(l.documento) : '<span class="dica">—</span>'}</td><td>${esc(l.nome ?? '')}</td><td class="${l.situacao === 'NOVO' ? 'cor-verde' : l.situacao === 'INVALIDO' ? 'cor-vermelho' : 'dica'}">${ROT[l.situacao]}${l.motivo && l.situacao !== 'EXISTE' ? ' — ' + esc(l.motivo) : ''}</td></tr>`).join('')}</tbody></table></div>` : '<p class="vazio">Nenhum CNPJ ou CPF encontrado na planilha.</p>'}
+          ${novos.length ? `<div class="acoes"><button class="primario" id="pl-ir">Importar ${novos.length} cliente(s)</button></div><div id="pl-prog"></div>` : ''}`;
+        const ir = corpo.querySelector('#pl-ir');
+        if (ir) ir.onclick = async () => {
+          ir.disabled = true; const prog = corpo.querySelector('#pl-prog'); const res = [];
+          for (let i = 0; i < novos.length; i += 5) {
+            prog.innerHTML = `<p class="sutil">Consultando a Receita e cadastrando… ${Math.min(i + 5, novos.length)} de ${novos.length}</p>`;
+            try { res.push(...(await api('POST', `${base}/importar`, { itens: novos.slice(i, i + 5).map((l) => ({ documento: l.documento, nome: l.nome })) })).resultados); }
+            catch (e) { novos.slice(i, i + 5).forEach((l) => res.push({ documento: l.documento, ok: false, mensagem: mensagemErro(e) })); }
+          }
+          const ok = res.filter((x) => x.ok);
+          prog.innerHTML = `<div class="banner"><strong>${ok.length} cliente(s) criado(s)</strong>${res.length - ok.length ? `, ${res.length - ok.length} com problema` : ''}. Todos ficam marcados como <em>Falta conferir</em>.</div>
+            <div class="rolagem" style="max-height:220px"><table class="tabela"><tbody>${res.map((x) => `<tr><td>${fmtDoc(x.documento)}</td><td>${esc(x.nome ?? '')}</td><td class="${x.ok ? 'cor-verde' : 'cor-vermelho'}">${esc(x.mensagem)}</td></tr>`).join('')}</tbody></table></div>
+            <div class="acoes"><button class="primario" id="pl-ver">Ver clientes a conferir</button></div>`;
+          prog.querySelector('#pl-ver').onclick = () => { telaTomadores.filtro = 'conferir'; dlg.close(); telaTomadores(); };
+        };
+      } catch (e) { corpo.innerHTML = `<p class="erro">${esc(mensagemErro(e))}</p>`; }
+    };
+  });
 }
 
 // ---------------------------------------------------------------------------

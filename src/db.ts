@@ -688,6 +688,9 @@ const migracoes: string[] = [
     ultimo_erro TEXT,
     automatica INTEGER NOT NULL DEFAULT 1
   );`,
+  // 26: clientes criados por planilha ficam marcados para conferência
+  `ALTER TABLE tomadores ADD COLUMN conferir INTEGER NOT NULL DEFAULT 0;
+  ALTER TABLE tomadores ADD COLUMN conferir_motivo TEXT;`,
 ];
 
 export function migrar(): void {

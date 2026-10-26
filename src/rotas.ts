@@ -21,6 +21,7 @@ import { pacoteContabilidade } from './servicos/contabilidade.js';
 import { ImportacaoRecebidas, buscarNaSefaz, buscarPorChave, configurarBusca, importarRecebidas, liberarCiencias, listarRecebidas, ocultarRecebida, xmlRecebida } from './servicos/nfe-recebidas.js';
 import { apagarCadeiaIcp, baixarCadeiaIcp, definirVerificacaoServidor, extrairCertificadosAc, guardarCadeiaIcp, statusConfianca } from './nfe/confianca.js';
 import { criarBackup, listarBackups } from './servicos/backup.js';
+import { analisarPlanilha, importarLote } from './servicos/importar-clientes.js';
 import { consultarCnpj } from './servicos/consulta-cnpj.js';
 import { strToU8, zipSync } from 'fflate';
 import fs from 'node:fs';
@@ -93,6 +94,8 @@ const Tomador = z.object({
   /** Desconto para pagamento antecipado: % do boleto, até N dias antes do vencimento (0 = até o vencimento). */
   desc_pontual_pct: z.number().min(0).max(100).nullish().transform((v) => (v && v > 0 ? v : null)),
   desc_pontual_dias: z.number().int().min(0).max(60).nullish().transform((v) => v ?? null),
+  /** true = o cadastro foi conferido (tira a marca "falta conferir"). */
+  conferido: z.boolean().nullish(),
   descricao_modelo: DescricaoModelo.nullish().transform((m) => (m ? JSON.stringify(m) : null)),
   /** Serviços que o sistema sempre usa com este cliente, com o valor de cada um. */
   servicos_padrao: z.array(z.object({
@@ -312,6 +315,16 @@ export async function rotas(app: FastifyInstance) {
       const sp = db.prepare('SELECT servico_id, valor, descricao, padrao FROM tomador_servicos WHERE tomador_id = ? ORDER BY padrao DESC, id');
       return linhas.map((t) => ({ ...t, servicos_padrao: (sp.all(t.id) as any[]).map((x) => ({ ...x, padrao: !!x.padrao })) }));
     });
+    api.post('/api/empresas/:id/tomadores/planilha/analisar', { bodyLimit: 8 * 1024 * 1024 }, async (req) => {
+      const id = Number((req.params as any).id); checarEmpresa(req, id);
+      const b = z.object({ nome: z.string().max(200).default('planilha.xlsx'), base64: z.string().min(20) }).parse(req.body);
+      return analisarPlanilha(id, b.nome, Buffer.from(b.base64, 'base64'));
+    });
+    api.post('/api/empresas/:id/tomadores/planilha/importar', async (req) => {
+      const id = Number((req.params as any).id); checarEmpresa(req, id);
+      const b = z.object({ itens: z.array(z.object({ documento: z.string().max(20), nome: z.string().max(300).nullish() })).min(1).max(10) }).parse(req.body);
+      return { resultados: await importarLote(id, b.itens) };
+    });
     api.post('/api/empresas/:id/tomadores', async (req) => {
       const id = Number((req.params as any).id);
       checarEmpresa(req, id);
@@ -337,6 +350,7 @@ export async function rotas(app: FastifyInstance) {
         .run(d.tipo_doc, d.documento, d.nome, d.inscricao_municipal ?? null, d.email || null, d.fone, d.cep, d.cod_municipio ?? null,
           d.logradouro ?? null, d.numero ?? null, d.complemento ?? null, d.bairro ?? null,
           d.modo_faturamento, d.vencimento_tipo, d.vencimento_valor, d.email_cobranca || null, d.enviar_email_auto, d.cidade || null, d.uf || null, d.desconto_valor, d.desconto_motivo, d.descricao_modelo, d.multa_pct, d.juros_pct_mes, d.desc_pontual_pct, d.desc_pontual_dias, id);
+      if (d.conferido) db.prepare('UPDATE tomadores SET conferir = 0, conferir_motivo = NULL WHERE id = ?').run(id);
       salvarServicosPadrao(t.empresa_id, id, d.servicos_padrao);
       return { ok: true };
     });

@@ -4,7 +4,7 @@
  * aqui (e a data/versão em MANUAL_VERSAO) antes de publicar a versão.
  * `corpo` é HTML escrito à mão (não recebe dados de usuário).
  */
-export const MANUAL_VERSAO = '3.17.3';
+export const MANUAL_VERSAO = '3.18.0';
 
 export const MANUAL = [
   {
@@ -42,6 +42,9 @@ export const MANUAL = [
     id: 'clientes', titulo: 'Clientes', resumo: 'Tomadores, forma de faturar, vencimento e serviços padrão.',
     corpo: `
       <p>Em <strong>Clientes</strong> ficam os tomadores de cada empresa. Informe o CNPJ/CPF (a busca preenche os dados), endereço e e-mail.</p>
+      <h3>Importar clientes de uma planilha</h3>
+      <p>Em <strong>Clientes → Importar planilha</strong>, envie um arquivo Excel (.xlsx) ou .csv com o <strong>CNPJ</strong> (ou CPF) e, se quiser, o nome, em qualquer coluna. O sistema mostra quantos são novos, quais já estão cadastrados, repetidos ou inválidos. Ao importar, ele <strong>consulta cada CNPJ na Receita Federal</strong> e preenche razão social, endereço, e-mail e telefone. CPF precisa do nome na planilha. CNPJ que o Excel mostrou sem o zero à esquerda é reconhecido.</p>
+      <p>Todo cliente criado assim fica com a marca <strong>Falta conferir</strong>, com o motivo (endereço incompleto, sem e-mail, situação na Receita, Receita fora do ar). Use a aba <em>Falta conferir</em> da lista, complete o cadastro e marque <em>Cadastro conferido</em> para tirar a marca.</p>
       <h3>Como faturar</h3>
       <ul>
         <li><strong>Somente nota:</strong> emite a NFS-e.</li>
