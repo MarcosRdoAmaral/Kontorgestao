@@ -4,7 +4,7 @@
  * aqui (e a data/versão em MANUAL_VERSAO) antes de publicar a versão.
  * `corpo` é HTML escrito à mão (não recebe dados de usuário).
  */
-export const MANUAL_VERSAO = '3.17.1';
+export const MANUAL_VERSAO = '3.17.2';
 
 export const MANUAL = [
   {
@@ -76,7 +76,6 @@ export const MANUAL = [
         <li><strong>Emitir.</strong> O sistema monta a DPS, assina com o certificado e envia à Sefin.</li>
       </ol>
       <p><strong>Retenção dispensada:</strong> retenção de até R$ 10,00 não é feita, a cada pagamento: PIS + COFINS + CSLL são somados (Lei 10.833/2003, art. 31, § 3º) e o IRRF é avaliado à parte (Lei 9.430/1996, art. 67). O valor dispensado <em>não se acumula</em> com notas seguintes (Solução de Consulta RFB 258/2024). O sistema aplica isso ao calcular as retenções pelos percentuais e na emissão automática, e mostra “Dispensada” na conferência. Para reter mesmo assim, digite o valor retido.</p>
-      <p><strong>Reembolsos e repasses de terceiros:</strong> quando você paga algo por conta e ordem do cliente (documento em nome dele) e repassa sem acréscimo, use <em>Adicionar reembolso</em> no bloco <em>Reembolsos e repasses de terceiros</em>. Informe o tipo, o documento de origem (chave de acesso ou número), o fornecedor e o valor. Esse valor continua dentro do valor da nota, mas <strong>não entra na base do ISS, do IBS e da CBS</strong>; a conferência já mostra a base reduzida. Exige uma tributação com IBS/CBS e a soma não pode passar do valor do serviço. Taxa de administração ou margem sobre o repasse entra na base normalmente.</p>
       <h3>Se algo der errado</h3>
       <ul>
         <li><strong>Rejeitada:</strong> a tela da nota mostra o código e o motivo. Use <em>Corrigir e reenviar</em>; o número da DPS é mantido.</li>
