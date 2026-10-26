@@ -4,7 +4,7 @@
  * aqui (e a data/versão em MANUAL_VERSAO) antes de publicar a versão.
  * `corpo` é HTML escrito à mão (não recebe dados de usuário).
  */
-export const MANUAL_VERSAO = '3.15.0';
+export const MANUAL_VERSAO = '3.15.1';
 
 export const MANUAL = [
   {
@@ -144,7 +144,7 @@ export const MANUAL = [
       </ol>
       <p><strong>Intervalo da SEFAZ:</strong> quando não há documentos novos, a SEFAZ só aceita nova consulta depois de 1 hora; o sistema respeita isso e mostra o horário liberado. Para uma nota específica, use <strong>Buscar pela chave</strong>.</p>
       <p>Notas <strong>canceladas pelo fornecedor</strong> aparecem riscadas e não podem ser importadas; se o cancelamento chegar depois da importação, um alerta em vermelho pede para conferir a compra. <strong>Ocultar</strong> esconde notas que não são compras da empresa (por exemplo, quando ela aparece só como transportadora). A Ciência da Operação não é a manifestação final: Confirmação, Desconhecimento ou Operação não Realizada continuam com o seu processo fiscal.</p>
-      <p><strong>Conexão com a SEFAZ</strong> (administrador): o servidor da SEFAZ usa certificado ICP-Brasil, que nem todo computador reconhece. Se a busca avisar disso, o sistema tenta baixar a cadeia oficial do ITI sozinho; se não conseguir, o administrador baixa o arquivo pelo navegador e envia nessa tela.</p>
+      <p><strong>Conexão com a SEFAZ</strong> (administrador): o servidor da SEFAZ usa certificado ICP-Brasil, que o Windows nem sempre reconhece. O sistema já traz essa cadeia embutida (raízes v5, v10, v11 e v12 e as ACs SSL dos servidores da SEFAZ), então normalmente não há nada a fazer. Se um dia a busca avisar que não reconhece o certificado do servidor, use <em>Atualizar pelo site do ITI</em> ou envie o pacote <em>ACcompactado.zip</em> baixado pelo navegador.</p>
       <h3>Importar o XML da NF-e</h3>
       <ol>
         <li>Clique em <strong>Importar XML da NF-e</strong> e escolha um ou <em>vários</em> arquivos de uma vez (o XML que o fornecedor envia ou que se baixa no portal da NF-e).</li>

@@ -327,14 +327,70 @@ test('cadeia ICP-Brasil: leitura de PEM, DER, PKCS#7 e ZIP; download oficial', a
   assert.equal(extrairCertificadosAc(fs.readFileSync(`${tmp}/c.p7b.pem`)).length, 1);
   assert.equal(extrairCertificadosAc(Buffer.from('lixo')).length, 0);
 
-  // download: servidor HTTP local fazendo o papel do repositório do ITI
-  const ITI = http.createServer((req, res) => { res.end(Buffer.from(zipSync({ 'a/raiz.cer': new Uint8Array(der) }))); });
+  // download: servidor HTTP local fazendo o papel do repositório do ITI. Só entra o que encadeia até uma raiz confiável:
+  // raiz de teste → AC intermediária (aceita) e uma AC solta, autoassinada por outra chave (recusada).
+  execSync(`cd ${tmp} && openssl req -x509 -newkey rsa:2048 -nodes -keyout rk.pem -out raiz.pem -days 30 -subj "/CN=RAIZ TESTE" -addext "basicConstraints=critical,CA:TRUE" 2>/dev/null`
+    + ` && openssl req -newkey rsa:2048 -nodes -keyout ik.pem -out i.csr -subj "/CN=AC SSL TESTE" 2>/dev/null`
+    + ` && printf "basicConstraints=critical,CA:TRUE\n" > ext.cnf && openssl x509 -req -in i.csr -CA raiz.pem -CAkey rk.pem -CAcreateserial -out inter.pem -days 30 -extfile ext.cnf 2>/dev/null`);
+  const inter = fs.readFileSync(`${tmp}/inter.pem`);
+  const raizTeste = fs.readFileSync(`${tmp}/raiz.pem`, 'utf8');
+  let pacote = Buffer.from(zipSync({ 'a/inter.crt': new Uint8Array(new crypto.X509Certificate(inter).raw), 'a/solta.cer': new Uint8Array(der), 'leia.txt': new TextEncoder().encode('x') }));
+  const ITI = http.createServer((req, res) => { res.end(pacote); });
   await new Promise<void>((r) => ITI.listen(0, '127.0.0.1', r));
+  const fecharIti = () => new Promise<void>((ok) => { if (!ITI.listening) return ok(); ITI.close(() => ok()); ITI.closeAllConnections(); });
+  try {
   process.env.SEFAZ_CADEIA_URL_TESTE = `http://127.0.0.1:${(ITI.address() as any).port}/ACcompactado.zip`;
   apagarCadeiaIcp();
-  const r = await baixarCadeiaIcp();
-  assert.equal(r.guardados, 1);
-  assert.equal(cadeiaIcpGuardada().length, 1);
-  assert.equal((await baixarCadeiaIcp()).guardados, 0, 'não duplica');
-  ITI.close();
+  let r = await baixarCadeiaIcp(undefined, [raizTeste]);
+  assert.equal(r.lidos, 2);
+  assert.equal(r.guardados, 1, 'só a AC que encadeia até a raiz');
+  assert.match(cadeiaIcpGuardada()[0], /BEGIN CERTIFICATE/);
+  assert.equal(new crypto.X509Certificate(cadeiaIcpGuardada()[0]).subject, 'CN=AC SSL TESTE');
+  assert.equal((await baixarCadeiaIcp(undefined, [raizTeste])).guardados, 0, 'não duplica');
+  // com as raízes ICP-Brasil reais, nada do pacote falso entra
+  apagarCadeiaIcp();
+  r = await baixarCadeiaIcp();
+  assert.equal(r.guardados, 0);
+  assert.match(r.falhas.join(), /nenhum certificado do arquivo encadeia/);
+  // falha de rede vira texto legível
+  await fecharIti();
+  const livre = http.createServer();
+  await new Promise<void>((ok) => livre.listen(0, '127.0.0.1', ok));
+  const portaLivre = (livre.address() as any).port;
+  await new Promise<void>((ok) => livre.close(() => ok()));
+  process.env.SEFAZ_CADEIA_URL_TESTE = `http://127.0.0.1:${portaLivre}/ACcompactado.zip`;
+  r = await baixarCadeiaIcp();
+  assert.match(r.falhas.join(), /^não foi possível baixar http:\/\/127\.0\.0\.1:\d+\/ACcompactado\.zip: conexão recusada/);
+  pacote = Buffer.alloc(0);
+  } finally { await fecharIti(); }
+});
+
+test('cadeia ICP-Brasil embutida: impressões digitais, assinaturas e uso na conexão', async () => {
+  const { CADEIA_ICP_EMBUTIDA } = await import('../src/nfe/icp-brasil-embutida.js');
+  const { autoridadesSefaz, statusConfianca } = await import('../src/nfe/confianca.js');
+  // SHA-256 conferidos no ACcompactado.zip do ITI (via @sinete/cert e @nfewizard/shared)
+  const esperado: Record<string, string> = {
+    'Autoridade Certificadora Raiz Brasileira v5': 'caa53fc6091c6951887c976e378f6ef89aa6377c55d97b6475422b71ed7e9b17',
+    'Autoridade Certificadora Raiz Brasileira v10': '6e0bff069a26994c15de2c4888cc54af84882e5495b7fbf66be9ccffec7489f6',
+    'Autoridade Certificadora Raiz Brasileira v11': '1406710058180fa4081aab3f246f1702429c552a11fa3143b84c88cb3ab8e5e7',
+    'Autoridade Certificadora Raiz Brasileira v12': 'd8478e37ce19c690cf657381e68fe600e4e1a042536830f06847e03e554c4b01',
+    'Autoridade Certificadora do SERPRO SSLv1': '08fc942d5176e568acbef9c595f36a20de6acf9ea30c6f5fcedd48216ed5b070',
+    'AC SOLUTI SSL EV G4': '8e30f7f0b678ca1440a94a5be416bed9ae5aff7f0f2e08d4bbe28af2c8eb8660',
+    'AC Certisign ICP-Brasil SSL EV G4': '1e36dcc28bc6fbdb23d5df49e55cfb6b27e29d99cc0d555226c2e1e07b838a23',
+  };
+  assert.equal(CADEIA_ICP_EMBUTIDA.length, Object.keys(esperado).length);
+  const v10 = new crypto.X509Certificate(CADEIA_ICP_EMBUTIDA.find((c) => c.nome.endsWith('v10'))!.pem);
+  for (const c of CADEIA_ICP_EMBUTIDA) {
+    const x = new crypto.X509Certificate(c.pem);
+    assert.equal(x.fingerprint256.replace(/:/g, '').toLowerCase(), esperado[c.nome], c.nome);
+    assert.equal(c.sha256, esperado[c.nome]);
+    assert.ok(x.ca, `${c.nome} é AC`);
+    if (c.tipo === 'raiz') assert.ok(x.verify(x.publicKey), `${c.nome} autoassinada`);
+    else assert.ok(x.checkIssued(v10) && x.verify(v10.publicKey), `${c.nome} emitida pela raiz v10`);
+  }
+  const ca = autoridadesSefaz();
+  for (const c of CADEIA_ICP_EMBUTIDA) assert.ok(ca.includes(c.pem), `${c.nome} vai para a conexão com a SEFAZ`);
+  const st = statusConfianca();
+  assert.equal(st.embutida.length, 7);
+  assert.match(st.urlPacote, /^http:\/\/acraiz\.icpbrasil\.gov\.br\/credenciadas\/CertificadosAC-ICP-Brasil\/ACcompactado\.zip$/);
 });

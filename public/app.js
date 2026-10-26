@@ -50,7 +50,10 @@ async function api(metodo, url, corpo, { bruto = false } = {}) {
 
 function mensagemErro(e) {
   if (e.campos?.length) return `${e.message}: ${e.campos.map((c) => `${c.campo || 'campo'} — ${c.mensagem}`).join('; ')}`;
-  if (Array.isArray(e.detalhes) && e.detalhes.length) return `${e.message} ${e.detalhes.map((d) => `[${d.codigo}] ${d.descricao}`).join(' ')}`;
+  if (Array.isArray(e.detalhes) && e.detalhes.length) {
+    const itens = e.detalhes.map((d) => (typeof d === 'string' ? d : d?.codigo ? `[${d.codigo}] ${d.descricao ?? ''}` : d?.descricao ?? '')).filter(Boolean);
+    if (itens.length) return `${e.message} ${itens.join(' ')}`;
+  }
   return e.message;
 }
 
@@ -1658,27 +1661,31 @@ function importarDaSefaz(base, chaves, opc, depois) {
 async function dialogoConexaoSefaz(depois, motivo) {
   let s;
   try { s = await api('GET', '/api/sefaz/conexao'); } catch (e) { aviso(mensagemErro(e)); return; }
+  const embRaizes = s.embutida.filter((c) => c.tipo === 'raiz').map((c) => c.nome.replace('Autoridade Certificadora Raiz Brasileira ', ''));
+  const embAcs = s.embutida.filter((c) => c.tipo !== 'raiz').map((c) => c.nome.replace('Autoridade Certificadora do ', 'AC '));
   abrirDialogo(`<div class="conexao-sefaz"><h2>Conexão com a SEFAZ</h2>
     ${motivo ? `<div class="banner perigo">${esc(motivo)}</div>` : ''}
-    <p class="sutil">O servidor da SEFAZ usa certificado da <strong>ICP-Brasil</strong>, que nem todo computador reconhece. Para conectar com segurança, o sistema guarda a cadeia ICP-Brasil e a usa só na conexão com a SEFAZ.</p>
-    <dl class="dados"><dt>Cadeia ICP-Brasil guardada</dt><dd>${s.cadeiaIcp ? `${s.cadeiaIcp} certificado(s)${s.raizesIcp.length ? ` — raiz: ${s.raizesIcp.map(esc).join(', ')}` : ''}` : '<span class="cor-vermelho">nenhuma</span>'}</dd>
+    <p class="sutil">O servidor da SEFAZ usa certificado da <strong>ICP-Brasil</strong>, que o Windows nem sempre reconhece. O sistema já traz essa cadeia embutida e a usa só na conexão com a SEFAZ.</p>
+    <dl class="dados"><dt>Embutida no sistema</dt><dd><span class="cor-verde">raízes ${embRaizes.map(esc).join(', ')}</span><br><span class="dica">e as ACs SSL dos servidores da SEFAZ: ${embAcs.map(esc).join(', ')}</span></dd>
+      <dt>Adicionais guardados</dt><dd>${s.cadeiaIcp ? `${s.cadeiaIcp} certificado(s)` : '<span class="dica">nenhum (normalmente não é preciso)</span>'}</dd>
       <dt>Verificar o servidor</dt><dd>${s.verificarServidor ? '<span class="cor-verde">ligado (recomendado)</span>' : '<span class="cor-vermelho">desligado</span>'}</dd></dl>
-    <h3>1. Baixar automaticamente</h3>
-    <p class="dica">Baixa a cadeia do repositório oficial do ITI (acraiz.icpbrasil.gov.br).</p>
-    <button id="cx-baixar" class="primario">Baixar cadeia ICP-Brasil</button>
-    <h3>2. Ou enviar o arquivo</h3>
-    <p class="dica">Se o download automático falhar, baixe pelo navegador o arquivo <em>ACcompactado.zip</em> (todas as ACs) ou as raízes .crt no site do ITI, ou a cadeia no Portal da NF-e, e envie aqui. Aceita .zip, .crt, .cer, .pem e .p7b.</p>
+    <h3>Se a SEFAZ trocar de certificado</h3>
+    <p class="dica">Só é preciso se a busca avisar que não reconhece o certificado do servidor (por exemplo, quando a SEFAZ passa a usar uma AC nova).</p>
+    <button id="cx-baixar" class="primario">Atualizar pelo site do ITI</button>
+    <p class="dica">Baixa o pacote oficial de ACs da ICP-Brasil e guarda só os certificados que encadeiam até as raízes acima.</p>
+    <h3>Ou enviar o arquivo</h3>
+    <p class="dica">Se a atualização automática falhar, baixe pelo navegador o pacote <a href="${esc(s.urlPacote)}" target="_blank" rel="noopener">ACcompactado.zip</a> (ou as raízes em <a href="${esc(s.urlRepositorio)}" target="_blank" rel="noopener">Repositório AC-Raiz do ITI</a>) e envie aqui. Aceita .zip, .crt, .cer, .pem e .p7b.</p>
     <input type="file" id="cx-arq" accept=".zip,.crt,.cer,.pem,.p7b,.p7c">
     <h3>Último recurso</h3>
     <label class="check"><input type="checkbox" id="cx-verificar" ${s.verificarServidor ? '' : 'checked'}> <span>Conectar <strong>sem verificar</strong> o certificado do servidor da SEFAZ (não recomendado; a conexão continua criptografada)</span></label>
     <p class="erro" id="cx-erro"></p>
-    <div class="acoes">${s.cadeiaIcp ? '<button id="cx-apagar">Apagar cadeia guardada</button>' : ''}<button data-fechar>Fechar</button></div></div>`, (dlg) => {
+    <div class="acoes">${s.cadeiaIcp ? '<button id="cx-apagar">Apagar adicionais</button>' : ''}<button data-fechar>Fechar</button></div></div>`, (dlg) => {
     const reabrir = (msg) => { dlg.close(); aviso(msg); dialogoConexaoSefaz(depois); depois?.(); };
     const erro = (e) => { $('#cx-erro').textContent = mensagemErro(e); };
     $('#cx-baixar').onclick = async (e) => {
       e.target.disabled = true; e.target.textContent = 'Baixando…';
-      try { const r = await api('POST', '/api/sefaz/conexao/baixar-cadeia'); reabrir(`Cadeia ICP-Brasil atualizada: ${r.cadeiaIcp} certificado(s). Tente buscar de novo.`); }
-      catch (err) { erro(err); e.target.disabled = false; e.target.textContent = 'Baixar cadeia ICP-Brasil'; }
+      try { const r = await api('POST', '/api/sefaz/conexao/baixar-cadeia'); reabrir(r.guardados ? `${r.guardados} certificado(s) novo(s) guardado(s) do pacote do ITI. Tente buscar de novo.` : `Pacote do ITI conferido (${r.lidos} certificados): nada novo para acrescentar.`); }
+      catch (err) { erro(err); e.target.disabled = false; e.target.textContent = 'Atualizar pelo site do ITI'; }
     };
     $('#cx-arq').onchange = async (e) => {
       const arq = e.target.files[0]; if (!arq) return;
@@ -1692,8 +1699,8 @@ async function dialogoConexaoSefaz(depois, motivo) {
       catch (err) { erro(err); e.target.checked = !e.target.checked; }
     };
     $('#cx-apagar')?.addEventListener('click', async () => {
-      if (!confirm('Apagar a cadeia ICP-Brasil guardada?')) return;
-      try { await api('DELETE', '/api/sefaz/conexao/cadeia'); reabrir('Cadeia apagada.'); } catch (err) { erro(err); }
+      if (!confirm('Apagar os certificados adicionais guardados? A cadeia embutida no sistema continua valendo.')) return;
+      try { await api('DELETE', '/api/sefaz/conexao/cadeia'); reabrir('Certificados adicionais apagados.'); } catch (err) { erro(err); }
     });
   });
 }
