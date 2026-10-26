@@ -134,8 +134,8 @@ async function comSefaz<T>(cert: CertificadoA1, fn: (cli: SefazAN) => Promise<T>
 function paraErroNegocio(e: unknown): never {
   if (e instanceof ErroSefaz) {
     if (e.tipo === 'CADEIA') {
-      throw new ErroNegocio('Este computador não reconhece o certificado do servidor da SEFAZ (cadeia ICP-Brasil) e não foi possível baixá-la automaticamente. '
-        + 'Um administrador pode resolver em Compras > Notas na SEFAZ > Conexão com a SEFAZ.', 502, { cadeia: true });
+      throw new ErroNegocio('O certificado do servidor da SEFAZ não foi reconhecido nem com a cadeia ICP-Brasil embutida no sistema (a SEFAZ pode ter passado a usar uma AC nova). '
+        + 'Um administrador pode atualizar em Compras > Notas na SEFAZ > Conexão com a SEFAZ.', 502, { cadeia: true });
     }
     throw new ErroNegocio(e.message, 502);
   }

@@ -3,30 +3,32 @@ import tls from 'node:tls';
 import forge from 'node-forge';
 import { unzipSync } from 'fflate';
 import { db } from '../db.js';
+import { CADEIA_ICP_EMBUTIDA } from './icp-brasil-embutida.js';
 
 /**
  * Confiança no servidor da SEFAZ (Ambiente Nacional da NF-e).
  *
  * Os web services da NF-e usam certificados da cadeia ICP-Brasil, que não está na lista de
  * autoridades do Node/Electron. Para a conexão com a SEFAZ (e só para ela) o sistema confia em:
- *  1. autoridades padrão do Node;
- *  2. autoridades do sistema operacional (repositório do Windows), quando o Node permite ler;
- *  3. a cadeia ICP-Brasil guardada no banco — baixada do repositório oficial do ITI ou enviada
- *     pelo administrador (arquivo .zip/.crt/.cer/.pem/.p7b).
+ *  1. a cadeia ICP-Brasil embutida no sistema (raízes v5/v10/v11/v12 e as ACs SSL dos servidores de DF-e);
+ *  2. autoridades padrão do Node e do sistema operacional (repositório do Windows);
+ *  3. certificados adicionais guardados no banco — baixados do repositório oficial do ITI (só os que
+ *     encadeiam até uma raiz embutida) ou enviados pelo administrador (.zip/.crt/.cer/.pem/.p7b).
  * Como último recurso o administrador pode desligar a verificação do servidor (não recomendado).
  */
 
 const P_CADEIA = 'sefaz_cadeia_icp';
 const P_VERIFICAR = 'sefaz_verificar_servidor';
 
-/** Repositório oficial do ITI: pacote com todas as ACs da ICP-Brasil e, em separado, as raízes. */
-export const URLS_CADEIA_ICP = [
-  'https://acraiz.icpbrasil.gov.br/credenciadas/CertificadosAC-ICP-Brasil/ACcompactado.zip',
-  'https://acraiz.icpbrasil.gov.br/credenciadas/RAIZ/ICP-Brasilv10.crt',
-  'https://acraiz.icpbrasil.gov.br/credenciadas/RAIZ/ICP-Brasilv5.crt',
-  'https://acraiz.icpbrasil.gov.br/credenciadas/RAIZ/ICP-Brasilv11.crt',
-  'https://acraiz.icpbrasil.gov.br/credenciadas/RAIZ/ICP-Brasilv12.crt',
-];
+/**
+ * Repositório oficial do ITI. O site é servido por http:// (o https:// usa certificado que o próprio Node não
+ * reconhece); a segurança vem da conferência da cadeia: só entram certificados assinados por uma raiz embutida.
+ */
+export const URL_ACCOMPACTADO = 'http://acraiz.icpbrasil.gov.br/credenciadas/CertificadosAC-ICP-Brasil/ACcompactado.zip';
+export const URL_REPOSITORIO_ITI = 'https://www.gov.br/iti/pt-br/assuntos/repositorio/repositorio-ac-raiz';
+
+export const PEMS_EMBUTIDOS = CADEIA_ICP_EMBUTIDA.map((c) => c.pem);
+const RAIZES_EMBUTIDAS = CADEIA_ICP_EMBUTIDA.filter((c) => c.tipo === 'raiz').map((c) => c.pem);
 
 export function parametro(nome: string): string | null {
   const r = db.prepare('SELECT valor FROM parametros WHERE nome = ?').get(nome) as { valor: string } | undefined;
@@ -122,33 +124,66 @@ function listaCa(tipo: 'default' | 'system'): string[] {
 
 /** Lista de autoridades usada só na conexão com a SEFAZ. */
 export function autoridadesSefaz(): string[] {
-  return [...new Set([...listaCa('default'), ...listaCa('system'), ...cadeiaIcpGuardada()])];
+  return [...new Set([...PEMS_EMBUTIDOS, ...listaCa('default'), ...listaCa('system'), ...cadeiaIcpGuardada()])];
 }
 
 /**
- * Baixa a cadeia ICP-Brasil do repositório oficial do ITI (por HTTPS, verificado pelas autoridades públicas).
- * Retorna quantos certificados novos foram guardados; 0 se não conseguiu baixar nada.
+ * Mantém só os certificados que encadeiam, com assinatura válida, até uma das raízes confiáveis.
+ * Usado no download pela internet (http), para que um arquivo adulterado no caminho não acrescente nada.
  */
-export async function baixarCadeiaIcp(baixar: (url: string) => Promise<Buffer> = baixarUrl): Promise<{ guardados: number; total: number; falhas: string[] }> {
-  const antes = cadeiaIcpGuardada().length;
-  const achados: string[] = [];
-  const falhas: string[] = [];
-  const urls = process.env.SEFAZ_CADEIA_URL_TESTE ? [process.env.SEFAZ_CADEIA_URL_TESTE] : URLS_CADEIA_ICP; // teste automatizado
-  for (const url of urls) {
-    try {
-      achados.push(...extrairCertificadosAc(await baixar(url)));
-    } catch (e) {
-      falhas.push(`${url}: ${(e as Error).message}`);
+export function encadeadosAte(pems: string[], raizes: string[] = RAIZES_EMBUTIDAS): string[] {
+  const confiaveis = new Map<string, crypto.X509Certificate>();
+  for (const r of raizes) { const x = new crypto.X509Certificate(r); confiaveis.set(x.fingerprint256, x); }
+  const pendentes = new Map<string, crypto.X509Certificate>();
+  for (const p of pems) { try { const x = new crypto.X509Certificate(p); if (x.ca) pendentes.set(x.fingerprint256, x); } catch { /* ignora */ } }
+  const aceitos: string[] = [];
+  let mudou = true;
+  while (mudou) { // várias passadas: AC de 2º nível entra depois da AC que a emitiu
+    mudou = false;
+    for (const [fp, x] of pendentes) {
+      if (confiaveis.has(fp)) { pendentes.delete(fp); continue; }
+      const emissor = [...confiaveis.values()].find((c) => x.checkIssued(c) && x.verify(c.publicKey));
+      if (emissor) { confiaveis.set(fp, x); aceitos.push(x.toString()); pendentes.delete(fp); mudou = true; }
     }
   }
-  if (!achados.length) return { guardados: 0, total: antes, falhas };
-  const total = guardarCadeiaIcp(achados);
-  return { guardados: total - antes, total, falhas };
+  return aceitos;
+}
+
+/** Texto curto para a falha de um download (o fetch do Node esconde o motivo em error.cause). */
+function motivo(e: unknown): string {
+  const err = e as Error & { cause?: { code?: string; message?: string } };
+  const codigo = err.cause?.code ?? (err as any).code;
+  if (err.name === 'TimeoutError' || codigo === 'UND_ERR_CONNECT_TIMEOUT') return 'tempo esgotado';
+  if (codigo === 'ENOTFOUND' || codigo === 'EAI_AGAIN') return 'endereço não encontrado (sem internet ou bloqueado)';
+  if (codigo === 'ECONNREFUSED' || codigo === 'ECONNRESET') return 'conexão recusada (firewall ou proxy?)';
+  return codigo ? `${err.cause?.message ?? err.message} (${codigo})` : err.cause?.message ?? err.message;
+}
+
+/**
+ * Baixa o pacote de ACs da ICP-Brasil do repositório oficial do ITI e guarda as ACs que encadeiam
+ * até uma raiz embutida (útil quando uma AC nova passa a emitir certificados para os servidores da SEFAZ).
+ */
+export async function baixarCadeiaIcp(baixar: (url: string) => Promise<Buffer> = baixarUrl, raizes?: string[]):
+  Promise<{ guardados: number; total: number; lidos: number; falhas: string[] }> {
+  const antes = cadeiaIcpGuardada().length;
+  const url = process.env.SEFAZ_CADEIA_URL_TESTE ?? URL_ACCOMPACTADO; // teste automatizado
+  const falhas: string[] = [];
+  let lidos: string[] = [];
+  try {
+    lidos = extrairCertificadosAc(await baixar(url));
+    if (!lidos.length) falhas.push('o arquivo baixado não tem certificados de AC');
+  } catch (e) {
+    falhas.push(`não foi possível baixar ${url}: ${motivo(e)}`);
+  }
+  const validos = encadeadosAte(lidos, raizes);
+  if (lidos.length && !validos.length) falhas.push('nenhum certificado do arquivo encadeia até as raízes ICP-Brasil do sistema');
+  const total = validos.length ? guardarCadeiaIcp(validos) : antes;
+  return { guardados: total - antes, total, lidos: lidos.length, falhas };
 }
 
 async function baixarUrl(url: string): Promise<Buffer> {
-  const r = await fetch(url, { signal: AbortSignal.timeout(30_000) });
-  if (!r.ok) throw new Error(`HTTP ${r.status}`);
+  const r = await fetch(url, { signal: AbortSignal.timeout(60_000) });
+  if (!r.ok) throw new Error(`o site respondeu HTTP ${r.status}`);
   return Buffer.from(await r.arrayBuffer());
 }
 
@@ -156,6 +191,9 @@ export function statusConfianca() {
   const cadeia = cadeiaIcpGuardada().map((p) => new crypto.X509Certificate(p));
   return {
     verificarServidor: verificarServidorSefaz(),
+    embutida: CADEIA_ICP_EMBUTIDA.map((c) => ({ nome: c.nome, tipo: c.tipo, validoAte: c.validoAte })),
+    urlRepositorio: URL_REPOSITORIO_ITI,
+    urlPacote: URL_ACCOMPACTADO,
     cadeiaIcp: cadeia.length,
     raizesIcp: cadeia.filter((x) => x.subject === x.issuer).map((x) => (x.subject.match(/CN=([^\n]+)/)?.[1] ?? x.subject)),
     autoridadesDoSistema: listaCa('system').length,

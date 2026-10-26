@@ -874,8 +874,10 @@ export async function rotas(app: FastifyInstance) {
     });
     api.post('/api/sefaz/conexao/baixar-cadeia', async () => {
       const r = await baixarCadeiaIcp();
-      if (!r.total) throw new ErroNegocio('Não foi possível baixar a cadeia ICP-Brasil do site do ITI. Baixe o arquivo pelo navegador e envie aqui.', 502, r.falhas);
-      return { ...statusConfianca(), guardados: r.guardados };
+      if (r.falhas.length && !r.guardados) {
+        throw new ErroNegocio(`Não foi possível atualizar pelo site do ITI: ${r.falhas.join('; ')}. A cadeia embutida no sistema continua valendo; se precisar, baixe o arquivo pelo navegador e envie aqui.`, 502);
+      }
+      return { ...statusConfianca(), guardados: r.guardados, lidos: r.lidos };
     });
     api.post('/api/sefaz/conexao/cadeia', async (req) => {
       let dados: Buffer | null = null;
