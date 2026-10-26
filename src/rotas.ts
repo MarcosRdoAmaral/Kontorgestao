@@ -16,7 +16,7 @@ import { catalogo, gerarRelatorio, relatorioCsv, relatorioPdf } from './servicos
 import { configurarAgenda, executarItem, executarProntas, listarAgenda, pularItem, resumoAgenda } from './servicos/agenda.js';
 import { EdicaoImposto, Tributacao, criarTributacao, editarTributacao, excluirTributacao, listarTributacoes, Perfil, TipoDocumento, apuracaoAssistida, conferirTipoDoVinculo, criarPerfil, criarTipo, editarImposto, editarPerfil, editarTipo, excluirPerfil, excluirTipo, gerarPerfisDosServicos, listarImpostos, listarPerfis, listarTipos, tributacaoCompletaDoServico, tributacaoEfetiva, NATUREZAS } from './servicos/tributacao.js';
 import { DescricaoModelo, EntradaDescricao, lerModelo, montarDescricao } from './servicos/descricao.js';
-import { CompraManual, OpcoesImportacao, criarCompraManual, excluirCompra, importarCompraXml, listarCompras, obterCompra, xmlDaCompra } from './servicos/compras.js';
+import { CompraManual, OpcoesImportacao, ParcelaEditada, alterarParcelas, previaCompraXml, criarCompraManual, excluirCompra, importarCompraXml, listarCompras, obterCompra, xmlDaCompra } from './servicos/compras.js';
 import { pacoteContabilidade } from './servicos/contabilidade.js';
 import { ImportacaoRecebidas, buscarNaSefaz, buscarPorChave, configurarBusca, importarRecebidas, liberarCiencias, listarRecebidas, ocultarRecebida, xmlRecebida } from './servicos/nfe-recebidas.js';
 import { apagarCadeiaIcp, baixarCadeiaIcp, definirVerificacaoServidor, extrairCertificadosAc, guardarCadeiaIcp, statusConfianca } from './nfe/confianca.js';
@@ -814,12 +814,24 @@ export async function rotas(app: FastifyInstance) {
     };
     api.get('/api/empresas/:id/compras', async (req) => {
       const id = Number((req.params as any).id); checarEmpresa(req, id);
-      const { mes } = z.object({ mes: z.string().regex(/^\d{4}-\d{2}$/) }).parse(req.query);
-      return listarCompras(id, mes);
+      const f = z.object({ mes: z.string().regex(/^\d{4}-\d{2}$/).optional(), q: z.string().max(80).optional(), de: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(), ate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional() }).parse(req.query);
+      return listarCompras(id, f.mes ?? null, f);
     });
     api.post('/api/empresas/:id/compras/importar-xml', { bodyLimit: 6 * 1024 * 1024 }, async (req) => {
       const id = Number((req.params as any).id); checarEmpresa(req, id);
       return importarCompraXml(id, u(req).id, OpcoesImportacao.parse(req.body));
+    });
+    api.post('/api/empresas/:id/compras/previa-xml', { bodyLimit: 6 * 1024 * 1024 }, async (req) => {
+      const id = Number((req.params as any).id); checarEmpresa(req, id);
+      return previaCompraXml(id, z.object({ xml: z.string().min(200) }).parse(req.body).xml);
+    });
+    api.put('/api/compras/:id/parcelas', async (req) => {
+      const id = Number((req.params as any).id); compraDoUsuario(req, id);
+      return alterarParcelas(id, u(req).id, z.object({ parcelas: z.array(ParcelaEditada).min(1).max(60) }).parse(req.body).parcelas);
+    });
+    api.get('/api/empresas/:id/compras/sefaz/previa/:chave', async (req) => {
+      const id = empresaDaRota(req);
+      return previaCompraXml(id, xmlRecebida(id, Chave.parse((req.params as any).chave)).xml);
     });
     api.post('/api/empresas/:id/compras', async (req) => {
       const id = Number((req.params as any).id); checarEmpresa(req, id);

@@ -79,3 +79,59 @@ test('compras: leitura da NF-e, importação, despesas, duplicidade, exclusão e
   assert.equal((db.prepare('SELECT COUNT(*) AS n FROM despesas').get() as any).n, 1, 'despesas geradas pela compra saem junto');
   assert.equal(listarCompras(1, '2026-10').compras.length, 2);
 });
+
+test('compras: prévia do XML, parcelas ajustadas na importação e depois, e busca', async () => {
+  const { db } = await import('../src/db.js');
+  const { importarCompraXml, previaCompraXml, alterarParcelas, listarCompras, obterCompra } = await import('../src/servicos/compras.js');
+  const ch = '35261012345678000195550010000012341000077777';
+  const xml = nfe(cobr, ch);
+  const pv = previaCompraXml(1, xml);
+  assert.equal(pv.numero, '1234'); assert.equal(pv.itens.length, 2); assert.equal(pv.parcelas.length, 2); assert.equal(pv.parcelasDaNota, true);
+  assert.equal(pv.bloqueio, null); assert.equal(pv.totais.nf, 260);
+  assert.equal((db.prepare('SELECT COUNT(*) n FROM compras WHERE chave_acesso = ?').get(ch) as any).n, 0, 'a prévia não grava');
+
+  // parcelas que não fecham com o total são recusadas; as ajustadas valem no lugar das da nota
+  assert.throws(() => importarCompraXml(1, 1, { xml, gerarDespesas: true, categoria: 'x', parcelas: [{ vencimento: '2026-11-15', valor: 100 }] }), /fechar com o total/);
+  const r = importarCompraXml(1, 1, { xml, gerarDespesas: true, categoria: 'Material e equipamentos', parcelas: [{ vencimento: '2026-11-15', valor: 100 }, { vencimento: '2026-12-15', valor: 100 }, { vencimento: '2027-01-15', valor: 60 }] });
+  let c = obterCompra(r.id);
+  assert.deepEqual(c.parcelas.map((p: any) => [p.vencimento, p.valor]), [['2026-11-15', 100], ['2026-12-15', 100], ['2027-01-15', 60]]);
+  assert.equal((db.prepare("SELECT COUNT(*) n FROM despesas WHERE descricao LIKE 'NF 1234%' AND valor IN (100, 60) AND data >= '2026-11-15'").get() as any).n, 3);
+  assert.equal(previaCompraXml(1, xml).bloqueio?.includes('já foi importada'), true);
+
+  // alterar depois: de 3 para 2 parcelas, a despesa que sobra é apagada
+  const antes = (db.prepare('SELECT COUNT(*) n FROM despesas').get() as any).n;
+  assert.throws(() => alterarParcelas(r.id, 1, [{ vencimento: '2026-11-20', valor: 50 }]), /fechar com o total/);
+  alterarParcelas(r.id, 1, [{ vencimento: '2026-11-20', valor: 130 }, { vencimento: '2026-12-20', valor: 130 }]);
+  c = obterCompra(r.id);
+  assert.deepEqual(c.parcelas.map((p: any) => p.valor), [130, 130]);
+  assert.equal((db.prepare('SELECT COUNT(*) n FROM despesas').get() as any).n, antes - 1);
+  assert.equal(c.parcelas.every((p: any) => p.despesa_id), true);
+
+  // parcela já ligada ao extrato trava a alteração
+  db.prepare("INSERT INTO extrato_importacoes (empresa_id, arquivo, qtd, hash) VALUES (1, 'x', 1, 'hh')").run();
+  const lid = Number(db.prepare("INSERT INTO extrato_lancamentos (empresa_id, importacao_id, data, descricao, documento, valor, saldo, chave) VALUES (1, (SELECT MAX(id) FROM extrato_importacoes), '2026-11-20', 'PIX', '1', -130, 0, 'kk')").run().lastInsertRowid);
+  db.prepare('UPDATE despesas SET extrato_lancamento_id = ? WHERE id = ?').run(lid, c.parcelas[0].despesa_id);
+  assert.throws(() => alterarParcelas(r.id, 1, [{ vencimento: '2026-11-20', valor: 260 }]), /ligada ao extrato/);
+
+  // busca por fornecedor, número, CNPJ e período
+  assert.equal(listarCompras(1, null, { q: 'papelaria', de: '2026-10-01', ate: '2026-10-31' }).compras.length >= 1, true);
+  assert.equal(listarCompras(1, null, { q: '12.345.678/0001-95' }).compras.length >= 1, true);
+  assert.equal(listarCompras(1, null, { q: 'inexistente' }).compras.length, 0);
+  assert.equal(listarCompras(1, null, { q: '1234', de: '2030-01-01', ate: '2030-12-31' }).compras.length, 0);
+});
+
+test('compras: importação das notas da SEFAZ aceita parcelas ajustadas', async () => {
+  const { db } = await import('../src/db.js');
+  const { previaCompraXml } = await import('../src/servicos/compras.js');
+  const { importarRecebidas } = await import('../src/servicos/nfe-recebidas.js');
+  const ch = '35261012345678000195550010000012341000088888';
+  const xml = nfe(cobr, ch);
+  db.prepare("INSERT INTO nfe_recebidas (empresa_id, chave, numero, emitente_nome, emissao, valor, situacao, xml) VALUES (1, ?, '1234', 'Papelaria', '2026-10-10', 260, 'AUTORIZADA', ?)").run(ch, xml);
+  assert.equal(previaCompraXml(1, xml).parcelas.length, 2);
+  const falha = importarRecebidas(1, 1, { chaves: [ch], gerarDespesas: true, categoria: 'x', parcelas: [{ vencimento: '2026-11-01', valor: 10 }] });
+  assert.equal(falha.importadas, 0);
+  const ok = importarRecebidas(1, 1, { chaves: [ch], gerarDespesas: true, categoria: 'x', parcelas: [{ vencimento: '2026-11-01', valor: 60 }, { vencimento: '2026-11-15', valor: 200 }] });
+  assert.equal(ok.importadas, 1);
+  const c = db.prepare("SELECT p.vencimento, p.valor FROM compra_parcelas p JOIN compras c ON c.id = p.compra_id WHERE c.chave_acesso = ? ORDER BY p.vencimento").all(ch) as any[];
+  assert.deepEqual(c.map((x) => x.valor), [60, 200]);
+});

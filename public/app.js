@@ -406,13 +406,13 @@ async function iniciar() {
 
 /** A tela pertence a algum módulo liberado para o usuário? (o servidor confere de novo em cada chamada) */
 function telaPermitida(nome) {
-  const modulo = { painel: 'painel', emitir: 'emitir', notas: 'notas', nota: 'notas', cobrancas: 'cobrancas', banco: 'empresas', despesas: 'despesas', compras: 'compras', tributacao: 'tributacao', extrato: 'despesas', cartao: 'despesas', agenda: 'emitir', relatorios: 'relatorios', tomadores: 'tomadores', servicos: 'servicos', empresas: 'empresas' }[nome];
+  const modulo = { painel: 'painel', emitir: 'emitir', notas: 'notas', nota: 'notas', cobrancas: 'cobrancas', banco: 'empresas', despesas: 'despesas', compras: 'compras', entradas: 'compras', 'nfe-sefaz': 'compras', tributacao: 'tributacao', extrato: 'despesas', cartao: 'despesas', agenda: 'emitir', relatorios: 'relatorios', tomadores: 'tomadores', servicos: 'servicos', empresas: 'empresas' }[nome];
   return nome === 'config' || (modulo && estado.usuario.modulos.includes(modulo));
 }
 
 const rotas = {
   painel: telaPainel, emitir: telaEmitir, notas: telaNotas, nota: telaNota,
-  cobrancas: telaCobrancas, banco: telaBanco, despesas: telaDespesas, compras: telaCompras, tributacao: telaTributacao, extrato: telaExtrato, cartao: telaCartao, agenda: telaAgenda, relatorios: telaRelatorios, tomadores: telaTomadores, servicos: telaServicos, empresas: telaEmpresas, config: telaConfig,
+  cobrancas: telaCobrancas, banco: telaBanco, despesas: telaDespesas, compras: telaCompras, entradas: telaEntradas, 'nfe-sefaz': telaNfeSefaz, tributacao: telaTributacao, extrato: telaExtrato, cartao: telaCartao, agenda: telaAgenda, relatorios: telaRelatorios, tomadores: telaTomadores, servicos: telaServicos, empresas: telaEmpresas, config: telaConfig,
 };
 
 function rotear() {
@@ -1437,59 +1437,152 @@ async function abaImpostos() {
 // ---------------------------------------------------------------------------
 // Compras (NF-e de entrada)
 // ---------------------------------------------------------------------------
-async function telaCompras() {
-  const mes = telaCompras.mes ?? mesAtual();
+const isoMais = (iso, d) => new Date(Date.parse(iso + 'T12:00:00Z') + d * 86400e3).toISOString().slice(0, 10);
+
+/** Editor de parcelas: linhas de vencimento e valor, com a conferência contra o total da nota. */
+function editorParcelas(box, parcelas, total, base) {
+  let linhas = parcelas.map((p) => ({ numero: p.numero ?? null, vencimento: p.vencimento, valor: p.valor }));
+  const fmt = (v) => String(v.toFixed(2)).replace('.', ',');
+  const soma = () => Math.round(linhas.reduce((a, p) => a + (Number(p.valor) || 0), 0) * 100) / 100;
+  const desenhar = () => {
+    box.innerHTML = `<table class="tabela"><thead><tr><th>Parcela</th><th>Vencimento</th><th class="num">Valor (R$)</th><th></th></tr></thead><tbody>
+      ${linhas.map((p, i) => `<tr><td>${i + 1}/${linhas.length}</td><td><input type="date" data-pv="${i}" value="${p.vencimento}"></td>
+        <td class="num"><input data-pq="${i}" data-num inputmode="decimal" size="10" value="${fmt(p.valor)}"></td>
+        <td>${linhas.length > 1 ? `<button type="button" data-pr="${i}" title="Remover parcela">×</button>` : ''}</td></tr>`).join('')}</tbody></table>
+      <div class="acoes-linha"><button type="button" id="p-add">Adicionar parcela</button>
+        <label style="display:inline-flex;gap:6px;align-items:center">Refazer em <input id="p-n" type="number" min="1" max="60" value="${linhas.length}" style="width:64px"> parcelas a cada <input id="p-d" type="number" min="1" max="365" value="30" style="width:64px"> dias</label>
+        <button type="button" id="p-refaz">Refazer</button></div>
+      <p id="p-status"></p>`;
+    status();
+    box.querySelectorAll('[data-pv]').forEach((i) => (i.onchange = () => { linhas[Number(i.dataset.pv)].vencimento = i.value; }));
+    box.querySelectorAll('[data-pq]').forEach((i) => (i.oninput = () => { linhas[Number(i.dataset.pq)].valor = numero(i.value) ?? 0; status(); }));
+    box.querySelectorAll('[data-pr]').forEach((b) => (b.onclick = () => { linhas.splice(Number(b.dataset.pr), 1); desenhar(); }));
+    box.querySelector('#p-add').onclick = () => { const ult = linhas[linhas.length - 1]; linhas.push({ numero: null, vencimento: isoMais(ult?.vencimento ?? base, 30), valor: Math.max(0, Math.round((total - soma()) * 100) / 100) }); desenhar(); };
+    box.querySelector('#p-refaz').onclick = () => {
+      const n = Math.min(60, Math.max(1, Number(box.querySelector('#p-n').value) || 1)), dias = Math.max(1, Number(box.querySelector('#p-d').value) || 30);
+      const ini = linhas[0]?.vencimento ?? base, cent = Math.round(total * 100), cada = Math.floor(cent / n);
+      linhas = Array.from({ length: n }, (_, i) => ({ numero: null, vencimento: isoMais(ini, dias * i), valor: (i === n - 1 ? cent - cada * (n - 1) : cada) / 100 }));
+      desenhar();
+    };
+  };
+  const status = () => {
+    const dif = Math.round((soma() - total) * 100) / 100, el = box.querySelector('#p-status');
+    if (el) el.innerHTML = Math.abs(dif) < 0.005 ? `<span class="cor-verde">Parcelas fecham com o total da nota (${brl(total)}).</span>`
+      : `<span class="cor-vermelho">Soma das parcelas ${brl(soma())} · total da nota ${brl(total)} · ${dif > 0 ? 'sobram' : 'faltam'} ${brl(Math.abs(dif))}.</span>`;
+  };
+  desenhar();
+  return { ler: () => linhas.map((p) => ({ numero: p.numero, vencimento: p.vencimento, valor: Number(p.valor) || 0 })), fecha: () => Math.abs(soma() - total) < 0.005 };
+}
+
+async function dadosDeEntrada() {
   const base = `/api/empresas/${estado.empresaId}`;
-  const [d, cat] = await Promise.all([api('GET', `${base}/compras?mes=${mes}`), api('GET', `${base}/despesas?mes=${mes}`).then((x) => x.categorias).catch(() => ['Outras'])]);
+  const cat = await api('GET', `${base}/despesas?mes=${mesAtual()}`).then((x) => x.categorias).catch(() => ['Outras']);
   const tiposEntrada = await api('GET', `${base}/tributacao/tipos`).then((r) => r.tipos.filter((t) => t.sentido === 'ENTRADA')).catch(() => []);
   const opcTipo = () => `<option value="">${tiposEntrada.some((t) => t.padrao) ? 'Tributação padrão da empresa' : 'Sem tributação'}</option>` + tiposEntrada.map((t) => `<option value="${t.id}">${esc(t.nome)}</option>`).join('');
   const opcCat = (sel) => cat.map((c) => `<option ${c === sel ? 'selected' : ''}>${esc(c)}</option>`).join('');
+  return { base, cat, tiposEntrada, opcTipo, opcCat };
+}
+
+const linhaCompra = (c) => `<tr class="clicavel" data-c="${c.id}"><td>${dataBr(c.emissao)}</td><td>${esc(c.fornecedor_nome)}${c.fornecedor_documento ? `<br><span class="dica">${fmtDoc(c.fornecedor_documento)}</span>` : ''}</td>
+  <td>${esc(c.numero ?? '')}${c.origem === 'MANUAL' ? ' <span class="dica">(manual)</span>' : ''}</td><td class="num">${c.itens || ''}</td><td class="num">${brl(c.valor_total)}</td>
+  <td>${c.despesas ? `<span class="cor-verde">lançadas (${esc(c.categoria ?? '')})</span>` : '<span class="dica">não lançadas</span>'}</td><td><button data-ver="${c.id}">Abrir</button></td></tr>`;
+
+/** Consulta das notas de compra já lançadas: busca por fornecedor, número, CNPJ ou chave, no período. */
+async function telaCompras() {
+  const est = (telaCompras.est ??= { q: '', de: mesAtual() + '-01', ate: '' });
+  if (!est.ate) { const [a, m] = mesAtual().split('-').map(Number); est.ate = `${mesAtual()}-${String(new Date(a, m, 0).getDate()).padStart(2, '0')}`; }
+  const base = `/api/empresas/${estado.empresaId}`;
+  const d = await api('GET', `${base}/compras?de=${est.de}&ate=${est.ate}${est.q ? '&q=' + encodeURIComponent(est.q) : ''}`);
   conteudo.innerHTML = `
-    <div class="topo"><div><h1>Compras</h1><p class="sutil">Notas fiscais de mercadorias que a empresa comprou. Busque as notas emitidas contra o CNPJ direto na SEFAZ, importe o XML da NF-e (um ou vários arquivos) ou lance a compra manualmente.</p></div>
-      <div><label>Mês <input type="month" id="mes-comp" value="${mes}"></label>
-        <button class="primario" id="imp-xml">Importar XML da NF-e</button><input type="file" id="arq-xml" accept=".xml,text/xml,application/xml" multiple hidden>
-        <button id="nova-compra">Lançar compra manual</button></div></div>
+    <div class="topo"><div><h1>Notas de compra</h1><p class="sutil">Consulta das NF-e e compras já lançadas. Para lançar uma nova, use <a href="#/entradas">Lançar entradas</a>.</p></div>
+      <div><button class="primario" id="ir-entradas">Lançar entradas</button></div></div>
+    <form id="busca-comp" class="grade" style="align-items:end">
+      <label class="largo">Buscar <input type="search" name="q" value="${esc(est.q)}" placeholder="Fornecedor, nº da nota, CNPJ ou chave de acesso"></label>
+      <label>De <input type="date" name="de" value="${est.de}"></label><label>Até <input type="date" name="ate" value="${est.ate}"></label>
+      <div><button class="primario" type="submit">Buscar</button></div></form>
     <div class="resumo">
-      <div class="cartao"><div class="sutil">Total comprado</div><div class="valor">${compacto(d.total)}</div><div class="dica">${d.compras.length} compra(s) em ${nomeMes(mes)}</div></div>
+      <div class="cartao"><div class="sutil">Total no período</div><div class="valor">${compacto(d.total)}</div><div class="dica">${d.compras.length} nota(s)</div></div>
       <div class="cartao"><div class="sutil">Maiores fornecedores</div>${d.fornecedores.length ? d.fornecedores.map((f) => `<div class="dica">${esc(f.nome)} · <strong>${brl(f.total)}</strong></div>`).join('') : '<div class="dica">—</div>'}</div>
     </div>
-    <div id="painel-sefaz"></div>
-    ${d.compras.length ? `<div class="rolagem"><table class="tabela"><thead><tr><th>Emissão</th><th>Fornecedor</th><th>NF</th><th class="num">Itens</th><th class="num">Total</th><th>Despesas</th><th></th></tr></thead><tbody>
-      ${d.compras.map((c) => `<tr class="clicavel" data-c="${c.id}"><td>${dataBr(c.emissao)}</td><td>${esc(c.fornecedor_nome)}${c.fornecedor_documento ? `<br><span class="dica">${fmtDoc(c.fornecedor_documento)}</span>` : ''}</td>
-        <td>${esc(c.numero ?? '')}${c.origem === 'MANUAL' ? ' <span class="dica">(manual)</span>' : ''}</td><td class="num">${c.itens || ''}</td><td class="num">${brl(c.valor_total)}</td>
-        <td>${c.despesas ? `<span class="cor-verde">lançadas (${esc(c.categoria ?? '')})</span>` : '<span class="dica">não lançadas</span>'}</td><td><button data-ver="${c.id}">Abrir</button></td></tr>`).join('')}
-    </tbody></table></div>` : '<div class="vazio">Nenhuma compra neste mês. Importe o XML da NF-e recebida do fornecedor.</div>'}`;
-  $('#mes-comp').onchange = (e) => { telaCompras.mes = e.target.value; telaCompras(); };
-  painelSefaz(base, { opcCat, opcTipo, tiposEntrada });
+    ${d.compras.length ? `<div class="rolagem"><table class="tabela"><thead><tr><th>Emissão</th><th>Fornecedor</th><th>NF</th><th class="num">Itens</th><th class="num">Total</th><th>Despesas</th><th></th></tr></thead><tbody>${d.compras.map(linhaCompra).join('')}</tbody></table></div>`
+      : '<div class="vazio">Nenhuma nota encontrada neste período e busca.</div>'}`;
+  $('#ir-entradas').onclick = () => { location.hash = '#/entradas'; };
+  $('#busca-comp').onsubmit = (e) => { e.preventDefault(); const f = e.target; Object.assign(est, { q: f.q.value.trim(), de: f.de.value || '0000-01-01', ate: f.ate.value || '9999-12-31' }); telaCompras(); };
   conteudo.querySelectorAll('[data-ver]').forEach((b) => (b.onclick = (ev) => { ev.stopPropagation(); detalheCompra(Number(b.dataset.ver), telaCompras); }));
   conteudo.querySelectorAll('tr[data-c]').forEach((tr) => (tr.onclick = () => detalheCompra(Number(tr.dataset.c), telaCompras)));
+}
+
+/** Conferência de UMA nota: resumo do XML, parcelamento editável, importar ou pular. Resolve { ok, ... }. */
+function conferirNotaDialogo({ opc, pv, rotulo, origem, ultima, enviar }) {
+  return new Promise((fim) => {
+    const t = pv.totais;
+    abrirDialogo(`<form id="form-nota"><h2>${esc(rotulo)} — NF ${esc(pv.numero)}</h2>
+      <p class="sutil">${esc(pv.fornecedor.nome)} · ${fmtDoc(pv.fornecedor.documento)}${pv.fornecedor.municipio ? ' · ' + esc(pv.fornecedor.municipio) + (pv.fornecedor.uf ? '/' + esc(pv.fornecedor.uf) : '') : ''}<br>emitida em ${dataBr(pv.emissao)}${pv.natureza ? ' · ' + esc(pv.natureza) : ''}${origem ? ' · ' + esc(origem) : ''}</p>
+      ${pv.bloqueio ? `<div class="banner perigo">${esc(pv.bloqueio)}</div>` : ''}${pv.alertas.map((x) => `<div class="banner teste">⚠ ${esc(x)}</div>`).join('')}
+      <dl class="dados"><dt>Produtos</dt><dd>${brl(t.produtos)}</dd>${t.frete + t.seguro ? `<dt>Frete e seguro</dt><dd>${brl(t.frete + t.seguro)}</dd>` : ''}${t.desconto ? `<dt>Desconto</dt><dd>${brl(t.desconto)}</dd>` : ''}${t.ipi ? `<dt>IPI</dt><dd>${brl(t.ipi)}</dd>` : ''}${t.icmsSt ? `<dt>ICMS-ST</dt><dd>${brl(t.icmsSt)}</dd>` : ''}<dt>Total da nota</dt><dd><strong>${brl(t.nf)}</strong></dd></dl>
+      <details><summary>${pv.itens.length} item(ns)</summary><div class="rolagem"><table class="tabela"><thead><tr><th>#</th><th>Descrição</th><th>NCM</th><th class="num">Qtd</th><th class="num">Total</th></tr></thead><tbody>
+        ${pv.itens.map((i) => `<tr><td>${i.n}</td><td>${esc(i.descricao)}</td><td>${esc(i.ncm ?? '')}</td><td class="num">${String(i.quantidade).replace('.', ',')} ${esc(i.unidade ?? '')}</td><td class="num">${brl(i.valor)}</td></tr>`).join('')}</tbody></table></div></details>
+      <h3>Parcelamento ${pv.parcelasDaNota ? 'da nota' : '(a nota não traz parcelas: à vista na emissão)'}</h3>
+      <p class="dica">Se o pagamento real for diferente do informado na nota, altere as datas e os valores. A soma precisa fechar com o total.</p>
+      <div id="ed-parc"></div>
+      <div class="grade"><label class="check largo"><input type="checkbox" name="gerar" checked> Lançar as parcelas nas <strong>despesas</strong>, na data de vencimento</label>
+        <label>Categoria da despesa <select name="categoria">${opc.opcCat('Material e equipamentos')}</select></label>
+        ${opc.tiposEntrada.length ? `<label>Tributação <select name="tipo">${opc.opcTipo()}</select></label>` : ''}</div>
+      <p class="erro" id="erro-nota"></p>
+      <div class="acoes"><button class="primario" type="submit" ${pv.bloqueio ? 'disabled' : ''}>Importar esta nota</button><button type="button" id="pular">${ultima ? 'Cancelar' : 'Pular'}</button></div></form>`, (dlg) => {
+      const ed = editorParcelas(dlg.querySelector('#ed-parc'), pv.parcelas, t.nf, pv.emissao);
+      let feito = false; const sair = (v) => { if (!feito) { feito = true; fim(v); } };
+      dlg.addEventListener('close', () => sair({ ok: false }));
+      dlg.querySelector('#pular').onclick = () => { sair({ ok: false }); dlg.close(); };
+      dlg.querySelector('#form-nota').onsubmit = async (e2) => {
+        e2.preventDefault(); const f = e2.target;
+        if (!ed.fecha()) { $('#erro-nota').textContent = 'A soma das parcelas precisa fechar com o total da nota.'; return; }
+        try {
+          const parcelas = ed.ler();
+          const r = await enviar(f, parcelas);
+          const x = r.resultados ? r.resultados[0] : r;
+          if (x.ok === false) { $('#erro-nota').textContent = x.mensagem; return; }
+          sair({ ok: true, numero: x.numero ?? pv.numero, fornecedor: x.fornecedor ?? pv.fornecedor.nome, valor: x.valor ?? t.nf, parcelas: parcelas.length, compraId: x.compraId ?? x.id, alertas: x.alertas ?? [] }); dlg.close();
+        } catch (err) { $('#erro-nota').textContent = mensagemErro(err); }
+      };
+    });
+  });
+}
+
+/** Lançamento de entradas: importa os XMLs nota a nota (resumo e parcelas para conferir) ou lança uma compra manual. */
+async function telaEntradas() {
+  const { base, tiposEntrada, opcTipo, opcCat } = await dadosDeEntrada();
+  const rec = await api('GET', `${base}/compras?mes=${mesAtual()}`);
+  conteudo.innerHTML = `
+    <div class="topo"><div><h1>Lançar entradas</h1><p class="sutil">Importe o XML da NF-e recebida do fornecedor. O sistema mostra o resumo de cada nota e o parcelamento para você conferir (e ajustar, se o pagamento real for diferente) antes de lançar nas despesas.</p></div>
+      <div><button class="primario" id="imp-xml">Importar XML da NF-e</button><input type="file" id="arq-xml" accept=".xml,text/xml,application/xml" multiple hidden>
+        <button id="nova-compra">Lançar compra manual</button></div></div>
+    <h2>Lançadas neste mês</h2>
+    ${rec.compras.length ? `<div class="rolagem"><table class="tabela"><thead><tr><th>Emissão</th><th>Fornecedor</th><th>NF</th><th class="num">Itens</th><th class="num">Total</th><th>Despesas</th><th></th></tr></thead><tbody>${rec.compras.slice(0, 10).map(linhaCompra).join('')}</tbody></table></div>
+      <p class="dica">Para pesquisar outras notas, abra <a href="#/compras">Notas de compra</a>.</p>` : '<div class="vazio">Nada lançado neste mês ainda.</div>'}`;
+  conteudo.querySelectorAll('[data-ver]').forEach((b) => (b.onclick = (ev) => { ev.stopPropagation(); detalheCompra(Number(b.dataset.ver), telaEntradas); }));
+  conteudo.querySelectorAll('tr[data-c]').forEach((tr) => (tr.onclick = () => detalheCompra(Number(tr.dataset.c), telaEntradas)));
 
   $('#imp-xml').onclick = () => $('#arq-xml').click();
   $('#arq-xml').onchange = (ev) => {
     const arqs = [...ev.target.files]; ev.target.value = '';
-    if (!arqs.length) return;
-    abrirDialogo(`<form id="form-imp"><h2>Importar ${arqs.length} XML de NF-e</h2>
-      <p class="dica">${arqs.map((a) => esc(a.name)).join(', ')}</p>
-      <label class="check"><input type="checkbox" name="gerar" checked> Lançar as parcelas (ou o total, se à vista) nas <strong>despesas</strong>, na data de vencimento</label>
-      <label>Categoria da despesa <select name="categoria">${opcCat('Material e equipamentos')}</select></label>
-      ${tiposEntrada.length ? `<label>Tributação <select name="tipo">${opcTipo()}</select></label>` : ''}
-      <div id="res-imp"></div>
-      <div class="acoes"><button class="primario" type="submit">Importar</button><button type="button" data-fechar>Fechar</button></div></form>`, (dlg) => {
-      dlg.querySelector('#form-imp').onsubmit = async (e2) => {
-        e2.preventDefault();
-        const f = e2.target, btn = f.querySelector('[type=submit]'); btn.disabled = true; btn.textContent = 'Importando…';
-        const linhas = [];
-        for (const a of arqs) {
-          try {
-            const r = await api('POST', `${base}/compras/importar-xml`, { xml: await a.text(), gerarDespesas: f.gerar.checked, categoria: f.categoria.value, tipoDocumentoId: f.tipo?.value ? Number(f.tipo.value) : null });
-            linhas.push(`<li class="cor-verde">NF ${esc(r.numero)} — ${esc(r.fornecedor)} · ${brl(r.valor)} · ${r.itens} item(ns)${r.alertas.map((x) => `<br><span class="aviso-txt">⚠ ${esc(x)}</span>`).join('')}</li>`);
-          } catch (err) { linhas.push(`<li class="cor-vermelho">${esc(a.name)}: ${esc(mensagemErro(err))}</li>`); }
-        }
-        f.querySelector('#res-imp').innerHTML = `<ul class="lista-simples">${linhas.join('')}</ul>`;
-        btn.textContent = 'Concluído'; telaCompras();
-      };
-    });
+    if (arqs.length) conferirNotas(arqs);
   };
+
+  async function conferirNotas(arqs) {
+    const resultado = [];
+    for (let k = 0; k < arqs.length; k++) {
+      const a = arqs[k];
+      let xml, pv;
+      try { xml = await a.text(); pv = await api('POST', `${base}/compras/previa-xml`, { xml }); }
+      catch (err) { resultado.push(`<li class="cor-vermelho">${esc(a.name)}: ${esc(mensagemErro(err))}</li>`); continue; }
+      const r = await conferirNotaDialogo({ opc: { tiposEntrada, opcTipo, opcCat }, pv, rotulo: `Nota ${k + 1} de ${arqs.length}`, origem: a.name, ultima: k + 1 === arqs.length,
+        enviar: (f, parcelas) => api('POST', `${base}/compras/importar-xml`, { xml, gerarDespesas: f.gerar.checked, categoria: f.categoria.value, tipoDocumentoId: f.tipo?.value ? Number(f.tipo.value) : null, parcelas }) });
+      resultado.push(r.ok ? `<li class="cor-verde">NF ${esc(r.numero)} — ${esc(r.fornecedor)} · ${brl(r.valor)} · ${r.parcelas} parcela(s)</li>` : `<li class="dica">NF ${esc(pv.numero)} — ${esc(pv.fornecedor.nome)}: não importada</li>`);
+    }
+    abrirDialogo(`<div><h2>Importação concluída</h2><ul class="lista-simples">${resultado.join('')}</ul><div class="acoes"><button class="primario" data-fechar>Fechar</button></div></div>`, () => {});
+    telaEntradas();
+  }
 
   $('#nova-compra').onclick = () => abrirDialogo(`<form id="form-comp"><h2>Lançar compra manual</h2>
     <div class="grade">
@@ -1510,15 +1603,24 @@ async function telaCompras() {
       e2.preventDefault(); const f = e2.target; const v = lerForm(f);
       try {
         await api('POST', `${base}/compras`, { fornecedor_nome: v.fornecedor_nome, fornecedor_documento: v.fornecedor_documento, numero: v.numero, emissao: v.emissao, valor_total: v.valor_total, vencimento: v.vencimento, observacao: v.observacao, categoria: f.categoria.value, gerarDespesas: f.gerar.checked, tipoDocumentoId: f.tipo?.value ? Number(f.tipo.value) : null });
-        dlg.close(); aviso('Compra lançada.'); telaCompras();
+        dlg.close(); aviso('Compra lançada.'); telaEntradas();
       } catch (err) { $('#erro-comp').textContent = mensagemErro(err); }
     };
   });
 }
 
+
 // ---------------------------------------------------------------------------
 // Compras: NF-e emitidas contra o CNPJ, direto da SEFAZ (Distribuição DF-e)
 // ---------------------------------------------------------------------------
+/** Busca das NF-e emitidas contra o CNPJ direto na SEFAZ; a importação passa pela conferência nota a nota. */
+async function telaNfeSefaz() {
+  const opc = await dadosDeEntrada();
+  conteudo.innerHTML = `<div class="topo"><div><h1>Buscar NF-e (SEFAZ)</h1><p class="sutil">Notas fiscais emitidas contra o CNPJ desta empresa, direto do Ambiente Nacional. Ao importar, cada nota abre com o resumo e o parcelamento para você conferir. As notas importadas ficam em <a href="#/compras">Notas de compra</a>.</p></div></div>
+    <div id="painel-sefaz"></div>`;
+  painelSefaz(opc.base, opc);
+}
+
 const SIT_SEFAZ = {
   PRONTA: 'Pronta para importar', NOVA: 'Ciência pendente', AGUARDANDO_XML: 'Aguardando XML', CIENCIA_RECUSADA: 'Ciência recusada',
   CANCELADA: 'Cancelada pelo fornecedor', CANCELADA_IMPORTADA: 'Cancelada após importar', IMPORTADA: 'Importada', DENEGADA: 'Denegada',
@@ -1578,7 +1680,7 @@ async function painelSefaz(base, opc) {
   if (todasCb) todasCb.onchange = () => { el.querySelectorAll('.sel-sefaz').forEach((c) => (c.checked = todasCb.checked)); atualizarBotao(); };
   if (btImp) btImp.onclick = () => importarDaSefaz(base, marcadas(), opc, recarregar);
   el.querySelectorAll('[data-imp]').forEach((b) => (b.onclick = () => importarDaSefaz(base, [b.dataset.imp], opc, recarregar)));
-  el.querySelectorAll('[data-abrir]').forEach((b) => (b.onclick = () => detalheCompra(Number(b.dataset.abrir), telaCompras)));
+  el.querySelectorAll('[data-abrir]').forEach((b) => (b.onclick = () => detalheCompra(Number(b.dataset.abrir), telaNfeSefaz)));
   el.querySelectorAll('[data-xml]').forEach((b) => (b.onclick = () => baixar(`${url}/xml/${b.dataset.xml}`, `NFe-${b.dataset.xml}.xml`)));
   el.querySelectorAll('[data-ocultar]').forEach((b) => (b.onclick = async () => {
     try { await api('POST', `${url}/ocultar`, { chave: b.dataset.ocultar, oculta: b.dataset.v === '1' }); recarregar(); } catch (e) { aviso(mensagemErro(e)); }
@@ -1631,30 +1733,19 @@ function tratarErroSefaz(err, depois) {
   else aviso(`${err.message} Peça ao administrador do sistema.`);
 }
 
-function importarDaSefaz(base, chaves, opc, depois) {
+async function importarDaSefaz(base, chaves, opc, depois) {
   if (!chaves.length) return;
-  abrirDialogo(`<form id="form-imp-sefaz"><h2>Importar ${chaves.length} NF-e da SEFAZ</h2>
-    <label class="check"><input type="checkbox" name="gerar" checked> <span>Lançar as parcelas (ou o total, se à vista) nas <strong>despesas</strong>, na data de vencimento</span></label>
-    <label>Categoria da despesa <select name="categoria">${opc.opcCat('Material e equipamentos')}</select></label>
-    ${opc.tiposEntrada.length ? `<label>Tributação <select name="tipo">${opc.opcTipo()}</select></label>` : ''}
-    <div id="res-imp-sefaz"></div>
-    <div class="acoes"><button class="primario" type="submit">Importar</button><button type="button" data-fechar>Fechar</button></div></form>`, (dlg) => {
-    dlg.addEventListener('close', () => { telaCompras(); }, { once: true });
-    dlg.querySelector('#form-imp-sefaz').onsubmit = async (e) => {
-      e.preventDefault();
-      const f = e.target, btn = f.querySelector('[type=submit]');
-      btn.disabled = true; btn.textContent = 'Importando…';
-      try {
-        const r = await api('POST', `${base}/compras/sefaz/importar`, { chaves, gerarDespesas: f.gerar.checked, categoria: f.categoria.value, tipoDocumentoId: f.tipo?.value ? Number(f.tipo.value) : null });
-        f.querySelector('#res-imp-sefaz').innerHTML = `<ul class="lista-simples">${r.resultados.map((x) => x.ok
-          ? `<li class="cor-verde">${esc(x.mensagem)} · ${brl(x.valor)}${(x.alertas ?? []).map((a) => `<br><span class="aviso-txt">⚠ ${esc(a)}</span>`).join('')} <button type="button" data-abrir-compra="${x.compraId}">Abrir compra</button></li>`
-          : `<li class="cor-vermelho">${esc(x.mensagem)}</li>`).join('')}</ul>`;
-        f.querySelectorAll('[data-abrir-compra]').forEach((b) => (b.onclick = () => detalheCompra(Number(b.dataset.abrirCompra), telaCompras)));
-        btn.textContent = `Concluído: ${r.importadas} de ${chaves.length}`;
-        depois?.();
-      } catch (err) { f.querySelector('#res-imp-sefaz').innerHTML = `<p class="erro">${esc(mensagemErro(err))}</p>`; btn.disabled = false; btn.textContent = 'Importar'; }
-    };
-  });
+  const resultado = [];
+  for (let k = 0; k < chaves.length; k++) {
+    let pv;
+    try { pv = await api('GET', `${base}/compras/sefaz/previa/${chaves[k]}`); }
+    catch (err) { resultado.push(`<li class="cor-vermelho">${esc(chaves[k])}: ${esc(mensagemErro(err))}</li>`); continue; }
+    const r = await conferirNotaDialogo({ opc, pv, rotulo: `Nota ${k + 1} de ${chaves.length}`, origem: 'SEFAZ', ultima: k + 1 === chaves.length,
+      enviar: (f, parcelas) => api('POST', `${base}/compras/sefaz/importar`, { chaves: [chaves[k]], gerarDespesas: f.gerar.checked, categoria: f.categoria.value, tipoDocumentoId: f.tipo?.value ? Number(f.tipo.value) : null, parcelas }) });
+    resultado.push(r.ok ? `<li class="cor-verde">NF ${esc(r.numero)} — ${esc(r.fornecedor)} · ${brl(r.valor)} · ${r.parcelas} parcela(s)${r.alertas.map((a) => `<br><span class="aviso-txt">⚠ ${esc(a)}</span>`).join('')}</li>` : `<li class="dica">NF ${esc(pv.numero)} — ${esc(pv.fornecedor.nome)}: não importada</li>`);
+  }
+  abrirDialogo(`<div><h2>Importação concluída</h2><ul class="lista-simples">${resultado.join('')}</ul><div class="acoes"><button class="primario" data-fechar>Fechar</button></div></div>`, () => {});
+  depois?.();
 }
 
 /** Administrador: cadeia ICP-Brasil usada só na conexão com a SEFAZ. */
@@ -1715,7 +1806,22 @@ async function detalheCompra(id, voltar) {
     <h3>Totais</h3><dl class="dados"><dt>Produtos</dt><dd>${brl(c.valor_produtos)}</dd>${c.valor_frete ? `<dt>Frete e seguro</dt><dd>${brl(c.valor_frete)}</dd>` : ''}${c.valor_outras ? `<dt>Outras despesas</dt><dd>${brl(c.valor_outras)}</dd>` : ''}${c.valor_desconto ? `<dt>Desconto</dt><dd>${brl(c.valor_desconto)}</dd>` : ''}${c.valor_icms ? `<dt>ICMS</dt><dd>${brl(c.valor_icms)}</dd>` : ''}${c.valor_ipi ? `<dt>IPI</dt><dd>${brl(c.valor_ipi)}</dd>` : ''}<dt>Total da nota</dt><dd><strong>${brl(c.valor_total)}</strong></dd></dl>
     <h3>Parcelas</h3><table class="tabela"><thead><tr><th>Parcela</th><th>Vencimento</th><th class="num">Valor</th><th>Despesa</th></tr></thead><tbody>
       ${c.parcelas.map((p) => `<tr><td>${esc(p.numero ?? '')}</td><td>${dataBr(p.vencimento)}</td><td class="num">${brl(p.valor)}</td><td>${p.despesa_id ? 'lançada' : '<span class="dica">não lançada</span>'}</td></tr>`).join('')}</tbody></table>
-    <div class="acoes">${c.tem_xml ? '<button id="c-xml">Baixar XML</button>' : ''}${podeExcluirRegistros() ? '<button class="perigo" id="c-excluir">Excluir compra</button>' : ''}<button data-fechar>Fechar</button></div></div>`, (dlg) => {
+    <div class="acoes"><button id="c-parcelas">Alterar parcelas</button>${c.tem_xml ? '<button id="c-xml">Baixar XML</button>' : ''}${podeExcluirRegistros() ? '<button class="perigo" id="c-excluir">Excluir compra</button>' : ''}<button data-fechar>Fechar</button></div></div>`, (dlg) => {
+    dlg.querySelector('#c-parcelas')?.addEventListener('click', () => {
+      dlg.close();
+      abrirDialogo(`<form id="form-parc"><h2>Alterar parcelas — NF ${esc(c.numero ?? '')}</h2>
+        <p class="dica">Ajuste datas e valores conforme o pagamento real. As despesas geradas pela compra acompanham. A soma precisa fechar com o total (${brl(c.valor_total)}).</p>
+        <div id="ed-parc"></div><p class="erro" id="erro-parc"></p>
+        <div class="acoes"><button class="primario" type="submit">Salvar parcelas</button><button type="button" data-fechar>Cancelar</button></div></form>`, (d2) => {
+        const ed = editorParcelas(d2.querySelector('#ed-parc'), c.parcelas, c.valor_total, c.emissao);
+        d2.querySelector('#form-parc').onsubmit = async (e) => {
+          e.preventDefault();
+          if (!ed.fecha()) { $('#erro-parc').textContent = 'A soma das parcelas precisa fechar com o total da nota.'; return; }
+          try { await api('PUT', `/api/compras/${id}/parcelas`, { parcelas: ed.ler() }); d2.close(); aviso('Parcelas atualizadas.'); voltar(); }
+          catch (err) { $('#erro-parc').textContent = mensagemErro(err); }
+        };
+      });
+    });
     dlg.querySelector('#c-xml')?.addEventListener('click', () => baixar(`/api/compras/${id}/xml`, `NFe_${c.numero ?? id}.xml`));
     dlg.querySelector('#c-excluir')?.addEventListener('click', async () => {
       if (!confirm('Excluir esta compra? As despesas que ela gerou também serão apagadas. Não dá para desfazer.')) return;

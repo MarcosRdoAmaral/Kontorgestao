@@ -7,12 +7,25 @@ import { conferirTipoDoVinculo, tipoPadrao } from './tributacao.js';
 const r2 = (n: number) => Math.round((n + Number.EPSILON) * 100) / 100;
 const soDig = (s: string | null | undefined) => String(s ?? '').replace(/[^0-9A-Za-z]/g, '').toUpperCase();
 
+export const ParcelaEditada = z.object({
+  vencimento: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Vencimento inválido'),
+  valor: z.number().positive('O valor da parcela precisa ser maior que zero'),
+  numero: z.string().max(20).nullish(),
+});
+
+function conferirSoma(parcelas: { valor: number }[], total: number) {
+  const soma = r2(parcelas.reduce((a, p) => a + p.valor, 0));
+  if (Math.abs(soma - total) > 0.01) throw new ErroNegocio(`A soma das parcelas (R$ ${soma.toFixed(2)}) precisa fechar com o total da nota (R$ ${total.toFixed(2)}).`);
+}
+
 export const OpcoesImportacao = z.object({
   xml: z.string().min(200),
   /** Lança as parcelas (ou o total, se à vista) como despesas na data de vencimento. */
   gerarDespesas: z.boolean().default(false),
   categoria: z.string().trim().max(60).default('Material e equipamentos'),
   tipoDocumentoId: z.number().int().nullish(),
+  /** Parcelas conferidas pelo usuário; substituem as da nota quando o pagamento real é diferente. */
+  parcelas: z.array(ParcelaEditada).max(60).optional(),
 });
 
 function lancarDespesa(empresaId: number, usuarioId: number, data: string, categoria: string, descricao: string, valor: number) {
@@ -35,6 +48,7 @@ export function importarCompraXml(empresaId: number, usuarioId: number, entrada:
   const totalCalc = r2(t.produtos + t.frete + t.seguro + t.outras + t.icmsSt + t.ipi - t.desconto);
   if (t.nf <= 0) throw new ErroNegocio('A NF-e não traz o valor total (vNF).');
   if (Math.abs(totalCalc - t.nf) > 0.05) alertas.push(`O total da nota (R$ ${t.nf.toFixed(2)}) difere da soma dos componentes (R$ ${totalCalc.toFixed(2)}); foi mantido o total informado na nota.`);
+  if (entrada.parcelas?.length) conferirSoma(entrada.parcelas, t.nf);
   const somaParc = r2(nfe.parcelas.reduce((a, p) => a + p.valor, 0));
   if (nfe.parcelas.length && Math.abs(somaParc - t.nf) > 0.05) alertas.push(`A soma das parcelas (R$ ${somaParc.toFixed(2)}) difere do total da nota.`);
 
@@ -47,7 +61,7 @@ export function importarCompraXml(empresaId: number, usuarioId: number, entrada:
       t.produtos, t.frete + t.seguro, t.desconto, t.outras, t.icms, t.ipi, t.nf, entrada.xml, usuarioId, tipoId).lastInsertRowid);
     const ins = db.prepare('INSERT INTO compra_itens (compra_id, n_item, codigo, descricao, ncm, cfop, unidade, quantidade, valor_unitario, valor_total, desconto) VALUES (?,?,?,?,?,?,?,?,?,?,?)');
     for (const i of nfe.itens) ins.run(cid, i.n, i.codigo, i.descricao, i.ncm, i.cfop, i.unidade, i.quantidade, i.valorUnit, i.valor, i.desconto);
-    const parcelas = nfe.parcelas.length ? nfe.parcelas : [{ numero: null as string | null, vencimento: nfe.emissao, valor: t.nf }];
+    const parcelas = entrada.parcelas?.length ? entrada.parcelas.map((p) => ({ numero: p.numero ?? null, vencimento: p.vencimento, valor: p.valor })) : nfe.parcelas.length ? nfe.parcelas : [{ numero: null as string | null, vencimento: nfe.emissao, valor: t.nf }];
     const insP = db.prepare('INSERT INTO compra_parcelas (compra_id, numero, vencimento, valor, despesa_id) VALUES (?,?,?,?,?)');
     parcelas.forEach((p, k) => {
       const desp = entrada.gerarDespesas
@@ -58,6 +72,61 @@ export function importarCompraXml(empresaId: number, usuarioId: number, entrada:
     return cid;
   })();
   return { id, numero: nfe.numero, fornecedor: nfe.fornecedor.nome, valor: t.nf, itens: nfe.itens.length, parcelas: nfe.parcelas.length, alertas };
+}
+
+/** Resumo do XML antes de importar: fornecedor, totais, itens e o parcelamento da nota. Não grava nada. */
+export function previaCompraXml(empresaId: number, xml: string) {
+  const empresa = db.prepare('SELECT documento FROM empresas WHERE id = ?').get(empresaId) as { documento: string } | undefined;
+  if (!empresa) throw new ErroNegocio('Empresa não encontrada.', 404);
+  let nfe: ReturnType<typeof lerNfe>;
+  try { nfe = lerNfe(xml); } catch (e: any) { throw new ErroNegocio(e.message ?? 'XML inválido.'); }
+  const alertas: string[] = [];
+  let bloqueio: string | null = null;
+  if (soDig(nfe.fornecedor.documento) === soDig(empresa.documento)) bloqueio = 'Esta NF-e foi emitida pela própria empresa (é uma venda), não uma compra.';
+  else if (db.prepare('SELECT 1 FROM compras WHERE empresa_id = ? AND chave_acesso = ?').get(empresaId, nfe.chave)) bloqueio = `A NF-e ${nfe.numero} de ${nfe.fornecedor.nome} já foi importada.`;
+  if (nfe.destinatario.documento && soDig(nfe.destinatario.documento) !== soDig(empresa.documento)) alertas.push(`O destinatário da nota (${nfe.destinatario.nome ?? nfe.destinatario.documento}) não é esta empresa.`);
+  const t = nfe.totais;
+  if (nfe.parcelas.length && Math.abs(r2(nfe.parcelas.reduce((a, p) => a + p.valor, 0)) - t.nf) > 0.05) alertas.push('A soma das parcelas da nota difere do total; ajuste o parcelamento abaixo.');
+  return {
+    chave: nfe.chave, numero: nfe.numero, serie: nfe.serie, emissao: nfe.emissao, natureza: nfe.natureza,
+    fornecedor: nfe.fornecedor, destinatario: nfe.destinatario, totais: t,
+    itens: nfe.itens.map((i) => ({ n: i.n, descricao: i.descricao, ncm: i.ncm, quantidade: i.quantidade, unidade: i.unidade, valorUnit: i.valorUnit, valor: i.valor })),
+    parcelas: nfe.parcelas.length ? nfe.parcelas : [{ numero: null, vencimento: nfe.emissao, valor: t.nf }],
+    parcelasDaNota: nfe.parcelas.length > 0, alertas, bloqueio,
+  };
+}
+
+/** Troca o parcelamento de uma compra já lançada. Reaproveita as despesas existentes (atualiza, cria ou apaga as que sobram). */
+export function alterarParcelas(compraId: number, usuarioId: number, parcelas: z.infer<typeof ParcelaEditada>[]) {
+  const c = db.prepare('SELECT id, empresa_id, valor_total, numero, fornecedor_nome, categoria FROM compras WHERE id = ?').get(compraId) as any;
+  if (!c) throw new ErroNegocio('Compra não encontrada.', 404);
+  if (!parcelas.length) throw new ErroNegocio('Informe ao menos uma parcela.');
+  conferirSoma(parcelas, c.valor_total);
+  const antigas = db.prepare('SELECT id, despesa_id FROM compra_parcelas WHERE compra_id = ? ORDER BY vencimento, id').all(compraId) as { id: number; despesa_id: number | null }[];
+  const despesas = antigas.map((a) => a.despesa_id).filter((x): x is number => x !== null);
+  const geraDespesas = despesas.length > 0;
+  if (geraDespesas) {
+    const ligada = db.prepare(`SELECT 1 FROM despesas WHERE id IN (${despesas.join(',')}) AND extrato_lancamento_id IS NOT NULL`).get();
+    if (ligada) throw new ErroNegocio('Há parcela já ligada ao extrato. Desfaça o vínculo em Extrato e conciliação antes de alterar o parcelamento.');
+  }
+  const ordenadas = [...parcelas].sort((a, b) => a.vencimento.localeCompare(b.vencimento));
+  db.transaction(() => {
+    db.prepare('DELETE FROM compra_parcelas WHERE compra_id = ?').run(compraId);
+    const insP = db.prepare('INSERT INTO compra_parcelas (compra_id, numero, vencimento, valor, despesa_id) VALUES (?,?,?,?,?)');
+    const cat = c.categoria ?? 'Material e equipamentos';
+    ordenadas.forEach((p, k) => {
+      let did: number | null = null;
+      if (geraDespesas) {
+        const desc = `${c.numero ? 'NF ' + c.numero : 'Compra'} — ${c.fornecedor_nome}${ordenadas.length > 1 ? ` (parcela ${k + 1}/${ordenadas.length})` : ''}`.slice(0, 200);
+        const reaproveita = despesas[k];
+        if (reaproveita) { db.prepare('UPDATE despesas SET data = ?, valor = ?, descricao = ? WHERE id = ?').run(p.vencimento, p.valor, desc, reaproveita); did = reaproveita; }
+        else did = lancarDespesa(c.empresa_id, usuarioId, p.vencimento, cat, desc, p.valor);
+      }
+      insP.run(compraId, p.numero ?? (ordenadas.length > 1 ? String(k + 1).padStart(3, '0') : null), p.vencimento, p.valor, did);
+    });
+    for (const sobra of despesas.slice(ordenadas.length)) db.prepare('DELETE FROM despesas WHERE id = ?').run(sobra);
+  })();
+  return { ok: true, parcelas: ordenadas.length };
 }
 
 export const CompraManual = z.object({
@@ -85,11 +154,16 @@ export function criarCompraManual(empresaId: number, usuarioId: number, d: z.inf
   })();
 }
 
-export function listarCompras(empresaId: number, mes: string) {
+export function listarCompras(empresaId: number, mes: string | null, busca?: { q?: string; de?: string; ate?: string }) {
+  const q = (busca?.q ?? '').trim();
+  const like = `%${q.replace(/[%_]/g, '')}%`;
+  const dig = q.replace(/\D/g, '');
   const linhas = db.prepare(`SELECT c.id, c.fornecedor_nome, c.fornecedor_documento, c.numero, c.serie, c.emissao, c.valor_total, c.origem, c.categoria,
       (SELECT COUNT(*) FROM compra_itens i WHERE i.compra_id = c.id) AS itens,
       (SELECT COUNT(*) FROM compra_parcelas p WHERE p.compra_id = c.id AND p.despesa_id IS NOT NULL) AS despesas
-    FROM compras c WHERE c.empresa_id = ? AND substr(c.emissao,1,7) = ? ORDER BY c.emissao DESC, c.id DESC`).all(empresaId, mes) as any[];
+    FROM compras c WHERE c.empresa_id = ? AND ${mes ? 'substr(c.emissao,1,7) = ?' : 'c.emissao BETWEEN ? AND ?'}
+      ${q ? 'AND (c.fornecedor_nome LIKE ? OR c.numero LIKE ? OR c.chave_acesso LIKE ? OR (? <> \'\' AND c.fornecedor_documento LIKE ?))' : ''}
+    ORDER BY c.emissao DESC, c.id DESC`).all(empresaId, ...(mes ? [mes] : [busca?.de ?? '0000-01-01', busca?.ate ?? '9999-12-31']), ...(q ? [like, like, like, dig, `%${dig}%`] : [])) as any[];
   const porFornecedor = new Map<string, number>();
   for (const l of linhas) porFornecedor.set(l.fornecedor_nome, r2((porFornecedor.get(l.fornecedor_nome) ?? 0) + l.valor_total));
   return {

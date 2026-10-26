@@ -322,7 +322,7 @@ export function importarRecebidas(empresaId: number, usuarioId: number, entrada:
     if (r.situacao !== 'AUTORIZADA') { resultados.push({ chave, ok: false, mensagem: `${nome}: a nota está ${r.situacao === 'CANCELADA' ? 'cancelada' : 'denegada'} na SEFAZ.` }); continue; }
     if (!r.xml) { resultados.push({ chave, ok: false, mensagem: `${nome}: o XML completo ainda não chegou da SEFAZ. Tente após a próxima busca.` }); continue; }
     try {
-      const c = importarCompraXml(empresaId, usuarioId, { xml: r.xml, gerarDespesas: entrada.gerarDespesas, categoria: entrada.categoria, tipoDocumentoId: entrada.tipoDocumentoId });
+      const c = importarCompraXml(empresaId, usuarioId, { xml: r.xml, gerarDespesas: entrada.gerarDespesas, categoria: entrada.categoria, tipoDocumentoId: entrada.tipoDocumentoId, parcelas: entrada.parcelas });
       resultados.push({ chave, ok: true, mensagem: `NF ${c.numero} — ${c.fornecedor}`, compraId: c.id, numero: c.numero, fornecedor: c.fornecedor, valor: c.valor, alertas: c.alertas });
     } catch (e) {
       resultados.push({ chave, ok: false, mensagem: `${nome}: ${(e as Error).message}` });

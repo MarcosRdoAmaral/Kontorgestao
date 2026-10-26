@@ -72,7 +72,7 @@ const REGRAS: Regra[] = [
   { r: /^\/api\/empresas\/\d+\/cartao(\/.*)?$/, mod: ['despesas'] },
   { m: 'GET', r: /^\/api\/empresas\/\d+\/tributacao\/tipos(\/\d+\/efetiva)?$/, mod: ['tributacao', 'servicos', 'compras', 'emitir'] },
   { r: /^\/api\/tributacao\/impostos(\/[A-Z_]+)?$|^\/api\/empresas\/\d+\/tributacao\/.*$/, mod: ['tributacao'] },
-  { r: /^\/api\/empresas\/\d+\/compras(\/importar-xml|\/sefaz(\/(buscar|chave|importar|ocultar|ciencia|config|xml\/\d{44}))?)?$|^\/api\/compras\/\d+(\/xml)?$/, mod: ['compras'] },
+  { r: /^\/api\/empresas\/\d+\/compras(\/importar-xml|\/previa-xml|\/sefaz(\/(buscar|chave|importar|ocultar|ciencia|config|xml\/\d{44}|previa\/\d{44}))?)?$|^\/api\/compras\/\d+(\/xml|\/parcelas)?$/, mod: ['compras'] },
   { r: /^\/api\/sefaz\/conexao(\/(baixar-cadeia|cadeia))?$/, mod: 'adm' },
   { m: 'GET', r: /^\/api\/empresas\/\d+\/feriados$/, mod: ['banco', 'empresas', 'emitir'] },
   { r: /^\/api\/empresas\/\d+\/feriados$/, mod: ['banco', 'empresas'] },
