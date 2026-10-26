@@ -231,6 +231,18 @@ function reservarNumero(empresaId: number, ambiente: number, serie: string): num
  * Retenções padrão do serviço cadastrado: quando a emissão chega sem nenhuma retenção
  * (ex.: emissão automática ou agendada), aplica os percentuais do cadastro do serviço.
  */
+/**
+ * Retenção de até R$ 10,00 é dispensada, verificada a cada pagamento e sem acumular com os seguintes
+ * (PIS+COFINS+CSLL somados: Lei 10.833/2003, art. 31, § 3º; IRRF: Lei 9.430/1996, art. 67; SC RFB 258/2024).
+ */
+export function dispensarRetencoes<T extends { pis?: number | null; cofins?: number | null; csll?: number | null; irrf?: number | null }>(r: T): T {
+  const pcc = Math.round(((r.pis ?? 0) + (r.cofins ?? 0) + (r.csll ?? 0)) * 100) / 100;
+  const out = { ...r };
+  if (pcc <= 10) { out.pis = null; out.cofins = null; out.csll = null; }
+  if ((r.irrf ?? 0) <= 10) out.irrf = null;
+  return out;
+}
+
 export function comRetencoesDoServico<T extends EntradaEmissao>(e: T): T {
   // tipo de documento: o escolhido na nota, senão o do serviço, senão o padrão de saída da empresa
   const sv = e.servicoId ? (db.prepare('SELECT tributacao_json, tipo_documento_id FROM servicos WHERE id = ? AND empresa_id = ?').get(e.servicoId, e.empresaId) as any) : null;
@@ -251,7 +263,7 @@ export function comRetencoesDoServico<T extends EntradaEmissao>(e: T): T {
   if (!t) return out;
   const base = out.valor - (out.descontoIncondicionado ?? 0);
   const v = (pc?: number | null) => (pc ? Math.round(base * pc) / 100 : null);
-  const ret = { pis: v(t.pPis), cofins: v(t.pCofins), csll: v(t.pCsll), irrf: v(t.irrf ?? t.pIrrf), cp: v(t.pCp), pPis: t.pPis ?? null, pCofins: t.pCofins ?? null };
+  const ret = dispensarRetencoes({ pis: v(t.pPis), cofins: v(t.pCofins), csll: v(t.pCsll), irrf: v(t.irrf ?? t.pIrrf), cp: v(t.pCp), pPis: t.pPis ?? null, pCofins: t.pCofins ?? null });
   return Object.values(ret).some((x) => x != null) ? { ...out, retencoes: ret } : out;
 }
 

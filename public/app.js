@@ -579,6 +579,7 @@ async function telaEmitir(notaIdCorrecao) {
           <label>Desconto incondicionado (R$) <input name="descontoIncondicionado" data-num inputmode="decimal" value="${p.descontoIncondicionado ?? ''}"></label>
           <fieldset class="largo retencoes"><legend>Retenções federais</legend>
             <p class="dica">Preencha só o que o tomador vai reter. Use o botão para sugerir as alíquotas usuais (PIS 0,65% · COFINS 3% · CSLL 1% · IRRF 1,5%) e ajuste se o caso for outro; retenções abaixo de R$ 10,00 normalmente são dispensadas.</p>
+            <p class="dica" id="aviso-dispensa" hidden style="color:var(--laranja)"></p>
             <div class="grade">
               <label>PIS (%) <input name="pPis" data-num inputmode="decimal" value="${p.retencoes?.pPis ?? ''}"></label>
               <label>PIS retido (R$) <input name="pis" data-num inputmode="decimal" value="${p.retencoes?.pis ?? ''}"></label>
@@ -615,6 +616,8 @@ async function telaEmitir(notaIdCorrecao) {
           <label data-boleto>Vencimento do boleto <input type="date" name="vencimento"></label>
           <label data-boleto>Valor do boleto (R$) <input name="valorBoleto" data-num inputmode="decimal" placeholder="Valor líquido da nota"><span class="dica">Preenchido sozinho com o líquido da nota (serviço menos descontos e retenções). Você pode alterar; apague o campo para voltar ao automático.</span><span class="dica" id="dica-boleto-desc"></span></label>
           <label data-boleto>Parcelas <input type="number" name="nParcelas" min="1" max="24" value="1"><span class="dica">Mais de 1: um boleto por parcela, cada um com o seu vencimento (editável abaixo).</span></label>
+          <label data-boleto>Dias entre parcelas <input type="number" name="diasEntre" min="1" max="365" placeholder="mensal"><span class="dica">Em branco: mesmo dia de cada mês. Ou informe, por exemplo, 15 ou 30 dias entre uma parcela e outra.</span></label>
+          <label data-boleto>Condição de pagamento <input name="condicao" placeholder="Ex.: 30/60/90" maxlength="60"><span class="dica">Dias após hoje para cada parcela. Preenchida, define o número de parcelas e os vencimentos.</span></label>
           <div data-boleto class="largo" id="lista-parcelas" hidden></div>
         </div>
       </fieldset>
@@ -633,6 +636,7 @@ async function telaEmitir(notaIdCorrecao) {
   if (p.issRetido) f.issRetido.value = p.issRetido;
 
   let pCpServico = null, tpImunidadeServico = null, modeloComposto = null, tCompor = null, ultimoEfetivo = null, parcelasManual = false;
+  let dispensa = { pcc: null, irrf: null };
   let reembolsos = Array.isArray(p.reembolsos) ? [...p.reembolsos] : [];
   const TIPOS_REEMB = { '01': 'Repasse a corretores (intermediação de imóveis)', '02': 'Repasse a fornecedor (agência de turismo)', '03': 'Reembolso de produção externa (propaganda)', '04': 'Reembolso de mídia (propaganda)', '99': 'Outros reembolsos ou ressarcimentos' };
   const somaReemb = () => Math.round(reembolsos.reduce((t, r) => t + r.valor, 0) * 100) / 100;
@@ -774,15 +778,22 @@ async function telaEmitir(notaIdCorrecao) {
   function desenharParcelas(regerar = true) {
     const box = $('#lista-parcelas');
     if (!box || !f.nParcelas) return;
+    // condição "30/60/90": dias após hoje, um por parcela; define sozinha a quantidade e o primeiro vencimento
+    const cond = (f.condicao.value.match(/^\s*\d{1,3}(\s*[\/;,-]\s*\d{1,3}){0,23}\s*$/) ? f.condicao.value.split(/[\/;,-]/).map((x) => Number(x.trim())) : null);
+    const hojeIso = new Date(Date.now() - 3 * 3600e3).toISOString().slice(0, 10);
+    const somaDiasIso = (iso, d) => new Date(Date.parse(iso + 'T12:00:00Z') + d * 86400e3).toISOString().slice(0, 10);
+    if (cond && regerar && !parcelasManual) { f.nParcelas.value = String(cond.length); f.vencimento.value = somaDiasIso(hojeIso, cond[0]); }
     const n = nParcelas(), total = lerForm(f).valorBoleto ?? 0;
     box.hidden = n < 2 || f.acao.value === 'NOTA';
     if (n < 2) { box.innerHTML = ''; return; }
     if (regerar && !parcelasManual) {
       const base = f.vencimento.value || vencPadrao(tomadores.find((x) => x.id === Number(f.tomadorId.value)));
+      const dias = Number(f.diasEntre.value) || 0;
+      const dataParcela = (i) => (cond && cond.length === n ? somaDiasIso(hojeIso, cond[i]) : dias ? somaDiasIso(base, dias * i) : addMes(base, i));
       const cent = Math.round(total * 100), cada = Math.floor(cent / n);
       box.innerHTML = Array.from({ length: n }, (_, i) => {
         const v = (i === n - 1 ? cent - cada * (n - 1) : cada) / 100;
-        return `<div class="linha-serv"><label>Parcela ${i + 1} — vencimento <input type="date" data-pv="${i}" value="${addMes(base, i)}"></label><label>Valor (R$) <input data-pq="${i}" data-num inputmode="decimal" value="${v ? v.toFixed(2).replace('.', ',') : ''}"></label></div>`;
+        return `<div class="linha-serv"><label>Parcela ${i + 1} — vencimento <input type="date" data-pv="${i}" value="${dataParcela(i)}"></label><label>Valor (R$) <input data-pq="${i}" data-num inputmode="decimal" value="${v ? v.toFixed(2).replace('.', ',') : ''}"></label></div>`;
       }).join('') + '<p class="dica" id="soma-parcelas"></p>';
       box.querySelectorAll('input').forEach((el) => el.addEventListener('input', () => { parcelasManual = true; somarParcelas(); }));
     }
@@ -795,7 +806,9 @@ async function telaEmitir(notaIdCorrecao) {
     el.textContent = dif === 0 ? `Soma das parcelas: ${brl(soma)} (confere com o boleto).` : `Soma das parcelas: ${brl(soma)} — ${dif > 0 ? 'excede' : 'falta'} ${brl(Math.abs(dif))} para o valor do boleto.`;
   }
   const lerParcelas = () => (nParcelas() < 2 ? null : [...f.querySelectorAll('[data-pv]')].map((el, i) => ({ vencimento: el.value, valor: numero(f.querySelector(`[data-pq="${i}"]`).value) ?? 0 })));
-  f.nParcelas?.addEventListener('input', () => { parcelasManual = false; desenharParcelas(); });
+  f.nParcelas?.addEventListener('input', () => { f.condicao.value = ''; parcelasManual = false; desenharParcelas(); });
+  f.diasEntre?.addEventListener('input', () => { f.condicao.value = ''; parcelasManual = false; desenharParcelas(); });
+  f.condicao?.addEventListener('input', () => { parcelasManual = false; desenharParcelas(); });
   f.vencimento?.addEventListener('change', () => { parcelasManual = false; desenharParcelas(); });
   f.valorBoleto?.addEventListener('input', () => { parcelasManual = false; desenharParcelas(); });
   f.acao.addEventListener('change', () => desenharParcelas());
@@ -815,6 +828,8 @@ async function telaEmitir(notaIdCorrecao) {
     const ret = [['PIS', d.pPis, d.pis], ['COFINS', d.pCofins, d.cofins], ['CSLL', d.pCsll, d.csll], ['IRRF', d.pIrrf, d.irrf], ['INSS (contrib. previdenciária)', null, d.cp]];
     let retidas = 0;
     for (const [n, p, val] of ret) if (val) { linhas.push([n, base, p, val, 'Retido pelo tomador']); retidas += val; }
+    const dispPcc = new Set(dispensa.pcc ? ['PIS', 'COFINS', 'CSLL'] : []), dispIrrf = dispensa.irrf ? ['IRRF'] : [];
+    for (const [n, p] of ret) if ((dispPcc.has(n) || dispIrrf.includes(n)) && p) linhas.push([n, base, p, 0, 'Dispensada: retenção ≤ R$ 10,00']);
     const proprios = new Set(['ISS', 'PIS', 'COFINS', 'CSLL', 'IRRF', 'INSS']);
     for (const it of ultimoEfetivo?.itens ?? []) if (!proprios.has(it.imposto)) { const b = baseTrib * (1 - (it.reducao_base || 0) / 100); linhas.push([it.imposto.replace('_', ' '), Math.round(b * 100) / 100, it.aliquota, Math.round(b * it.aliquota) / 100, 'Informativo (IBS/CBS)']); }
     const liquido = Math.round((base - retidas - (issRet ? iss : 0)) * 100) / 100;
@@ -950,6 +965,15 @@ async function telaEmitir(notaIdCorrecao) {
       f.elements[campo].value = pc ? (Math.round(base * pc) / 100).toFixed(2).replace('.', ',') : '';
     };
     preencher('pPis', 'pis'); preencher('pCofins', 'cofins'); preencher('pCsll', 'csll'); preencher('pIrrf', 'irrf');
+    // retenção de até R$ 10,00 é dispensada (PCC somado: Lei 10.833/2003, art. 31, § 3º; IRRF: Lei 9.430/1996, art. 67) e não acumula
+    const val = (k) => numero(f.elements[k].value) ?? 0;
+    dispensa = { pcc: null, irrf: null };
+    const pcc = Math.round((val('pis') + val('cofins') + val('csll')) * 100) / 100;
+    if (pcc > 0 && pcc <= 10) { dispensa.pcc = pcc; for (const k of ['pis', 'cofins', 'csll']) f.elements[k].value = ''; }
+    if (val('irrf') > 0 && val('irrf') <= 10) { dispensa.irrf = val('irrf'); f.elements.irrf.value = ''; }
+    const av = $('#aviso-dispensa');
+    av.hidden = !dispensa.pcc && !dispensa.irrf;
+    av.textContent = [dispensa.pcc ? `PIS + COFINS + CSLL somam ${brl(dispensa.pcc)}` : '', dispensa.irrf ? `IRRF é ${brl(dispensa.irrf)}` : ''].filter(Boolean).join(' e ') + ': retenção dispensada (valor igual ou inferior a R$ 10,00, a cada pagamento; não se acumula com pagamentos seguintes). Para reter mesmo assim, digite o valor retido.';
   }
   // com percentuais preenchidos, os valores retidos acompanham o valor do serviço
   ['valor', 'descontoIncondicionado'].forEach((n) => f.elements[n].addEventListener('input', () => {

@@ -57,8 +57,10 @@ test('tributação: perfis, tipos de documento, retenções do perfil e apuraç�
 
   // serviço ligado ao tipo de saída: retenções vêm do perfil; sem retenção própria
   const sv = Number(db.prepare("INSERT INTO servicos (empresa_id, nome, descricao, c_trib_nac, aliquota, tipo_documento_id) VALUES (1,'Contábil','x','171901',5,?)").run(tSaida.id).lastInsertRowid);
-  const ret = comRetencoesDoServico({ empresaId: 1, servicoId: sv, valor: 1000, competencia: '2026-10-01', descricao: 'x' } as any);
-  assert.equal(ret.retencoes?.pis, 6.5);
+  const ret = comRetencoesDoServico({ empresaId: 1, servicoId: sv, valor: 5000, competencia: '2026-10-01', descricao: 'x' } as any);
+  assert.equal(ret.retencoes?.pis, 32.5);
+  // retenção de até R$ 10,00 é dispensada (R$ 1.000 × 0,65% = 6,50)
+  assert.equal(comRetencoesDoServico({ empresaId: 1, servicoId: sv, valor: 1000, competencia: '2026-10-01', descricao: 'x' } as any).retencoes?.pis, null);
 
   // tipo escolhido na própria nota prevalece sobre o do serviço; o perfil completa alíquota, ISSQN e IBS/CBS
   const pIbs = T.criarPerfil(1, { nome: 'Com IBS/CBS', trib_issqn: 1, municipio_prestacao: '4208203', itens: [

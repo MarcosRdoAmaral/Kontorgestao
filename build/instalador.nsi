@@ -3,7 +3,7 @@ Unicode true
 !include "MUI2.nsh"
 
 !ifndef VERSAO
-  !define VERSAO "3.11.0"
+  !define VERSAO "3.12.0"
 !endif
 !define NOME "Kontor Gestão"
 !define EXE "Kontor Gestão.exe"

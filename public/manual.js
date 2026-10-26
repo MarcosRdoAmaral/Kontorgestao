@@ -4,7 +4,7 @@
  * aqui (e a data/versão em MANUAL_VERSAO) antes de publicar a versão.
  * `corpo` é HTML escrito à mão (não recebe dados de usuário).
  */
-export const MANUAL_VERSAO = '3.11.0';
+export const MANUAL_VERSAO = '3.12.0';
 
 export const MANUAL = [
   {
@@ -72,9 +72,10 @@ export const MANUAL = [
         <li><strong>Tributação:</strong> traz alíquota, ISSQN, retenções, totais aproximados, município e informações complementares (na data da competência). Trocar a tributação refaz o preenchimento; os campos ainda podem ser ajustados na nota.</li>
         <li><strong>Conferência da tributação:</strong> no fim do formulário, uma tabela mostra cada imposto com base, alíquota e valor (ISS, retenções federais, IBS/CBS informativo), o total retido e o <strong>líquido a receber</strong>, atualizada conforme você digita.</li>
         <li>Informe competência, valor e, se precisar, ajuste descrição e retenções.</li>
-        <li>Se o cliente fatura com boleto, no bloco <strong>Pagamento / parcelamento</strong> (logo depois de Serviço e retenções, onde já está o líquido da NFS-e) defina o vencimento (já sugerido pela regra do cliente). Para <strong>parcelar</strong>, informe o número de parcelas: o sistema divide o valor e sugere um vencimento por mês; ajuste data e valor de cada parcela (a soma precisa fechar com o boleto). Cada parcela vira um boleto, com o seu vencimento, e todos seguem no e-mail.</li>
+        <li>Se o cliente fatura com boleto, no bloco <strong>Pagamento / parcelamento</strong> (logo depois de Serviço e retenções, onde já está o líquido da NFS-e) defina o vencimento (já sugerido pela regra do cliente). Para <strong>parcelar</strong>, informe o número de parcelas (use <em>Dias entre parcelas</em> para intervalos fixos, como 15 ou 30 dias, ou a <em>Condição de pagamento</em>, como 30/60/90, que define sozinha as parcelas e os vencimentos a partir de hoje): o sistema divide o valor e sugere um vencimento por mês; ajuste data e valor de cada parcela (a soma precisa fechar com o boleto). Cada parcela vira um boleto, com o seu vencimento, e todos seguem no e-mail.</li>
         <li><strong>Emitir.</strong> O sistema monta a DPS, assina com o certificado e envia à Sefin.</li>
       </ol>
+      <p><strong>Retenção dispensada:</strong> retenção de até R$ 10,00 não é feita, a cada pagamento: PIS + COFINS + CSLL são somados (Lei 10.833/2003, art. 31, § 3º) e o IRRF é avaliado à parte (Lei 9.430/1996, art. 67). O valor dispensado <em>não se acumula</em> com notas seguintes (Solução de Consulta RFB 258/2024). O sistema aplica isso ao calcular as retenções pelos percentuais e na emissão automática, e mostra “Dispensada” na conferência. Para reter mesmo assim, digite o valor retido.</p>
       <p><strong>Reembolsos e repasses de terceiros:</strong> quando você paga algo por conta e ordem do cliente (documento em nome dele) e repassa sem acréscimo, use <em>Adicionar reembolso</em> no bloco <em>Reembolsos e repasses de terceiros</em>. Informe o tipo, o documento de origem (chave de acesso ou número), o fornecedor e o valor. Esse valor continua dentro do valor da nota, mas <strong>não entra na base do ISS, do IBS e da CBS</strong>; a conferência já mostra a base reduzida. Exige uma tributação com IBS/CBS e a soma não pode passar do valor do serviço. Taxa de administração ou margem sobre o repasse entra na base normalmente.</p>
       <h3>Se algo der errado</h3>
       <ul>
