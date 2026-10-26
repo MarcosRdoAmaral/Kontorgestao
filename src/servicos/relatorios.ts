@@ -4,7 +4,6 @@ import { lerNfse } from '../nfse/leitura.js';
 import { ErroNegocio } from './emissao.js';
 import { balancoExtrato } from './extrato.js';
 import { despesaMes, recebidoMes } from './financeiro.js';
-import { listarItens } from './estoque.js';
 
 /**
  * Relatórios gerenciais. A nota e o boleto têm datas próprias (emissão da nota, emissão do boleto, vencimento,
@@ -50,7 +49,7 @@ const COL = {
 } as const satisfies Record<string, Coluna>;
 
 /** Ordem em que os grupos aparecem na tela. */
-export const GRUPOS = ['Faturamento', 'Contas a receber', 'Despesas e pagamentos', 'Fiscal e retenções', 'Resultado e caixa', 'Clientes', 'Estoque'] as const;
+export const GRUPOS = ['Faturamento', 'Contas a receber', 'Despesas e pagamentos', 'Fiscal e retenções', 'Resultado e caixa', 'Clientes'] as const;
 export type Grupo = (typeof GRUPOS)[number];
 interface Def { grupo: Grupo; titulo: string; descricao: string; filtroData: string; situacoes?: string[]; gerar: (empresaId: number, f: Filtros) => { colunas: Coluna[]; linhas: any[] } }
 
@@ -328,25 +327,6 @@ export const RELATORIOS: Record<string, Def> = {
         FROM tomadores t WHERE t.empresa_id = ? ${f.tomadorId ? 'AND t.id = ' + Number(f.tomadorId) : ''} AND NOT EXISTS (SELECT 1 FROM notas n WHERE n.tomador_id = t.id AND n.status = 'AUTORIZADA'
           AND COALESCE(date(n.autorizada_em,'-3 hours'), date(n.criado_em,'-3 hours')) BETWEEN ? AND ?) ORDER BY ultima IS NULL, ultima DESC, t.nome`).all(e, f.de, f.ate) as any[])
         .map((x) => ({ ...x, modo: ({ NOTA: 'Nota', NOTA_BOLETO: 'Nota + boleto', BOLETO: 'Boleto', NENHUM: 'Nenhum' } as any)[x.modo] ?? x.modo })),
-    }),
-  },
-  // ---------------- Estoque ----------------
-  'estoque-posicao': {
-    grupo: 'Estoque', titulo: 'Posição do estoque de insumos', filtroData: 'Posição atual (as datas não filtram)',
-    descricao: 'Saldo de cada insumo, estoque mínimo, última entrada e saída, e a situação: comprar, parado, zerado ou ok.',
-    gerar: (e) => ({
-      colunas: [{ k: 'nome', nome: 'Item', tipo: 'texto' }, { k: 'categoria', nome: 'Categoria', tipo: 'texto' }, { k: 'unidade', nome: 'Un.', tipo: 'texto' }, { k: 'saldo', nome: 'Saldo', tipo: 'inteiro' }, { k: 'estoque_minimo', nome: 'Mínimo', tipo: 'inteiro' },
-        { k: 'ultima_entrada', nome: 'Última entrada', tipo: 'data' }, { k: 'ultima_saida', nome: 'Última saída', tipo: 'data' }, { k: 'sit', nome: 'Situação', tipo: 'texto' }],
-      linhas: listarItens(e).map((i: any) => ({ ...i, sit: ({ COMPRAR: 'Comprar', PARADO: 'Parado', ZERADO: 'Zerado', OK: 'Ok' } as any)[i.situacao] ?? i.situacao })),
-    }),
-  },
-  'estoque-movimentos': {
-    grupo: 'Estoque', titulo: 'Movimentos do estoque', filtroData: 'Data do movimento',
-    descricao: 'Entradas, baixas por uso e ajustes de inventário no período.',
-    gerar: (e, f) => ({
-      colunas: [{ k: 'data', nome: 'Data', tipo: 'data' }, { k: 'item', nome: 'Item', tipo: 'texto' }, { k: 'tipo', nome: 'Tipo', tipo: 'texto' }, { k: 'quantidade', nome: 'Quantidade', tipo: 'inteiro' }, { k: 'custo_unitario', nome: 'Custo unitário', tipo: 'moeda' }, { k: 'observacao', nome: 'Observação', tipo: 'texto' }],
-      linhas: (db.prepare(`SELECT m.data, i.nome AS item, m.tipo, m.quantidade, m.custo_unitario, m.observacao FROM estoque_movimentos m JOIN estoque_itens i ON i.id = m.item_id
-        WHERE m.empresa_id = ? AND m.data BETWEEN ? AND ? ORDER BY m.data, m.id`).all(e, f.de, f.ate) as any[]).map((x) => ({ ...x, tipo: ({ ENTRADA: 'Entrada', SAIDA: 'Baixa por uso', AJUSTE: 'Ajuste' } as any)[x.tipo] ?? x.tipo })),
     }),
   },
 };

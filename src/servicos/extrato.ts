@@ -252,8 +252,8 @@ export function classificar(empresaId: number, lancId: number, d: z.infer<typeof
 // ---------------------------------------------------------------------------
 export function extratoDoMes(empresaId: number, mes: string) {
   const lancs = db.prepare(`SELECT x.id, x.data, x.descricao, x.documento, x.valor, x.saldo, x.categoria, x.categoria_origem, x.cobranca_id,
-      t.nome AS tomador, c.vencimento AS boleto_venc
-    FROM extrato_lancamentos x LEFT JOIN cobrancas c ON c.id = x.cobranca_id LEFT JOIN tomadores t ON t.id = c.tomador_id
+      t.nome AS tomador, c.vencimento AS boleto_venc, dl.id AS despesa_ligada_id, dl.descricao AS despesa_ligada
+    FROM extrato_lancamentos x LEFT JOIN despesas dl ON dl.extrato_lancamento_id = x.id AND dl.origem <> 'EXTRATO' LEFT JOIN cobrancas c ON c.id = x.cobranca_id LEFT JOIN tomadores t ON t.id = c.tomador_id
     WHERE x.empresa_id = ? AND substr(x.data,1,7) = ? ORDER BY x.data, x.id`).all(empresaId, mes) as any[];
   const entradas = r2(lancs.filter((l) => l.valor > 0).reduce((s, l) => s + l.valor, 0));
   const saidas = r2(-lancs.filter((l) => l.valor < 0).reduce((s, l) => s + l.valor, 0));
@@ -322,4 +322,41 @@ export function sincronizarDespesasDoExtrato(empresaId: number) {
     }
     for (const [lid, did] of espelhos) if (!vivos.has(lid)) del.run(did);
   }
+}
+
+
+// ---------------------------------------------------------------------------
+// Vínculo de uma saída do extrato com uma despesa lançada à mão (por exemplo, a parcela de uma compra)
+// ---------------------------------------------------------------------------
+/** Despesas manuais ainda sem extrato, com o mesmo valor da saída e data até 45 dias de distância. */
+export function candidatosDespesa(empresaId: number, lancId: number) {
+  const l = db.prepare('SELECT data, valor FROM extrato_lancamentos WHERE id = ? AND empresa_id = ?').get(lancId, empresaId) as { data: string; valor: number } | undefined;
+  if (!l) throw new ErroNegocio('Lançamento não encontrado.', 404);
+  if (l.valor >= 0) throw new ErroNegocio('Só saídas do extrato podem ser ligadas a despesas.');
+  return db.prepare(`SELECT id, data, categoria, descricao, valor FROM despesas
+    WHERE empresa_id = ? AND origem = 'MANUAL' AND extrato_lancamento_id IS NULL AND ABS(valor - ?) < 0.005
+      AND ABS(julianday(data) - julianday(?)) <= 45 ORDER BY ABS(julianday(data) - julianday(?)), id`).all(empresaId, -l.valor, l.data, l.data);
+}
+
+/** Liga (ou, com despesaId nulo, desfaz) o vínculo. A despesa ligada substitui o espelho do extrato, sem contar duas vezes. */
+export function ligarDespesa(empresaId: number, lancId: number, despesaId: number | null) {
+  const l = db.prepare('SELECT valor, categoria FROM extrato_lancamentos WHERE id = ? AND empresa_id = ?').get(lancId, empresaId) as { valor: number; categoria: string | null } | undefined;
+  if (!l) throw new ErroNegocio('Lançamento não encontrado.', 404);
+  db.transaction(() => {
+    if (despesaId === null) {
+      db.prepare("UPDATE despesas SET extrato_lancamento_id = NULL WHERE empresa_id = ? AND origem = 'MANUAL' AND extrato_lancamento_id = ?").run(empresaId, lancId);
+    } else {
+      if (l.valor >= 0) throw new ErroNegocio('Só saídas do extrato podem ser ligadas a despesas.');
+      const d = db.prepare('SELECT origem, valor, categoria, extrato_lancamento_id AS lid FROM despesas WHERE id = ? AND empresa_id = ?').get(despesaId, empresaId) as any;
+      if (!d) throw new ErroNegocio('Despesa não encontrada.', 404);
+      if (d.origem !== 'MANUAL') throw new ErroNegocio('Só despesas lançadas à mão (ou parcelas de compras) podem ser ligadas.');
+      if (d.lid && d.lid !== lancId) throw new ErroNegocio('Esta despesa já está ligada a outro lançamento do extrato.');
+      if (Math.abs(d.valor + l.valor) > 0.005) throw new ErroNegocio('O valor da despesa é diferente do valor da saída no extrato.');
+      db.prepare("DELETE FROM despesas WHERE empresa_id = ? AND origem = 'EXTRATO' AND extrato_lancamento_id = ?").run(empresaId, lancId);
+      db.prepare("UPDATE despesas SET extrato_lancamento_id = NULL WHERE empresa_id = ? AND origem = 'MANUAL' AND extrato_lancamento_id = ?").run(empresaId, lancId);
+      db.prepare('UPDATE despesas SET extrato_lancamento_id = ? WHERE id = ?').run(lancId, despesaId);
+      if (!l.categoria) db.prepare("UPDATE extrato_lancamentos SET categoria = ?, categoria_origem = 'manual' WHERE id = ?").run(d.categoria, lancId);
+    }
+    sincronizarDespesasDoExtrato(empresaId);
+  })();
 }

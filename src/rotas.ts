@@ -11,12 +11,11 @@ import { BoletoAvulso, EntradaFaturamento, faturar, gerarBoletoAvulso, listarCob
 import { ContaBancaria, obterModelosWhatsapp, reemitirCobranca, salvarModelosWhatsapp, boletoPdf, cancelarCobranca, gerarRemessaEmpresa, listarRemessas, marcarPago, obterCobranca, obterConta, obterRemessa, processarRetorno, salvarConta } from './servicos/cobranca.js';
 import { Despesa, criarDespesa, editarDespesa, excluirDespesa, listarCategorias, listarDespesas, painelFinanceiro, salvarCategorias } from './servicos/financeiro.js';
 import { ClassificacaoCartao, classificarCartao, excluirFatura, faturasDoMes, importarFatura } from './servicos/cartao.js';
-import { Classificacao, balancoExtrato, candidatosBoleto, classificar, conciliar, excluirImportacao, extratoDoMes, importarExtrato } from './servicos/extrato.js';
+import { Classificacao, balancoExtrato, candidatosBoleto, candidatosDespesa, classificar, conciliar, excluirImportacao, extratoDoMes, importarExtrato, ligarDespesa } from './servicos/extrato.js';
 import { catalogo, gerarRelatorio, relatorioCsv, relatorioPdf } from './servicos/relatorios.js';
 import { configurarAgenda, executarItem, executarProntas, listarAgenda, pularItem, resumoAgenda } from './servicos/agenda.js';
 import { EdicaoImposto, Tributacao, criarTributacao, editarTributacao, excluirTributacao, listarTributacoes, Perfil, TipoDocumento, apuracaoAssistida, conferirTipoDoVinculo, criarPerfil, criarTipo, editarImposto, editarPerfil, editarTipo, excluirPerfil, excluirTipo, gerarPerfisDosServicos, listarImpostos, listarPerfis, listarTipos, tributacaoCompletaDoServico, tributacaoEfetiva, NATUREZAS } from './servicos/tributacao.js';
 import { DescricaoModelo, EntradaDescricao, lerModelo, montarDescricao } from './servicos/descricao.js';
-import { ItemEstoque, LancamentoCompra, Movimento, avisos as avisosEstoque, criarItem as criarItemEstoque, editarItem as editarItemEstoque, excluirItem as excluirItemEstoque, excluirMovimento, itensDaCompra, lancarCompraNoEstoque, listarItens as listarItensEstoque, listarMovimentos, movimentar } from './servicos/estoque.js';
 import { CompraManual, OpcoesImportacao, criarCompraManual, excluirCompra, importarCompraXml, listarCompras, obterCompra, xmlDaCompra } from './servicos/compras.js';
 import { pacoteContabilidade } from './servicos/contabilidade.js';
 import { criarBackup, listarBackups } from './servicos/backup.js';
@@ -688,6 +687,15 @@ export async function rotas(app: FastifyInstance) {
       const p = req.params as any; checarEmpresa(req, Number(p.id));
       return candidatosBoleto(Number(p.id), Number(p.lid));
     });
+    api.get('/api/empresas/:id/extrato/:lid/despesas', async (req) => {
+      const p = req.params as any; checarEmpresa(req, Number(p.id));
+      return candidatosDespesa(Number(p.id), Number(p.lid));
+    });
+    api.post('/api/empresas/:id/extrato/:lid/despesa', async (req) => {
+      const p = req.params as any; checarEmpresa(req, Number(p.id));
+      const d = z.object({ despesaId: z.number().int().nullable() }).parse(req.body);
+      ligarDespesa(Number(p.id), Number(p.lid), d.despesaId); return { ok: true };
+    });
     api.post('/api/empresas/:id/extrato/:lid/conciliar', async (req) => {
       const p = req.params as any; checarEmpresa(req, Number(p.id));
       const d = z.object({ cobrancaId: z.number().int().nullable(), darBaixa: z.boolean().default(false) }).parse(req.body);
@@ -820,37 +828,6 @@ export async function rotas(app: FastifyInstance) {
       const id = Number((req.params as any).id); compraDoUsuario(req, id);
       const { xml, nome } = xmlDaCompra(id);
       return reply.header('content-type', 'application/xml; charset=utf-8').header('content-disposition', `attachment; filename="${nome}"`).send(xml);
-    });
-    // ---------- Estoque de insumos ----------
-    const itemEstoqueDoUsuario = (req: FastifyRequest, id: number) => {
-      const i = db.prepare('SELECT empresa_id FROM estoque_itens WHERE id = ?').get(id) as { empresa_id: number } | undefined;
-      if (!i) throw new ErroNegocio('Item de estoque não encontrado.', 404);
-      checarEmpresa(req, i.empresa_id);
-      return i.empresa_id;
-    };
-    api.get('/api/empresas/:id/estoque/itens', async (req) => { const id = Number((req.params as any).id); checarEmpresa(req, id); return listarItensEstoque(id); });
-    api.post('/api/empresas/:id/estoque/itens', async (req) => { const id = Number((req.params as any).id); checarEmpresa(req, id); return criarItemEstoque(id, ItemEstoque.parse(req.body)); });
-    api.put('/api/estoque/itens/:id', async (req) => { const id = Number((req.params as any).id); return editarItemEstoque(itemEstoqueDoUsuario(req, id), id, ItemEstoque.parse(req.body)); });
-    api.delete('/api/estoque/itens/:id', async (req) => { const id = Number((req.params as any).id); return excluirItemEstoque(itemEstoqueDoUsuario(req, id), id); });
-    api.post('/api/estoque/itens/:id/movimentos', async (req) => { const id = Number((req.params as any).id); return movimentar(itemEstoqueDoUsuario(req, id), id, Movimento.parse(req.body), u(req).id); });
-    api.get('/api/empresas/:id/estoque/movimentos', async (req) => {
-      const id = Number((req.params as any).id); checarEmpresa(req, id);
-      const { item } = z.object({ item: z.coerce.number().int().optional() }).parse(req.query);
-      return listarMovimentos(id, item);
-    });
-    api.delete('/api/estoque/movimentos/:id', async (req) => {
-      const id = Number((req.params as any).id);
-      const m = db.prepare('SELECT empresa_id FROM estoque_movimentos WHERE id = ?').get(id) as { empresa_id: number } | undefined;
-      if (!m) throw new ErroNegocio('Movimento não encontrado.', 404);
-      checarEmpresa(req, m.empresa_id);
-      return excluirMovimento(m.empresa_id, id);
-    });
-    api.get('/api/empresas/:id/estoque/avisos', async (req) => { const id = Number((req.params as any).id); checarEmpresa(req, id); return avisosEstoque(id); });
-    api.get('/api/compras/:id/estoque', async (req) => { const id = Number((req.params as any).id); compraDoUsuario(req, id); return { itens: itensDaCompra(id) }; });
-    api.post('/api/compras/:id/estoque', async (req) => {
-      const id = Number((req.params as any).id); compraDoUsuario(req, id);
-      const c = db.prepare('SELECT empresa_id FROM compras WHERE id = ?').get(id) as { empresa_id: number };
-      return lancarCompraNoEstoque(c.empresa_id, id, LancamentoCompra.parse(req.body), u(req).id);
     });
     api.delete('/api/compras/:id', async (req) => { const id = Number((req.params as any).id); compraDoUsuario(req, id); return excluirCompra(id); });
 

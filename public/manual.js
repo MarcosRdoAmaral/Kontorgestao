@@ -4,7 +4,7 @@
  * aqui (e a data/versão em MANUAL_VERSAO) antes de publicar a versão.
  * `corpo` é HTML escrito à mão (não recebe dados de usuário).
  */
-export const MANUAL_VERSAO = '3.13.1';
+export const MANUAL_VERSAO = '3.14.0';
 
 export const MANUAL = [
   {
@@ -145,26 +145,7 @@ export const MANUAL = [
       <h3>Compra manual</h3>
       <p><strong>Lançar compra manual</strong> registra uma compra sem XML (cupom, recibo): fornecedor, data, valor, vencimento e categoria.</p>
       <h3>Detalhe, XML e exclusão</h3>
-      <p>Clique na compra para ver itens, totais e parcelas e baixar o XML. <strong>Excluir compra</strong> (permissão <em>Excluir registros</em>) apaga também as despesas que ela gerou. O relatório <em>Compras (NF-e de entrada)</em> está em Relatórios. O acesso a Compras é liberado por usuário em Configurações &gt; Usuários e acessos.</p>`,
-  },
-  {
-    id: 'estoque', titulo: 'Estoque de insumos', resumo: 'Material de expediente e insumos: entradas, baixas e avisos no topo.',
-    corpo: `
-      <p>Em <strong>Estoque</strong> ficam os insumos usados na prestação dos serviços (papel, canetas, toner etc.). O saldo de cada item é a soma das entradas, baixas e ajustes.</p>
-      <h3>Cadastrar e dar entrada</h3>
-      <ul>
-        <li><strong>Novo item:</strong> nome, unidade, categoria e <em>estoque mínimo</em> (quando o saldo chegar a esse valor o sistema avisa para comprar). Dá para informar um saldo inicial.</li>
-        <li><strong>Pela compra:</strong> em <em>Compras</em>, abra a NF-e e clique em <strong>Lançar no estoque</strong>. Marque os itens que são insumos, ajuste nome/quantidade se precisar; itens com o mesmo nome somam no que já existe. Um item da nota só entra uma vez.</li>
-        <li><strong>Entrada manual:</strong> botão <em>Entrada</em> na linha do item.</li>
-      </ul>
-      <h3>Dar baixa</h3>
-      <p>Use <strong>Baixa</strong> sempre que retirar material, informando a quantidade, a data e, se quiser, onde foi usado. Não é possível baixar mais que o saldo. Se a contagem física diferir, use <strong>Contagem</strong> (inventário) e informe o saldo real: o sistema registra o ajuste.</p>
-      <h3>Avisos no topo</h3>
-      <ul>
-        <li><strong>Precisa comprar</strong> (vermelho): saldo igual ou abaixo do mínimo, ou item zerado.</li>
-        <li><strong>Comprado e sem uso</strong> (amarelo): entrou no estoque e está há 30 dias ou mais sem nenhuma baixa.</li>
-      </ul>
-      <p>O aviso aparece em todas as telas para quem tem a permissão <em>Estoque de insumos</em> e pode ser dispensado com o ×; volta se a situação mudar. O <strong>Histórico</strong> de cada item mostra todos os lançamentos.</p>`,
+      <p>Clique na compra para ver itens, totais e parcelas e baixar o XML. Cada parcela vira uma despesa; quando o pagamento aparecer no extrato, ligue-o em <em>Extrato e conciliação</em>. <strong>Excluir compra</strong> (permissão <em>Excluir registros</em>) apaga também as despesas que ela gerou. O relatório <em>Compras (NF-e de entrada)</em> está em Relatórios. O acesso a Compras é liberado por usuário em Configurações &gt; Usuários e acessos.</p>`,
   },
   {
     id: 'tributacao', titulo: 'Tributação e apuração assistida', resumo: 'Impostos, tributações e comparação com o que as notas declaram.',
@@ -202,6 +183,7 @@ export const MANUAL = [
         <li>Nas entradas, use <strong>Ligar a boleto</strong> para conciliar o recebimento com o boleto (aparecem os boletos de valor compatível, mesmo com vencimento diferente da data do crédito).</li>
         <li>O balanço do mês só fecha quando não há lançamentos sem classificação.</li>
       </ol>
+      <p><strong>Ligar a despesa:</strong> numa saída, clique em <em>Ligar a despesa</em> para ligá-la a uma despesa já lançada (a parcela de uma compra, por exemplo) com o mesmo valor e data próxima. A despesa passa a ser a própria saída do extrato, sem aparecer duas vezes; <em>desfazer</em> desliga. Fluxo recomendado: lance a NF-e em <em>Compras</em> (gera despesa e parcelas) e, quando o pagamento cair no extrato, ligue.</p>
       <p><strong>Reflexo em Despesas e balanço:</strong> toda <em>saída classificada</em> vira automaticamente uma despesa (marcada como “extrato”, com o PIX/débito deduzido da descrição). Reclassificar no extrato atualiza a despesa; excluir a importação remove as despesas dela. Ficam de fora as categorias <em>Cartão de crédito</em> (os gastos entram pela própria fatura) e <em>Transferências</em>. Entradas classificadas como <em>Outras receitas</em> (sem boleto) entram nas receitas do balanço.</p>
       <p class="dica">Importar o mesmo extrato duas vezes não duplica os lançamentos. Uma importação errada pode ser excluída na lista de importações.</p>`,
   },
@@ -228,7 +210,6 @@ export const MANUAL = [
         <li><strong>Fiscal e retenções:</strong> notas emitidas e tributos, livro de serviços prestados (ISS a recolher e ISS retido pelo tomador) e retenções por cliente (PIS, COFINS, CSLL, IRRF, INSS e ISS).</li>
         <li><strong>Resultado e caixa:</strong> resultado mensal (o balanço mês a mês), fluxo de caixa por categoria e pendências do extrato (sem classificação ou crédito sem boleto ligado).</li>
         <li><strong>Clientes:</strong> curva ABC (classes A, B e C pelo faturamento) e clientes sem faturamento no período.</li>
-        <li><strong>Estoque:</strong> posição do estoque de insumos e movimentos do período.</li>
       </ul>
       <p>Clique no relatório na lista, escolha o período, o cliente e a situação (quando houver) e clique em <em>Gerar</em>. Exporte para <strong>Excel (CSV)</strong> ou <strong>PDF</strong>.</p>`,
   },
@@ -253,7 +234,7 @@ export const MANUAL = [
   {
     id: 'atalhos', titulo: 'Atalhos e dicas', resumo: 'Atalhos de teclado e boas práticas.',
     corpo: `
-      <p><strong>Menu:</strong> as telas ficam em grupos (Faturamento, Compras e estoque, Financeiro, Cadastros). Clique no nome do grupo para abrir ou recolher; o grupo da tela atual abre sozinho.</p>
+      <p><strong>Menu:</strong> as telas ficam em grupos (Faturamento, Compras, Financeiro, Cadastros). Clique no nome do grupo para abrir ou recolher; o grupo da tela atual abre sozinho.</p>
       <ul>
         <li>Em Emitir nota, digite no campo do cliente para buscar na hora; <kbd>F2</kbd> abre a consulta completa (setas, Enter para escolher, Esc para fechar).</li>
         <li>Confira sempre a <strong>empresa selecionada</strong> no alto do menu antes de emitir.</li>
