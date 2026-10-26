@@ -61,7 +61,7 @@ test('compras: leitura da NF-e, importação, despesas, duplicidade, exclusão e
   assert.equal(r2.alertas.length, 1);
   assert.equal((db.prepare('SELECT COUNT(*) AS n FROM despesas').get() as any).n, 2, 'sem gerar despesas não lança');
 
-  const m = criarCompraManual(1, 1, { fornecedor_nome: 'Mercadinho', emissao: '2026-10-12', valor_total: 80, gerarDespesas: true, categoria: 'Outras', vencimento: '2026-10-12' });
+  const m = criarCompraManual(1, 1, { fornecedor_nome: 'Mercadinho', emissao: '2026-10-12', valor_total: 80, gerarDespesas: true, categoria: 'Outras', vencimento: '2026-10-12', formaPagamento: 'PIX' });
   assert.ok(m.id);
 
   const lista = listarCompras(1, '2026-10');
@@ -134,4 +134,26 @@ test('compras: importação das notas da SEFAZ aceita parcelas ajustadas', async
   assert.equal(ok.importadas, 1);
   const c = db.prepare("SELECT p.vencimento, p.valor FROM compra_parcelas p JOIN compras c ON c.id = p.compra_id WHERE c.chave_acesso = ? ORDER BY p.vencimento").all(ch) as any[];
   assert.deepEqual(c.map((x) => x.valor), [60, 200]);
+});
+
+test('compras: à vista exige forma de pagamento; manual parcelado; lista de fornecedores', async () => {
+  const { db } = await import('../src/db.js');
+  const { criarCompraManual, fornecedoresDaEmpresa, importarCompraXml } = await import('../src/servicos/compras.js');
+  const base = { fornecedor_nome: 'Loja Nova', emissao: '2026-10-20', valor_total: 300, gerarDespesas: true, categoria: 'Outras' };
+  assert.throws(() => criarCompraManual(1, 1, base), /forma de pagamento/);
+  const av = criarCompraManual(1, 1, { ...base, formaPagamento: 'DEBITO' });
+  assert.equal((db.prepare("SELECT forma_pagamento f FROM despesas d JOIN compra_parcelas p ON p.despesa_id = d.id WHERE p.compra_id = ?").get(av.id) as any).f, 'DEBITO');
+  // parcelado não exige; a soma precisa fechar
+  assert.throws(() => criarCompraManual(1, 1, { ...base, parcelas: [{ vencimento: '2026-11-20', valor: 100 }] }), /fechar com o total/);
+  const pr = criarCompraManual(1, 1, { ...base, parcelas: [{ vencimento: '2026-11-20', valor: 150 }, { vencimento: '2026-12-20', valor: 150 }] });
+  assert.equal((db.prepare('SELECT COUNT(*) n FROM compra_parcelas WHERE compra_id = ? AND despesa_id IS NOT NULL').get(pr.id) as any).n, 2);
+  // sem gerar despesas, não exige
+  criarCompraManual(1, 1, { ...base, gerarDespesas: false });
+  // XML sem duplicatas é à vista
+  const xml = nfe('', '35261012345678000195550010000012341000066666');
+  assert.throws(() => importarCompraXml(1, 1, { xml, gerarDespesas: true, categoria: 'x' }), /forma de pagamento/);
+  importarCompraXml(1, 1, { xml, gerarDespesas: true, categoria: 'x', formaPagamento: 'PIX' });
+  const f = fornecedoresDaEmpresa(1) as any[];
+  assert.equal(f.some((x) => x.nome === 'Papelaria Central Ltda' && x.documento === '12345678000195' && x.notas >= 1), true);
+  assert.equal(f.some((x) => x.nome === 'Loja Nova'), true);
 });

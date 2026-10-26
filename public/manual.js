@@ -4,7 +4,7 @@
  * aqui (e a data/versão em MANUAL_VERSAO) antes de publicar a versão.
  * `corpo` é HTML escrito à mão (não recebe dados de usuário).
  */
-export const MANUAL_VERSAO = '3.16.0';
+export const MANUAL_VERSAO = '3.17.0';
 
 export const MANUAL = [
   {
@@ -134,8 +134,8 @@ export const MANUAL = [
   {
     id: 'compras', titulo: 'Compras (NF-e de entrada)', resumo: 'Buscar na SEFAZ as NF-e emitidas contra o CNPJ, importar o XML e lançar nas despesas.',
     corpo: `
-      <p>O grupo <strong>Compras</strong> tem três telas: <strong>Lançar entradas</strong> (importar XML ou lançar à mão), <strong>Buscar NF-e (SEFAZ)</strong> (notas emitidas contra o CNPJ) e <strong>Notas de compra</strong> (consulta, com busca por fornecedor, número, CNPJ ou chave, no período).</p>
-      <p>Toda nota que entra, pelo XML ou pela SEFAZ, abre <em>nota a nota</em> com o resumo (fornecedor, totais, itens) e o <strong>parcelamento da nota</strong>. Se o pagamento real for diferente, altere datas e valores, adicione ou remova parcelas, ou use <em>Refazer</em> em N parcelas a cada X dias; a soma precisa fechar com o total.</p>
+      <p>O grupo <strong>Compras</strong> tem duas telas: <strong>Compras</strong> (lançar e consultar notas, num lugar só) e <strong>Buscar NF-e (SEFAZ)</strong> (notas emitidas contra o CNPJ). Na tela Compras, busque por fornecedor, número da nota, CNPJ ou chave, no período, e use <em>Importar XML da NF-e</em> ou <em>Lançar compra manual</em>.</p>
+      <p>Toda nota que entra, pelo XML ou pela SEFAZ, abre <em>nota a nota</em> com o resumo (fornecedor, totais, itens) e o <strong>parcelamento da nota</strong>. Se o pagamento real for diferente, altere datas e valores, adicione ou remova parcelas, ou use <em>Refazer</em> em N parcelas a cada X dias; a soma precisa fechar com o total. <strong>Compra à vista</strong> (uma parcela vencendo na data da compra) exige escolher a <em>forma de pagamento</em> (PIX, débito, crédito ou dinheiro), que vai para as despesas geradas.</p>
       <h3>Buscar NF-e (SEFAZ)</h3>
       <p>Com o certificado A1 da empresa cadastrado, a tela <strong>Buscar NF-e (SEFAZ)</strong> traz as NF-e emitidas contra o CNPJ direto do Ambiente Nacional, sem precisar pedir o XML ao fornecedor.</p>
       <ol>
@@ -146,7 +146,7 @@ export const MANUAL = [
       <p><strong>Intervalo da SEFAZ:</strong> quando não há documentos novos, a SEFAZ só aceita nova consulta depois de 1 hora; o sistema respeita isso e mostra o horário liberado. Para uma nota específica, use <strong>Buscar pela chave</strong>.</p>
       <p>Notas <strong>canceladas pelo fornecedor</strong> aparecem riscadas e não podem ser importadas; se o cancelamento chegar depois da importação, um alerta em vermelho pede para conferir a compra. <strong>Ocultar</strong> esconde notas que não são compras da empresa (por exemplo, quando ela aparece só como transportadora). A Ciência da Operação não é a manifestação final: Confirmação, Desconhecimento ou Operação não Realizada continuam com o seu processo fiscal.</p>
       <p><strong>Conexão com a SEFAZ</strong> (administrador): o servidor da SEFAZ usa certificado ICP-Brasil, que o Windows nem sempre reconhece. O sistema já traz essa cadeia embutida (raízes v5, v10, v11 e v12 e as ACs SSL dos servidores da SEFAZ), então normalmente não há nada a fazer. Se um dia a busca avisar que não reconhece o certificado do servidor, use <em>Atualizar pelo site do ITI</em> ou envie o pacote <em>ACcompactado.zip</em> baixado pelo navegador.</p>
-      <h3>Lançar entradas: importar o XML da NF-e</h3>
+      <h3>Importar o XML da NF-e</h3>
       <ol>
         <li>Clique em <strong>Importar XML da NF-e</strong> e escolha um ou <em>vários</em> arquivos de uma vez (o XML que o fornecedor envia ou que se baixa no portal da NF-e).</li>
         <li>Deixe marcado <em>Lançar nas despesas</em> se quiser que cada parcela (duplicata) vire uma despesa na data de vencimento, na categoria escolhida; nota à vista vira uma despesa só.</li>
@@ -154,7 +154,7 @@ export const MANUAL = [
       </ol>
       <p>O sistema avisa e <strong>não importa</strong> quando a nota já foi importada, quando foi emitida pela própria empresa (é uma venda), ou quando o XML é de NFS-e ou de evento. Se o destinatário da nota for outro CNPJ, importa com um alerta para você conferir a empresa selecionada.</p>
       <h3>Compra manual</h3>
-      <p><strong>Lançar compra manual</strong> registra uma compra sem XML (cupom, recibo): fornecedor, data, valor, vencimento e categoria.</p>
+      <p><strong>Lançar compra manual</strong> registra uma compra sem XML (cupom, recibo). No fornecedor, digite para buscar ou use <strong>F2</strong> para consultar os fornecedores que já tiveram nota lançada; se for novo, informe o CNPJ e clique em <em>Buscar CNPJ</em> (ou saia do campo) para preencher o nome pela Receita. Informe o valor e o parcelamento, e a forma de pagamento (obrigatória à vista).</p>
       <h3>Detalhe, XML e exclusão</h3>
       <p>Clique na compra para ver itens, totais e parcelas e baixar o XML. <strong>Alterar parcelas</strong> refaz o parcelamento e acerta as despesas geradas (se uma parcela já estiver ligada ao extrato, desfaça o vínculo antes). Cada parcela vira uma despesa; quando o pagamento aparecer no extrato, ligue-o em <em>Extrato e conciliação</em>. <strong>Excluir compra</strong> (permissão <em>Excluir registros</em>) apaga também as despesas que ela gerou. O relatório <em>Compras (NF-e de entrada)</em> está em Relatórios. O acesso a Compras é liberado por usuário em Configurações &gt; Usuários e acessos.</p>`,
   },

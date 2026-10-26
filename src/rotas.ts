@@ -16,7 +16,7 @@ import { catalogo, gerarRelatorio, relatorioCsv, relatorioPdf } from './servicos
 import { configurarAgenda, executarItem, executarProntas, listarAgenda, pularItem, resumoAgenda } from './servicos/agenda.js';
 import { EdicaoImposto, Tributacao, criarTributacao, editarTributacao, excluirTributacao, listarTributacoes, Perfil, TipoDocumento, apuracaoAssistida, conferirTipoDoVinculo, criarPerfil, criarTipo, editarImposto, editarPerfil, editarTipo, excluirPerfil, excluirTipo, gerarPerfisDosServicos, listarImpostos, listarPerfis, listarTipos, tributacaoCompletaDoServico, tributacaoEfetiva, NATUREZAS } from './servicos/tributacao.js';
 import { DescricaoModelo, EntradaDescricao, lerModelo, montarDescricao } from './servicos/descricao.js';
-import { CompraManual, OpcoesImportacao, ParcelaEditada, alterarParcelas, previaCompraXml, criarCompraManual, excluirCompra, importarCompraXml, listarCompras, obterCompra, xmlDaCompra } from './servicos/compras.js';
+import { CompraManual, OpcoesImportacao, fornecedoresDaEmpresa, ParcelaEditada, alterarParcelas, previaCompraXml, criarCompraManual, excluirCompra, importarCompraXml, listarCompras, obterCompra, xmlDaCompra } from './servicos/compras.js';
 import { pacoteContabilidade } from './servicos/contabilidade.js';
 import { ImportacaoRecebidas, buscarNaSefaz, buscarPorChave, configurarBusca, importarRecebidas, liberarCiencias, listarRecebidas, ocultarRecebida, xmlRecebida } from './servicos/nfe-recebidas.js';
 import { apagarCadeiaIcp, baixarCadeiaIcp, definirVerificacaoServidor, extrairCertificadosAc, guardarCadeiaIcp, statusConfianca } from './nfe/confianca.js';
@@ -821,6 +821,7 @@ export async function rotas(app: FastifyInstance) {
       const id = Number((req.params as any).id); checarEmpresa(req, id);
       return importarCompraXml(id, u(req).id, OpcoesImportacao.parse(req.body));
     });
+    api.get('/api/empresas/:id/compras/fornecedores', async (req) => { const id = Number((req.params as any).id); checarEmpresa(req, id); return fornecedoresDaEmpresa(id); });
     api.post('/api/empresas/:id/compras/previa-xml', { bodyLimit: 6 * 1024 * 1024 }, async (req) => {
       const id = Number((req.params as any).id); checarEmpresa(req, id);
       return previaCompraXml(id, z.object({ xml: z.string().min(200) }).parse(req.body).xml);

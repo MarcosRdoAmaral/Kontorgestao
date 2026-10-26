@@ -7,6 +7,13 @@ import { conferirTipoDoVinculo, tipoPadrao } from './tributacao.js';
 const r2 = (n: number) => Math.round((n + Number.EPSILON) * 100) / 100;
 const soDig = (s: string | null | undefined) => String(s ?? '').replace(/[^0-9A-Za-z]/g, '').toUpperCase();
 
+export const FormaPagamento = z.enum(['PIX', 'DEBITO', 'CREDITO', 'DINHEIRO']);
+
+/** À vista: uma parcela só, vencendo na data da compra (ou antes). Nesse caso a forma de pagamento é obrigatória. */
+function exigirFormaAVista(gerar: boolean, parcelas: { vencimento: string }[], emissao: string, forma: string | null | undefined) {
+  if (gerar && parcelas.length === 1 && parcelas[0].vencimento <= emissao && !forma) throw new ErroNegocio('Compra à vista: informe a forma de pagamento (PIX, débito, crédito ou dinheiro).');
+}
+
 export const ParcelaEditada = z.object({
   vencimento: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Vencimento inválido'),
   valor: z.number().positive('O valor da parcela precisa ser maior que zero'),
@@ -26,11 +33,13 @@ export const OpcoesImportacao = z.object({
   tipoDocumentoId: z.number().int().nullish(),
   /** Parcelas conferidas pelo usuário; substituem as da nota quando o pagamento real é diferente. */
   parcelas: z.array(ParcelaEditada).max(60).optional(),
+  /** Forma de pagamento das despesas geradas; obrigatória quando a compra é à vista. */
+  formaPagamento: FormaPagamento.nullish(),
 });
 
-function lancarDespesa(empresaId: number, usuarioId: number, data: string, categoria: string, descricao: string, valor: number) {
-  return Number(db.prepare('INSERT INTO despesas (empresa_id, data, categoria, descricao, valor, criado_por) VALUES (?,?,?,?,?,?)')
-    .run(empresaId, data, categoria, descricao.slice(0, 200), valor, usuarioId).lastInsertRowid);
+function lancarDespesa(empresaId: number, usuarioId: number, data: string, categoria: string, descricao: string, valor: number, forma?: string | null) {
+  return Number(db.prepare('INSERT INTO despesas (empresa_id, data, categoria, descricao, valor, criado_por, forma_pagamento) VALUES (?,?,?,?,?,?,?)')
+    .run(empresaId, data, categoria, descricao.slice(0, 200), valor, usuarioId, forma ?? null).lastInsertRowid);
 }
 
 export function importarCompraXml(empresaId: number, usuarioId: number, entrada: z.infer<typeof OpcoesImportacao>) {
@@ -53,6 +62,7 @@ export function importarCompraXml(empresaId: number, usuarioId: number, entrada:
   if (nfe.parcelas.length && Math.abs(somaParc - t.nf) > 0.05) alertas.push(`A soma das parcelas (R$ ${somaParc.toFixed(2)}) difere do total da nota.`);
 
   const tipoId = conferirTipoDoVinculo(empresaId, entrada.tipoDocumentoId, 'ENTRADA') ?? tipoPadrao(empresaId, 'ENTRADA')?.id ?? null;
+  exigirFormaAVista(entrada.gerarDespesas, entrada.parcelas?.length ? entrada.parcelas : nfe.parcelas.length ? nfe.parcelas : [{ vencimento: nfe.emissao }], nfe.emissao, entrada.formaPagamento);
   const id = db.transaction(() => {
     const cid = Number(db.prepare(`INSERT INTO compras (empresa_id, fornecedor_documento, fornecedor_nome, numero, serie, chave_acesso, emissao, natureza, categoria,
         valor_produtos, valor_frete, valor_desconto, valor_outras, valor_icms, valor_ipi, valor_total, xml, origem, criado_por, tipo_documento_id)
@@ -65,7 +75,7 @@ export function importarCompraXml(empresaId: number, usuarioId: number, entrada:
     const insP = db.prepare('INSERT INTO compra_parcelas (compra_id, numero, vencimento, valor, despesa_id) VALUES (?,?,?,?,?)');
     parcelas.forEach((p, k) => {
       const desp = entrada.gerarDespesas
-        ? lancarDespesa(empresaId, usuarioId, p.vencimento, entrada.categoria, `NF ${nfe.numero} — ${nfe.fornecedor.nome}${parcelas.length > 1 ? ` (parcela ${k + 1}/${parcelas.length})` : ''}`, p.valor)
+        ? lancarDespesa(empresaId, usuarioId, p.vencimento, entrada.categoria, `NF ${nfe.numero} — ${nfe.fornecedor.nome}${parcelas.length > 1 ? ` (parcela ${k + 1}/${parcelas.length})` : ''}`, p.valor, entrada.formaPagamento)
         : null;
       insP.run(cid, p.numero, p.vencimento, p.valor, desp);
     });
@@ -140,18 +150,32 @@ export const CompraManual = z.object({
   categoria: z.string().trim().max(60).default('Material e equipamentos'),
   vencimento: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullish(),
   tipoDocumentoId: z.number().int().nullish(),
+  /** Parcelamento (soma = valor total). Sem ele, vale uma parcela única em `vencimento` (ou na data da compra). */
+  parcelas: z.array(ParcelaEditada).max(60).optional(),
+  formaPagamento: FormaPagamento.nullish(),
 });
 
 export function criarCompraManual(empresaId: number, usuarioId: number, d: z.infer<typeof CompraManual>) {
   const tipoId = conferirTipoDoVinculo(empresaId, d.tipoDocumentoId, 'ENTRADA') ?? tipoPadrao(empresaId, 'ENTRADA')?.id ?? null;
+  const parcelas = d.parcelas?.length ? [...d.parcelas].sort((x, y) => x.vencimento.localeCompare(y.vencimento)) : [{ numero: null as string | null | undefined, vencimento: d.vencimento ?? d.emissao, valor: d.valor_total }];
+  conferirSoma(parcelas, d.valor_total);
+  exigirFormaAVista(d.gerarDespesas, parcelas, d.emissao, d.formaPagamento);
   return db.transaction(() => {
     const cid = Number(db.prepare(`INSERT INTO compras (empresa_id, fornecedor_documento, fornecedor_nome, numero, emissao, categoria, observacao, valor_produtos, valor_total, origem, criado_por, tipo_documento_id)
       VALUES (?,?,?,?,?,?,?,?,?,'MANUAL',?,?)`).run(empresaId, d.fornecedor_documento ?? null, d.fornecedor_nome, d.numero ?? null, d.emissao, d.gerarDespesas ? d.categoria : null, d.observacao ?? null, d.valor_total, d.valor_total, usuarioId, tipoId).lastInsertRowid);
-    const venc = d.vencimento ?? d.emissao;
-    const desp = d.gerarDespesas ? lancarDespesa(empresaId, usuarioId, venc, d.categoria, `Compra${d.numero ? ' ' + d.numero : ''} — ${d.fornecedor_nome}`, d.valor_total) : null;
-    db.prepare('INSERT INTO compra_parcelas (compra_id, vencimento, valor, despesa_id) VALUES (?,?,?,?)').run(cid, venc, d.valor_total, desp);
+    const insP = db.prepare('INSERT INTO compra_parcelas (compra_id, numero, vencimento, valor, despesa_id) VALUES (?,?,?,?,?)');
+    parcelas.forEach((p, k) => {
+      const desp = d.gerarDespesas ? lancarDespesa(empresaId, usuarioId, p.vencimento, d.categoria, `Compra${d.numero ? ' ' + d.numero : ''} — ${d.fornecedor_nome}${parcelas.length > 1 ? ` (parcela ${k + 1}/${parcelas.length})` : ''}`, p.valor, d.formaPagamento) : null;
+      insP.run(cid, p.numero ?? (parcelas.length > 1 ? String(k + 1).padStart(3, '0') : null), p.vencimento, p.valor, desp);
+    });
     return { id: cid };
   })();
+}
+
+/** Fornecedores que já tiveram nota lançada (para a consulta por F2 e o preenchimento automático). */
+export function fornecedoresDaEmpresa(empresaId: number) {
+  return db.prepare(`SELECT MAX(fornecedor_nome) AS nome, fornecedor_documento AS documento, COUNT(*) AS notas, MAX(emissao) AS ultima
+    FROM compras WHERE empresa_id = ? GROUP BY COALESCE(NULLIF(fornecedor_documento, ''), fornecedor_nome) ORDER BY nome COLLATE NOCASE`).all(empresaId);
 }
 
 export function listarCompras(empresaId: number, mes: string | null, busca?: { q?: string; de?: string; ate?: string }) {

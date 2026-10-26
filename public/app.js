@@ -91,12 +91,12 @@ function abrirDialogo(html, aoAbrir) {
  * Consulta de clientes por F2: abre uma busca (nome, CNPJ/CPF ou e-mail) sobre a lista do <select>.
  * Setas navegam, Enter escolhe, Esc fecha. Vale em qualquer tela que passe o formulário e o select.
  */
-function habilitarConsultaF2(form, select, clientes) {
+function habilitarConsultaF2(form, select, clientes, titulo = 'Consultar cliente') {
   const abrir = () => {
     let sel = 0, achados = clientes;
     const norm = (x) => String(x ?? '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
     abrirDialogo(`
-      <h2>Consultar cliente</h2>
+      <h2>${esc(titulo)}</h2>
       <input id="f2-busca" type="search" autocomplete="off" placeholder="Digite o nome, CNPJ/CPF ou e-mail" style="width:100%">
       <div class="rolagem" style="max-height:320px;margin-top:10px"><table class="tabela"><tbody id="f2-lista"></tbody></table></div>
       <p class="dica">↑ ↓ para navegar · Enter para escolher · Esc para fechar</p>
@@ -406,13 +406,13 @@ async function iniciar() {
 
 /** A tela pertence a algum módulo liberado para o usuário? (o servidor confere de novo em cada chamada) */
 function telaPermitida(nome) {
-  const modulo = { painel: 'painel', emitir: 'emitir', notas: 'notas', nota: 'notas', cobrancas: 'cobrancas', banco: 'empresas', despesas: 'despesas', compras: 'compras', entradas: 'compras', 'nfe-sefaz': 'compras', tributacao: 'tributacao', extrato: 'despesas', cartao: 'despesas', agenda: 'emitir', relatorios: 'relatorios', tomadores: 'tomadores', servicos: 'servicos', empresas: 'empresas' }[nome];
+  const modulo = { painel: 'painel', emitir: 'emitir', notas: 'notas', nota: 'notas', cobrancas: 'cobrancas', banco: 'empresas', despesas: 'despesas', compras: 'compras', entradas: 'compras', 'compra-nova': 'compras', 'nfe-sefaz': 'compras', tributacao: 'tributacao', extrato: 'despesas', cartao: 'despesas', agenda: 'emitir', relatorios: 'relatorios', tomadores: 'tomadores', servicos: 'servicos', empresas: 'empresas' }[nome];
   return nome === 'config' || (modulo && estado.usuario.modulos.includes(modulo));
 }
 
 const rotas = {
   painel: telaPainel, emitir: telaEmitir, notas: telaNotas, nota: telaNota,
-  cobrancas: telaCobrancas, banco: telaBanco, despesas: telaDespesas, compras: telaCompras, entradas: telaEntradas, 'nfe-sefaz': telaNfeSefaz, tributacao: telaTributacao, extrato: telaExtrato, cartao: telaCartao, agenda: telaAgenda, relatorios: telaRelatorios, tomadores: telaTomadores, servicos: telaServicos, empresas: telaEmpresas, config: telaConfig,
+  cobrancas: telaCobrancas, banco: telaBanco, despesas: telaDespesas, compras: telaCompras, entradas: telaCompras, 'compra-nova': telaCompraManual, 'nfe-sefaz': telaNfeSefaz, tributacao: telaTributacao, extrato: telaExtrato, cartao: telaCartao, agenda: telaAgenda, relatorios: telaRelatorios, tomadores: telaTomadores, servicos: telaServicos, empresas: telaEmpresas, config: telaConfig,
 };
 
 function rotear() {
@@ -1439,11 +1439,16 @@ async function abaImpostos() {
 // ---------------------------------------------------------------------------
 const isoMais = (iso, d) => new Date(Date.parse(iso + 'T12:00:00Z') + d * 86400e3).toISOString().slice(0, 10);
 
-/** Editor de parcelas: linhas de vencimento e valor, com a conferência contra o total da nota. */
-function editorParcelas(box, parcelas, total, base) {
+/** Editor de parcelas: linhas de vencimento e valor, com a conferência contra o total da nota. `total` pode ser função (valor digitado na tela). */
+function editorParcelas(box, parcelas, total, base, aoMudar) {
   let linhas = parcelas.map((p) => ({ numero: p.numero ?? null, vencimento: p.vencimento, valor: p.valor }));
-  const fmt = (v) => String(v.toFixed(2)).replace('.', ',');
+  const tot = () => Math.round((typeof total === 'function' ? total() : total) * 100) / 100 || 0;
+  const fmt = (v) => String(Number(v).toFixed(2)).replace('.', ',');
   const soma = () => Math.round(linhas.reduce((a, p) => a + (Number(p.valor) || 0), 0) * 100) / 100;
+  const dividir = (n, dias) => {
+    const ini = linhas[0]?.vencimento ?? base, cent = Math.round(tot() * 100), cada = Math.floor(cent / n);
+    linhas = Array.from({ length: n }, (_, i) => ({ numero: null, vencimento: dias ? isoMais(ini, dias * i) : (linhas[i]?.vencimento ?? isoMais(ini, 30 * i)), valor: (i === n - 1 ? cent - cada * (n - 1) : cada) / 100 }));
+  };
   const desenhar = () => {
     box.innerHTML = `<table class="tabela"><thead><tr><th>Parcela</th><th>Vencimento</th><th class="num">Valor (R$)</th><th></th></tr></thead><tbody>
       ${linhas.map((p, i) => `<tr><td>${i + 1}/${linhas.length}</td><td><input type="date" data-pv="${i}" value="${p.vencimento}"></td>
@@ -1454,24 +1459,29 @@ function editorParcelas(box, parcelas, total, base) {
         <button type="button" id="p-refaz">Refazer</button></div>
       <p id="p-status"></p>`;
     status();
-    box.querySelectorAll('[data-pv]').forEach((i) => (i.onchange = () => { linhas[Number(i.dataset.pv)].vencimento = i.value; }));
-    box.querySelectorAll('[data-pq]').forEach((i) => (i.oninput = () => { linhas[Number(i.dataset.pq)].valor = numero(i.value) ?? 0; status(); }));
-    box.querySelectorAll('[data-pr]').forEach((b) => (b.onclick = () => { linhas.splice(Number(b.dataset.pr), 1); desenhar(); }));
-    box.querySelector('#p-add').onclick = () => { const ult = linhas[linhas.length - 1]; linhas.push({ numero: null, vencimento: isoMais(ult?.vencimento ?? base, 30), valor: Math.max(0, Math.round((total - soma()) * 100) / 100) }); desenhar(); };
+    box.querySelectorAll('[data-pv]').forEach((i) => (i.onchange = () => { linhas[Number(i.dataset.pv)].vencimento = i.value; aoMudar?.(); }));
+    box.querySelectorAll('[data-pq]').forEach((i) => (i.oninput = () => { linhas[Number(i.dataset.pq)].valor = numero(i.value) ?? 0; status(); aoMudar?.(); }));
+    box.querySelectorAll('[data-pr]').forEach((b) => (b.onclick = () => { linhas.splice(Number(b.dataset.pr), 1); desenhar(); aoMudar?.(); }));
+    box.querySelector('#p-add').onclick = () => { const ult = linhas[linhas.length - 1]; linhas.push({ numero: null, vencimento: isoMais(ult?.vencimento ?? base, 30), valor: Math.max(0, Math.round((tot() - soma()) * 100) / 100) }); desenhar(); aoMudar?.(); };
     box.querySelector('#p-refaz').onclick = () => {
-      const n = Math.min(60, Math.max(1, Number(box.querySelector('#p-n').value) || 1)), dias = Math.max(1, Number(box.querySelector('#p-d').value) || 30);
-      const ini = linhas[0]?.vencimento ?? base, cent = Math.round(total * 100), cada = Math.floor(cent / n);
-      linhas = Array.from({ length: n }, (_, i) => ({ numero: null, vencimento: isoMais(ini, dias * i), valor: (i === n - 1 ? cent - cada * (n - 1) : cada) / 100 }));
-      desenhar();
+      dividir(Math.min(60, Math.max(1, Number(box.querySelector('#p-n').value) || 1)), Math.max(1, Number(box.querySelector('#p-d').value) || 30));
+      desenhar(); aoMudar?.();
     };
   };
   const status = () => {
-    const dif = Math.round((soma() - total) * 100) / 100, el = box.querySelector('#p-status');
-    if (el) el.innerHTML = Math.abs(dif) < 0.005 ? `<span class="cor-verde">Parcelas fecham com o total da nota (${brl(total)}).</span>`
-      : `<span class="cor-vermelho">Soma das parcelas ${brl(soma())} · total da nota ${brl(total)} · ${dif > 0 ? 'sobram' : 'faltam'} ${brl(Math.abs(dif))}.</span>`;
+    const dif = Math.round((soma() - tot()) * 100) / 100, el = box.querySelector('#p-status');
+    if (el) el.innerHTML = Math.abs(dif) < 0.005 ? `<span class="cor-verde">Parcelas fecham com o total (${brl(tot())}).</span>`
+      : `<span class="cor-vermelho">Soma das parcelas ${brl(soma())} · total ${brl(tot())} · ${dif > 0 ? 'sobram' : 'faltam'} ${brl(Math.abs(dif))}.</span>`;
   };
   desenhar();
-  return { ler: () => linhas.map((p) => ({ numero: p.numero, vencimento: p.vencimento, valor: Number(p.valor) || 0 })), fecha: () => Math.abs(soma() - total) < 0.005 };
+  return {
+    ler: () => linhas.map((p) => ({ numero: p.numero, vencimento: p.vencimento, valor: Number(p.valor) || 0 })),
+    fecha: () => Math.abs(soma() - tot()) < 0.005,
+    /** À vista: uma parcela só, vencendo até a data da compra. */
+    aVista: (emissao) => linhas.length === 1 && linhas[0].vencimento <= emissao,
+    /** O total ou a data da compra mudou: refaz as parcelas mantendo a quantidade (uma parcela à vista acompanha a data da compra). */
+    recalcular: (emissao) => { if (linhas.length === 1 && emissao) linhas[0].vencimento = emissao; dividir(linhas.length, 0); desenhar(); },
+  };
 }
 
 async function dadosDeEntrada() {
@@ -1483,19 +1493,22 @@ async function dadosDeEntrada() {
   return { base, cat, tiposEntrada, opcTipo, opcCat };
 }
 
+const opcForma = () => '<option value="">Selecione…</option>' + Object.entries(FORMAS_PGTO).map(([k, n]) => `<option value="${k}">${n}</option>`).join('');
+
 const linhaCompra = (c) => `<tr class="clicavel" data-c="${c.id}"><td>${dataBr(c.emissao)}</td><td>${esc(c.fornecedor_nome)}${c.fornecedor_documento ? `<br><span class="dica">${fmtDoc(c.fornecedor_documento)}</span>` : ''}</td>
   <td>${esc(c.numero ?? '')}${c.origem === 'MANUAL' ? ' <span class="dica">(manual)</span>' : ''}</td><td class="num">${c.itens || ''}</td><td class="num">${brl(c.valor_total)}</td>
   <td>${c.despesas ? `<span class="cor-verde">lançadas (${esc(c.categoria ?? '')})</span>` : '<span class="dica">não lançadas</span>'}</td><td><button data-ver="${c.id}">Abrir</button></td></tr>`;
 
-/** Consulta das notas de compra já lançadas: busca por fornecedor, número, CNPJ ou chave, no período. */
+/** Compras: lançamento (XML ou manual) e consulta das notas num lugar só, com busca por fornecedor, número, CNPJ ou chave. */
 async function telaCompras() {
   const est = (telaCompras.est ??= { q: '', de: mesAtual() + '-01', ate: '' });
   if (!est.ate) { const [a, m] = mesAtual().split('-').map(Number); est.ate = `${mesAtual()}-${String(new Date(a, m, 0).getDate()).padStart(2, '0')}`; }
-  const base = `/api/empresas/${estado.empresaId}`;
+  const { base, tiposEntrada, opcTipo, opcCat } = await dadosDeEntrada();
   const d = await api('GET', `${base}/compras?de=${est.de}&ate=${est.ate}${est.q ? '&q=' + encodeURIComponent(est.q) : ''}`);
   conteudo.innerHTML = `
-    <div class="topo"><div><h1>Notas de compra</h1><p class="sutil">Consulta das NF-e e compras já lançadas. Para lançar uma nova, use <a href="#/entradas">Lançar entradas</a>.</p></div>
-      <div><button class="primario" id="ir-entradas">Lançar entradas</button></div></div>
+    <div class="topo"><div><h1>Compras</h1><p class="sutil">Lance as notas de entrada e consulte o que já foi lançado. Importe o XML da NF-e (cada nota abre com o resumo e o parcelamento para conferir) ou lance a compra manualmente. Para buscar as notas emitidas contra o CNPJ, use <a href="#/nfe-sefaz">Buscar NF-e (SEFAZ)</a>.</p></div>
+      <div><button class="primario" id="imp-xml">Importar XML da NF-e</button><input type="file" id="arq-xml" accept=".xml,text/xml,application/xml" multiple hidden>
+        <button id="nova-compra">Lançar compra manual</button></div></div>
     <form id="busca-comp" class="grade" style="align-items:end">
       <label class="largo">Buscar <input type="search" name="q" value="${esc(est.q)}" placeholder="Fornecedor, nº da nota, CNPJ ou chave de acesso"></label>
       <label>De <input type="date" name="de" value="${est.de}"></label><label>Até <input type="date" name="ate" value="${est.ate}"></label>
@@ -1506,13 +1519,30 @@ async function telaCompras() {
     </div>
     ${d.compras.length ? `<div class="rolagem"><table class="tabela"><thead><tr><th>Emissão</th><th>Fornecedor</th><th>NF</th><th class="num">Itens</th><th class="num">Total</th><th>Despesas</th><th></th></tr></thead><tbody>${d.compras.map(linhaCompra).join('')}</tbody></table></div>`
       : '<div class="vazio">Nenhuma nota encontrada neste período e busca.</div>'}`;
-  $('#ir-entradas').onclick = () => { location.hash = '#/entradas'; };
   $('#busca-comp').onsubmit = (e) => { e.preventDefault(); const f = e.target; Object.assign(est, { q: f.q.value.trim(), de: f.de.value || '0000-01-01', ate: f.ate.value || '9999-12-31' }); telaCompras(); };
   conteudo.querySelectorAll('[data-ver]').forEach((b) => (b.onclick = (ev) => { ev.stopPropagation(); detalheCompra(Number(b.dataset.ver), telaCompras); }));
   conteudo.querySelectorAll('tr[data-c]').forEach((tr) => (tr.onclick = () => detalheCompra(Number(tr.dataset.c), telaCompras)));
+  $('#nova-compra').onclick = () => { location.hash = '#/compra-nova'; };
+  $('#imp-xml').onclick = () => $('#arq-xml').click();
+  $('#arq-xml').onchange = async (ev) => {
+    const arqs = [...ev.target.files]; ev.target.value = '';
+    if (!arqs.length) return;
+    const resultado = [];
+    for (let k = 0; k < arqs.length; k++) {
+      const a = arqs[k];
+      let xml, pv;
+      try { xml = await a.text(); pv = await api('POST', `${base}/compras/previa-xml`, { xml }); }
+      catch (err) { resultado.push(`<li class="cor-vermelho">${esc(a.name)}: ${esc(mensagemErro(err))}</li>`); continue; }
+      const r = await conferirNotaDialogo({ opc: { tiposEntrada, opcTipo, opcCat }, pv, rotulo: `Nota ${k + 1} de ${arqs.length}`, origem: a.name, ultima: k + 1 === arqs.length,
+        enviar: (f, parcelas) => api('POST', `${base}/compras/importar-xml`, { xml, gerarDespesas: f.gerar.checked, categoria: f.categoria.value, tipoDocumentoId: f.tipo?.value ? Number(f.tipo.value) : null, formaPagamento: f.forma.value || null, parcelas }) });
+      resultado.push(r.ok ? `<li class="cor-verde">NF ${esc(r.numero)} — ${esc(r.fornecedor)} · ${brl(r.valor)} · ${r.parcelas} parcela(s)</li>` : `<li class="dica">NF ${esc(pv.numero)} — ${esc(pv.fornecedor.nome)}: não importada</li>`);
+    }
+    abrirDialogo(`<div><h2>Importação concluída</h2><ul class="lista-simples">${resultado.join('')}</ul><div class="acoes"><button class="primario" data-fechar>Fechar</button></div></div>`, () => {});
+    telaCompras();
+  };
 }
 
-/** Conferência de UMA nota: resumo do XML, parcelamento editável, importar ou pular. Resolve { ok, ... }. */
+/** Conferência de UMA nota: resumo do XML, parcelamento editável, forma de pagamento (obrigatória à vista), importar ou pular. */
 function conferirNotaDialogo({ opc, pv, rotulo, origem, ultima, enviar }) {
   return new Promise((fim) => {
     const t = pv.totais;
@@ -1527,16 +1557,23 @@ function conferirNotaDialogo({ opc, pv, rotulo, origem, ultima, enviar }) {
       <div id="ed-parc"></div>
       <div class="grade"><label class="check largo"><input type="checkbox" name="gerar" checked> Lançar as parcelas nas <strong>despesas</strong>, na data de vencimento</label>
         <label>Categoria da despesa <select name="categoria">${opc.opcCat('Material e equipamentos')}</select></label>
+        <label>Forma de pagamento <span class="dica" id="forma-dica"></span><select name="forma">${opcForma()}</select></label>
         ${opc.tiposEntrada.length ? `<label>Tributação <select name="tipo">${opc.opcTipo()}</select></label>` : ''}</div>
       <p class="erro" id="erro-nota"></p>
       <div class="acoes"><button class="primario" type="submit" ${pv.bloqueio ? 'disabled' : ''}>Importar esta nota</button><button type="button" id="pular">${ultima ? 'Cancelar' : 'Pular'}</button></div></form>`, (dlg) => {
-      const ed = editorParcelas(dlg.querySelector('#ed-parc'), pv.parcelas, t.nf, pv.emissao);
+      const f = dlg.querySelector('#form-nota');
+      let ed;
+      const obrigatoria = () => f.gerar.checked && ed?.aVista(pv.emissao);
+      const atualizar = () => { const o = obrigatoria(); f.forma.required = !!o; dlg.querySelector('#forma-dica').textContent = o ? '(obrigatória: compra à vista)' : '(opcional)'; };
+      ed = editorParcelas(dlg.querySelector('#ed-parc'), pv.parcelas, t.nf, pv.emissao, atualizar);
+      f.gerar.onchange = atualizar; atualizar();
       let feito = false; const sair = (v) => { if (!feito) { feito = true; fim(v); } };
       dlg.addEventListener('close', () => sair({ ok: false }));
       dlg.querySelector('#pular').onclick = () => { sair({ ok: false }); dlg.close(); };
-      dlg.querySelector('#form-nota').onsubmit = async (e2) => {
-        e2.preventDefault(); const f = e2.target;
+      f.onsubmit = async (e2) => {
+        e2.preventDefault();
         if (!ed.fecha()) { $('#erro-nota').textContent = 'A soma das parcelas precisa fechar com o total da nota.'; return; }
+        if (obrigatoria() && !f.forma.value) { $('#erro-nota').textContent = 'Compra à vista: selecione a forma de pagamento.'; f.forma.focus(); return; }
         try {
           const parcelas = ed.ler();
           const r = await enviar(f, parcelas);
@@ -1549,66 +1586,60 @@ function conferirNotaDialogo({ opc, pv, rotulo, origem, ultima, enviar }) {
   });
 }
 
-/** Lançamento de entradas: importa os XMLs nota a nota (resumo e parcelas para conferir) ou lança uma compra manual. */
-async function telaEntradas() {
+/** Lançamento manual de compra (cupom, recibo, nota sem XML): fornecedor com consulta F2 e busca de CNPJ, parcelamento e forma de pagamento. */
+async function telaCompraManual() {
   const { base, tiposEntrada, opcTipo, opcCat } = await dadosDeEntrada();
-  const rec = await api('GET', `${base}/compras?mes=${mesAtual()}`);
-  conteudo.innerHTML = `
-    <div class="topo"><div><h1>Lançar entradas</h1><p class="sutil">Importe o XML da NF-e recebida do fornecedor. O sistema mostra o resumo de cada nota e o parcelamento para você conferir (e ajustar, se o pagamento real for diferente) antes de lançar nas despesas.</p></div>
-      <div><button class="primario" id="imp-xml">Importar XML da NF-e</button><input type="file" id="arq-xml" accept=".xml,text/xml,application/xml" multiple hidden>
-        <button id="nova-compra">Lançar compra manual</button></div></div>
-    <h2>Lançadas neste mês</h2>
-    ${rec.compras.length ? `<div class="rolagem"><table class="tabela"><thead><tr><th>Emissão</th><th>Fornecedor</th><th>NF</th><th class="num">Itens</th><th class="num">Total</th><th>Despesas</th><th></th></tr></thead><tbody>${rec.compras.slice(0, 10).map(linhaCompra).join('')}</tbody></table></div>
-      <p class="dica">Para pesquisar outras notas, abra <a href="#/compras">Notas de compra</a>.</p>` : '<div class="vazio">Nada lançado neste mês ainda.</div>'}`;
-  conteudo.querySelectorAll('[data-ver]').forEach((b) => (b.onclick = (ev) => { ev.stopPropagation(); detalheCompra(Number(b.dataset.ver), telaEntradas); }));
-  conteudo.querySelectorAll('tr[data-c]').forEach((tr) => (tr.onclick = () => detalheCompra(Number(tr.dataset.c), telaEntradas)));
-
-  $('#imp-xml').onclick = () => $('#arq-xml').click();
-  $('#arq-xml').onchange = (ev) => {
-    const arqs = [...ev.target.files]; ev.target.value = '';
-    if (arqs.length) conferirNotas(arqs);
-  };
-
-  async function conferirNotas(arqs) {
-    const resultado = [];
-    for (let k = 0; k < arqs.length; k++) {
-      const a = arqs[k];
-      let xml, pv;
-      try { xml = await a.text(); pv = await api('POST', `${base}/compras/previa-xml`, { xml }); }
-      catch (err) { resultado.push(`<li class="cor-vermelho">${esc(a.name)}: ${esc(mensagemErro(err))}</li>`); continue; }
-      const r = await conferirNotaDialogo({ opc: { tiposEntrada, opcTipo, opcCat }, pv, rotulo: `Nota ${k + 1} de ${arqs.length}`, origem: a.name, ultima: k + 1 === arqs.length,
-        enviar: (f, parcelas) => api('POST', `${base}/compras/importar-xml`, { xml, gerarDespesas: f.gerar.checked, categoria: f.categoria.value, tipoDocumentoId: f.tipo?.value ? Number(f.tipo.value) : null, parcelas }) });
-      resultado.push(r.ok ? `<li class="cor-verde">NF ${esc(r.numero)} — ${esc(r.fornecedor)} · ${brl(r.valor)} · ${r.parcelas} parcela(s)</li>` : `<li class="dica">NF ${esc(pv.numero)} — ${esc(pv.fornecedor.nome)}: não importada</li>`);
-    }
-    abrirDialogo(`<div><h2>Importação concluída</h2><ul class="lista-simples">${resultado.join('')}</ul><div class="acoes"><button class="primario" data-fechar>Fechar</button></div></div>`, () => {});
-    telaEntradas();
-  }
-
-  $('#nova-compra').onclick = () => abrirDialogo(`<form id="form-comp"><h2>Lançar compra manual</h2>
-    <div class="grade">
-      <label class="largo">Fornecedor <input name="fornecedor_nome" required maxlength="120"></label>
-      <label>CNPJ/CPF <input name="fornecedor_documento" maxlength="20"></label>
-      <label>Nº da nota/documento <input name="numero" maxlength="30"></label>
-      <label>Data da compra <input type="date" name="emissao" required value="${new Date(Date.now() - 3 * 3600e3).toISOString().slice(0, 10)}"></label>
-      <label>Valor total (R$) <input name="valor_total" data-num inputmode="decimal" required></label>
-      <label>Vencimento <input type="date" name="vencimento"></label>
-      <label>Categoria <select name="categoria">${opcCat('Material e equipamentos')}</select></label>
-      ${tiposEntrada.length ? `<label>Tributação <select name="tipo">${opcTipo()}</select></label>` : ''}
-      <label class="largo">Observação <input name="observacao" maxlength="300"></label>
-    </div>
-    <label class="check"><input type="checkbox" name="gerar" checked> Lançar nas despesas</label>
-    <p class="erro" id="erro-comp"></p>
-    <div class="acoes"><button class="primario" type="submit">Salvar</button><button type="button" data-fechar>Cancelar</button></div></form>`, (dlg) => {
-    dlg.querySelector('#form-comp').onsubmit = async (e2) => {
-      e2.preventDefault(); const f = e2.target; const v = lerForm(f);
-      try {
-        await api('POST', `${base}/compras`, { fornecedor_nome: v.fornecedor_nome, fornecedor_documento: v.fornecedor_documento, numero: v.numero, emissao: v.emissao, valor_total: v.valor_total, vencimento: v.vencimento, observacao: v.observacao, categoria: f.categoria.value, gerarDespesas: f.gerar.checked, tipoDocumentoId: f.tipo?.value ? Number(f.tipo.value) : null });
-        dlg.close(); aviso('Compra lançada.'); telaEntradas();
-      } catch (err) { $('#erro-comp').textContent = mensagemErro(err); }
-    };
+  const fornecedores = (await api('GET', `${base}/compras/fornecedores`).catch(() => [])).map((x, i) => ({ id: i, nome: x.nome, documento: x.documento, email: '' }));
+  const hoje = new Date(Date.now() - 3 * 3600e3).toISOString().slice(0, 10);
+  conteudo.innerHTML = `<div class="topo"><div><h1>Lançar compra manual</h1><p class="sutil">Para compra sem XML (cupom, recibo, nota de papel). <span class="dica">Dica: F2 consulta os fornecedores já lançados.</span></p></div>
+      <div><button type="button" id="voltar-compras">Voltar para Compras</button></div></div>
+    <form id="form-comp">
+      <datalist id="lista-forn">${fornecedores.map((x) => `<option value="${esc(x.nome)}">`).join('')}</datalist>
+      <div class="grade">
+        <label class="largo">Fornecedor <span class="dica">(digite para buscar · F2 abre a consulta)</span><input name="nome" list="lista-forn" required maxlength="120" autocomplete="off"></label>
+        <label>CNPJ / CPF <span class="linha-campo"><input name="documento" maxlength="20"><button type="button" data-buscar-cnpj>Buscar CNPJ</button></span><span class="dica" data-cnpj-info>Se o fornecedor ainda não foi lançado, a busca na Receita preenche o nome.</span></label>
+        <label>Nº da nota/documento <input name="nf_numero" maxlength="30"></label>
+        <label>Data da compra <input type="date" name="emissao" required value="${hoje}"></label>
+        <label>Valor total (R$) <input name="valor_total" data-num inputmode="decimal" required></label>
+        <label>Categoria <select name="categoria">${opcCat('Material e equipamentos')}</select></label>
+        <label>Forma de pagamento <span class="dica" id="forma-dica"></span><select name="forma">${opcForma()}</select></label>
+        ${tiposEntrada.length ? `<label>Tributação <select name="tipo">${opcTipo()}</select></label>` : ''}
+        <label class="largo">Observação <input name="observacao" maxlength="300"></label>
+      </div>
+      <h3>Parcelamento</h3>
+      <p class="dica">Uma parcela vencendo na data da compra é <strong>à vista</strong> (a forma de pagamento passa a ser obrigatória). Para parcelar, use <em>Refazer em N parcelas</em> ou edite as linhas.</p>
+      <div id="ed-parc"></div>
+      <label class="check"><input type="checkbox" name="gerar" checked> Lançar as parcelas nas despesas</label>
+      <p class="erro" id="erro-comp"></p>
+      <div class="acoes"><button class="primario" type="submit">Salvar compra</button><button type="button" id="cancelar-comp">Cancelar</button></div></form>`;
+  const f = $('#form-comp');
+  $('#voltar-compras').onclick = $('#cancelar-comp').onclick = () => { location.hash = '#/compras'; };
+  // fornecedor: F2, lista de digitação e CNPJ (preenche os campos vazios)
+  const noFake = { set value(i) { const x = fornecedores[Number(i)]; if (x) { f.nome.value = x.nome; f.documento.value = x.documento ? fmtDoc(x.documento) : ''; } }, dispatchEvent() {}, focus() { f.nome.focus(); } };
+  habilitarConsultaF2(f, noFake, fornecedores, 'Consultar fornecedor');
+  f.nome.addEventListener('change', () => { const x = fornecedores.find((y) => y.nome === f.nome.value); if (x && !f.documento.value.trim() && x.documento) f.documento.value = fmtDoc(x.documento); });
+  f.documento.addEventListener('blur', () => {
+    const dig = f.documento.value.replace(/\D/g, ''), x = dig && fornecedores.find((y) => String(y.documento ?? '').replace(/\D/g, '') === dig);
+    if (x && !f.nome.value.trim()) f.nome.value = x.nome;
   });
+  ligarConsultaCnpj(f, 'fornecedor');
+  // parcelamento
+  const total = () => numero(f.valor_total.value) ?? 0;
+  const ed = editorParcelas($('#ed-parc'), [{ vencimento: hoje, valor: 0 }], total, hoje, () => atualizarForma());
+  function atualizarForma() { const o = f.gerar.checked && ed.aVista(f.emissao.value); f.forma.required = !!o; $('#forma-dica').textContent = o ? '(obrigatória: compra à vista)' : '(opcional)'; }
+  f.valor_total.addEventListener('input', () => { ed.recalcular(); atualizarForma(); });
+  f.emissao.addEventListener('change', () => { ed.recalcular(f.emissao.value); atualizarForma(); });
+  f.gerar.onchange = atualizarForma; atualizarForma();
+  f.onsubmit = async (e) => {
+    e.preventDefault(); const v = lerForm(f);
+    if (!ed.fecha()) { $('#erro-comp').textContent = 'A soma das parcelas precisa fechar com o valor total.'; return; }
+    if (f.forma.required && !f.forma.value) { $('#erro-comp').textContent = 'Compra à vista: selecione a forma de pagamento.'; f.forma.focus(); return; }
+    try {
+      await api('POST', `${base}/compras`, { fornecedor_nome: v.nome, fornecedor_documento: v.documento, numero: v.nf_numero, emissao: v.emissao, valor_total: v.valor_total, observacao: v.observacao, gerarDespesas: v.gerar, categoria: v.categoria, tipoDocumentoId: v.tipo ? Number(v.tipo) : null, formaPagamento: v.forma || null, parcelas: ed.ler() });
+      aviso('Compra lançada.'); location.hash = '#/compras';
+    } catch (err) { $('#erro-comp').textContent = mensagemErro(err); }
+  };
 }
-
 
 // ---------------------------------------------------------------------------
 // Compras: NF-e emitidas contra o CNPJ, direto da SEFAZ (Distribuição DF-e)
@@ -1741,7 +1772,7 @@ async function importarDaSefaz(base, chaves, opc, depois) {
     try { pv = await api('GET', `${base}/compras/sefaz/previa/${chaves[k]}`); }
     catch (err) { resultado.push(`<li class="cor-vermelho">${esc(chaves[k])}: ${esc(mensagemErro(err))}</li>`); continue; }
     const r = await conferirNotaDialogo({ opc, pv, rotulo: `Nota ${k + 1} de ${chaves.length}`, origem: 'SEFAZ', ultima: k + 1 === chaves.length,
-      enviar: (f, parcelas) => api('POST', `${base}/compras/sefaz/importar`, { chaves: [chaves[k]], gerarDespesas: f.gerar.checked, categoria: f.categoria.value, tipoDocumentoId: f.tipo?.value ? Number(f.tipo.value) : null, parcelas }) });
+      enviar: (f, parcelas) => api('POST', `${base}/compras/sefaz/importar`, { chaves: [chaves[k]], gerarDespesas: f.gerar.checked, categoria: f.categoria.value, tipoDocumentoId: f.tipo?.value ? Number(f.tipo.value) : null, formaPagamento: f.forma.value || null, parcelas }) });
     resultado.push(r.ok ? `<li class="cor-verde">NF ${esc(r.numero)} — ${esc(r.fornecedor)} · ${brl(r.valor)} · ${r.parcelas} parcela(s)${r.alertas.map((a) => `<br><span class="aviso-txt">⚠ ${esc(a)}</span>`).join('')}</li>` : `<li class="dica">NF ${esc(pv.numero)} — ${esc(pv.fornecedor.nome)}: não importada</li>`);
   }
   abrirDialogo(`<div><h2>Importação concluída</h2><ul class="lista-simples">${resultado.join('')}</ul><div class="acoes"><button class="primario" data-fechar>Fechar</button></div></div>`, () => {});
@@ -2478,7 +2509,7 @@ async function telaNota(id) {
 function ligarConsultaCnpj(form, modo) {
   const btn = form.querySelector('[data-buscar-cnpj]');
   const info = form.querySelector('[data-cnpj-info]');
-  const nomeCampo = modo === 'empresa' ? 'razao_social' : 'nome';
+  const nomeCampo = modo === 'empresa' ? 'razao_social' : 'nome';  // 'tomador' e 'fornecedor' usam o campo nome
   const limpo = () => form.documento.value.replace(/[^0-9A-Za-z]/g, '');
   const dicaPadrao = info.textContent;
 
@@ -2505,7 +2536,7 @@ function ligarConsultaCnpj(form, modo) {
       const mun = form.querySelector('[data-municipio]');
       if (mun && d.municipio) mun.textContent = `${d.municipio}/${d.uf}${d.cod_municipio ? ' — IBGE ' + d.cod_municipio : ''}`;
       const regime = d.op_simp_nac ? ['', 'Não optante', 'MEI', 'Simples ME/EPP'][d.op_simp_nac] : null;
-      const faltas = [!d.cod_municipio && 'código IBGE', !d.logradouro && 'logradouro', !d.numero && 'número', modo === 'empresa' && 'inscrição municipal (não consta na Receita)'].filter(Boolean);
+      const faltas = modo === 'fornecedor' ? [] : [!d.cod_municipio && 'código IBGE', !d.logradouro && 'logradouro', !d.numero && 'número', modo === 'empresa' && 'inscrição municipal (não consta na Receita)'].filter(Boolean);
       info.className = d.ativa ? 'dica' : 'dica erro';
       info.textContent = `Receita Federal: ${d.situacao ?? 'situação não informada'}${regime ? ' · ' + regime : ''}.${d.ativa ? '' : ' Atenção: o CNPJ não está ativo.'}${faltas.length ? ' Confira: ' + faltas.join(', ') + '.' : ''}`;
     } catch (e) {
