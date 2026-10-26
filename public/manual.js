@@ -4,7 +4,7 @@
  * aqui (e a data/versão em MANUAL_VERSAO) antes de publicar a versão.
  * `corpo` é HTML escrito à mão (não recebe dados de usuário).
  */
-export const MANUAL_VERSAO = '3.19.0';
+export const MANUAL_VERSAO = '3.19.1';
 
 export const MANUAL = [
   {
@@ -229,10 +229,10 @@ export const MANUAL = [
   {
     id: 'contabilidade', titulo: 'Exportar para a contabilidade', resumo: 'Pacote com extrato em OFX, PDF e XML das notas.',
     corpo: `
-      <p>Em <strong>Configurações &gt; Contabilidade</strong> (administrador) escolha a empresa e o mês. O sistema gera um pacote ZIP com o extrato convertido em <strong>OFX</strong>, o extrato em <strong>PDF</strong> e os <strong>XML</strong> de todas as notas emitidas no período, pronto para enviar ao contador.</p>`,
+      <p>Em <strong>Configurações &gt; Contabilidade</strong> (administrador) escolha a empresa e o mês. O sistema gera um pacote ZIP com o extrato convertido em <strong>OFX</strong>, o extrato em <strong>PDF</strong> e os <strong>XML</strong> de todas as notas emitidas no período, pronto para enviar ao contador.</p>
       <p>Marque o que vai no pacote: notas emitidas (XML e PDF), <strong>notas de entrada lançadas em Compras</strong>, <strong>notas recebidas da SEFAZ ainda não lançadas</strong> e o extrato em OFX. As entradas vão em <code>entradas/xml</code> com uma planilha (fornecedor, valor, chave, parcelas); as não lançadas e as canceladas pelo fornecedor vêm marcadas.</p>
       <h3>Fechamento mensal automático</h3>
-      <p>Na mesma tela, informe o <strong>e-mail da contabilidade</strong> (até 5), ligue <em>Enviar automaticamente todo mês</em> e escolha o <strong>dia</strong>. Nesse dia o sistema envia sozinho, em anexo, o pacote completo do <strong>mês anterior</strong>. Usa o e-mail do escritório configurado em <em>E-mail</em>. Se o sistema estiver fechado no dia, envia na primeira vez que for aberto depois; se falhar, tenta de novo em 6 horas e mostra o motivo. <em>Enviar agora</em> dispara qualquer mês na hora. Pacotes acima de 20 MB não vão por e-mail.</p>
+      <p>Na mesma tela, informe o <strong>e-mail da contabilidade</strong> (até 5), ligue <em>Enviar automaticamente todo mês</em> e escolha o <strong>dia</strong>. Nesse dia o sistema envia sozinho, em anexo, o pacote completo do <strong>mês anterior</strong>. Usa o e-mail do escritório configurado em <em>E-mail</em>. Se o sistema estiver fechado no dia, envia na primeira vez que for aberto depois; se falhar, tenta de novo em 6 horas e mostra o motivo. <em>Enviar agora</em> dispara qualquer mês na hora. Pacotes acima de 20 MB não vão por e-mail.</p>`,
   },
   {
     id: 'configuracoes', titulo: 'Configurações', resumo: 'Usuários, e-mail, aparência, backup, licença e atualizações.',
