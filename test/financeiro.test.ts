@@ -104,7 +104,7 @@ test('painel financeiro, despesas e balanço', async () => {
     const arqs = unzipSync(new Uint8Array(rz.rawPayload));
     const ofx = strFromU8(arqs['extrato/movimentacao_2026-10-01_2026-10-31.ofx']);
     assert.match(ofx, /<TRNTYPE>DEBIT[\s\S]*<TRNAMT>-750.50/); assert.match(ofx, /<TRNTYPE>CREDIT[\s\S]*<TRNAMT>1000.00/); assert.match(ofx, /<BANKID>085/);
-    assert.equal((await call('GET', `/api/contabilidade/exportar?empresaId=${eid}&de=2026-10-01&ate=2026-10-31&xml=0&pdf=0&ofx=0`, undefined, t)).status, 400);
+    assert.equal((await call('GET', `/api/contabilidade/exportar?empresaId=${eid}&de=2026-10-01&ate=2026-10-31&xml=0&pdf=0&ofx=0&entradas=0&sefaz=0`, undefined, t)).status, 400);
 
     // tributação padrão do serviço
     const tri = { tribISSQN: 1, issRetido: 2, pPis: 0.65, pCofins: 3, pCsll: 1, pIrrf: 1.5, pCp: 11, pTotTrib: { fed: 11.33, mun: 3 }, municipioPrestacao: '4208203', infoComplementar: 'Ref. competência' };

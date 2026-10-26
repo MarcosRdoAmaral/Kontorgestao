@@ -157,3 +157,21 @@ test('compras: à vista exige forma de pagamento; manual parcelado; lista de for
   assert.equal(f.some((x) => x.nome === 'Papelaria Central Ltda' && x.documento === '12345678000195' && x.notas >= 1), true);
   assert.equal(f.some((x) => x.nome === 'Loja Nova'), true);
 });
+
+test('contabilidade: pacote com XML das entradas (compras e SEFAZ não lançadas), com escolha', async () => {
+  const { db } = await import('../src/db.js');
+  const { pacoteContabilidade } = await import('../src/servicos/contabilidade.js');
+  const { unzipSync, strFromU8 } = await import('fflate');
+  const ch = '35261012345678000195550010000012341000099001';
+  db.prepare("INSERT INTO nfe_recebidas (empresa_id, chave, numero, emitente_nome, emitente_documento, emissao, valor, situacao, xml) VALUES (1, ?, '777', 'Outro Fornecedor', '98765432000198', '2026-10-15', 90, 'AUTORIZADA', ?)").run(ch, nfe('', ch));
+  const lista = (o: any) => pacoteContabilidade(1, { de: '2026-10-01', ate: '2026-10-31', xml: false, pdf: false, ofx: false, ...o }).then((r) => unzipSync(new Uint8Array(r.zip)));
+  const so_compras = await lista({ entradas: true });
+  assert.equal(Object.keys(so_compras).some((k) => k.includes(ch)), false, 'sem a opção da SEFAZ, a nota não lançada fica de fora');
+  assert.equal(Object.keys(so_compras).some((k) => k.startsWith('entradas/xml/')), true);
+  const so_sefaz = await lista({ sefaz: true });
+  assert.deepEqual(Object.keys(so_sefaz).filter((k) => k.startsWith('entradas/xml/')), [`entradas/xml/NFe_${ch}.xml`]);
+  assert.match(strFromU8(so_sefaz['entradas/relatorio-entradas.csv']), /Recebida da SEFAZ, não lançada/);
+  const ambas = await lista({ entradas: true, sefaz: true });
+  assert.equal(Object.keys(ambas).filter((k) => k.startsWith('entradas/xml/')).length >= 2, true);
+  await assert.rejects(pacoteContabilidade(1, { de: '2026-10-01', ate: '2026-10-31', xml: false, pdf: false, ofx: false }), /ao menos um/);
+});

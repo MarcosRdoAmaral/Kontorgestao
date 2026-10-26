@@ -691,6 +691,13 @@ const migracoes: string[] = [
   // 26: clientes criados por planilha ficam marcados para conferência
   `ALTER TABLE tomadores ADD COLUMN conferir INTEGER NOT NULL DEFAULT 0;
   ALTER TABLE tomadores ADD COLUMN conferir_motivo TEXT;`,
+  // 27: e-mail da contabilidade e fechamento mensal automático
+  `ALTER TABLE empresas ADD COLUMN contabilidade_email TEXT;
+  ALTER TABLE empresas ADD COLUMN fechamento_ativo INTEGER NOT NULL DEFAULT 0;
+  ALTER TABLE empresas ADD COLUMN fechamento_dia INTEGER;
+  ALTER TABLE empresas ADD COLUMN fechamento_ultimo TEXT;
+  ALTER TABLE empresas ADD COLUMN fechamento_em TEXT;
+  ALTER TABLE empresas ADD COLUMN fechamento_resultado TEXT;`,
 ];
 
 export function migrar(): void {

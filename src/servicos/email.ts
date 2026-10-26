@@ -168,3 +168,21 @@ export async function enviarMensagemBoleto(escritorioId: number, para: string[],
     });
   } catch (e) { throw new ErroNegocio(traduzirErro(e), 502); }
 }
+
+/** Fechamento mensal para a contabilidade: o pacote ZIP segue em anexo. */
+export async function enviarPacoteContabilidade(escritorioId: number, para: string[], empresa: { razao_social: string; nome_fantasia?: string | null; documento: string; email?: string | null }, rotuloMes: string, zip: Buffer, nomeZip: string, resumo: string[]) {
+  const c = lerConfig(escritorioId);
+  if (!c) throw new ErroNegocio('Configure o e-mail do escritório em E-mail antes de enviar o fechamento.');
+  if (zip.length > 20 * 1024 * 1024) throw new ErroNegocio(`O pacote tem ${(zip.length / 1048576).toFixed(1)} MB, acima do que o e-mail aceita. Baixe pelo sistema e envie por outro meio.`);
+  const nome = empresa.nome_fantasia || empresa.razao_social;
+  const linhas = ['Olá!', '', `Segue o fechamento de ${rotuloMes} de ${empresa.razao_social} (${empresa.documento}).`, '', ...resumo, '', 'O pacote vai em anexo (ZIP). Gerado automaticamente pelo Kontor Gestão.'];
+  try {
+    await fabrica(c).sendMail({
+      from: `"${c.remetente_nome}" <${c.remetente_email}>`, to: para.join(', '), ...(empresa.email ? { replyTo: empresa.email } : {}),
+      subject: `Fechamento ${rotuloMes} — ${nome}`,
+      text: linhas.join('\n'),
+      html: `<div style="font-family:Arial,sans-serif;font-size:14px;color:#222">${linhas.map((l) => (l ? `<p style="margin:0 0 8px">${esc(l)}</p>` : '')).join('')}</div>`,
+      attachments: [{ filename: nomeZip, content: zip, contentType: 'application/zip' }],
+    });
+  } catch (e) { throw new ErroNegocio(traduzirErro(e), 502); }
+}

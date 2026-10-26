@@ -17,7 +17,7 @@ import { configurarAgenda, executarItem, executarProntas, listarAgenda, pularIte
 import { EdicaoImposto, Tributacao, criarTributacao, editarTributacao, excluirTributacao, listarTributacoes, Perfil, TipoDocumento, apuracaoAssistida, conferirTipoDoVinculo, criarPerfil, criarTipo, editarImposto, editarPerfil, editarTipo, excluirPerfil, excluirTipo, gerarPerfisDosServicos, listarImpostos, listarPerfis, listarTipos, tributacaoCompletaDoServico, tributacaoEfetiva, NATUREZAS } from './servicos/tributacao.js';
 import { DescricaoModelo, EntradaDescricao, lerModelo, montarDescricao } from './servicos/descricao.js';
 import { CompraManual, OpcoesImportacao, fornecedoresDaEmpresa, ParcelaEditada, alterarParcelas, previaCompraXml, criarCompraManual, excluirCompra, importarCompraXml, listarCompras, obterCompra, xmlDaCompra } from './servicos/compras.js';
-import { pacoteContabilidade } from './servicos/contabilidade.js';
+import { ConfigFechamento, configFechamento, enviarFechamento, mesAnterior, pacoteContabilidade, salvarFechamento } from './servicos/contabilidade.js';
 import { ImportacaoRecebidas, buscarNaSefaz, buscarPorChave, configurarBusca, importarRecebidas, liberarCiencias, listarRecebidas, ocultarRecebida, xmlRecebida } from './servicos/nfe-recebidas.js';
 import { apagarCadeiaIcp, baixarCadeiaIcp, definirVerificacaoServidor, extrairCertificadosAc, guardarCadeiaIcp, statusConfianca } from './nfe/confianca.js';
 import { criarBackup, listarBackups } from './servicos/backup.js';
@@ -496,6 +496,17 @@ export async function rotas(app: FastifyInstance) {
       return faturar(u(req), entrada);
     });
 
+    api.get('/api/empresas/:id/contabilidade/config', async (req) => { const id = Number((req.params as any).id); checarEmpresa(req, id); return configFechamento(id); });
+    api.put('/api/empresas/:id/contabilidade/config', async (req) => {
+      const id = Number((req.params as any).id); checarEmpresa(req, id);
+      salvarFechamento(id, ConfigFechamento.parse(req.body)); return configFechamento(id);
+    });
+    api.post('/api/empresas/:id/contabilidade/enviar', async (req) => {
+      const id = Number((req.params as any).id); checarEmpresa(req, id);
+      const { mes } = z.object({ mes: z.string().regex(/^\d{4}-\d{2}$/).optional() }).parse(req.body ?? {});
+      return enviarFechamento(id, mes ?? mesAnterior(new Date(Date.now() - 3 * 3600e3).toISOString().slice(0, 10)));
+    });
+
     // ---------- Relatórios ----------
     api.get('/api/relatorios', async () => catalogo());
     api.get('/api/empresas/:id/relatorios/:rel', async (req, reply) => {
@@ -749,10 +760,10 @@ export async function rotas(app: FastifyInstance) {
       const q = z.object({
         empresaId: z.coerce.number().int(),
         de: z.string().regex(/^\d{4}-\d{2}-\d{2}$/), ate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
-        xml: z.enum(['0', '1']).default('1'), pdf: z.enum(['0', '1']).default('1'), ofx: z.enum(['0', '1']).default('1'),
+        xml: z.enum(['0', '1']).default('1'), pdf: z.enum(['0', '1']).default('1'), ofx: z.enum(['0', '1']).default('1'), entradas: z.enum(['0', '1']).default('1'), sefaz: z.enum(['0', '1']).default('1'),
       }).parse(req.query);
       checarEmpresa(req, q.empresaId);
-      const r = await pacoteContabilidade(q.empresaId, { de: q.de, ate: q.ate, xml: q.xml === '1', pdf: q.pdf === '1', ofx: q.ofx === '1' });
+      const r = await pacoteContabilidade(q.empresaId, { de: q.de, ate: q.ate, xml: q.xml === '1', pdf: q.pdf === '1', ofx: q.ofx === '1', entradas: q.entradas === '1', sefaz: q.sefaz === '1' });
       return reply.type('application/zip').header('Content-Disposition', `attachment; filename="${r.nome}"`).send(r.zip);
     });
 

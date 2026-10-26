@@ -3054,6 +3054,40 @@ function telaAparencia() {
   corpoConfig().querySelectorAll('[data-tema]').forEach((b) => (b.onclick = () => { aplicarTema(b.dataset.tema); telaAparencia(); }));
 }
 
+/** E-mail da contabilidade e envio automático do fechamento do mês anterior no dia escolhido. */
+async function carregarFechamento() {
+  const box = $('#cartao-fechamento'); if (!box || !estado.empresaId) { if (box) box.innerHTML = ''; return; }
+  const url = `/api/empresas/${estado.empresaId}/contabilidade`;
+  let c; try { c = await api('GET', `${url}/config`); } catch (e) { box.innerHTML = `<p class="erro">${esc(mensagemErro(e))}</p>`; return; }
+  const hoje = new Date(Date.now() - 3 * 3600e3), ant = new Date(Date.UTC(hoje.getUTCFullYear(), hoje.getUTCMonth() - 1, 1)).toISOString().slice(0, 7);
+  box.innerHTML = `<h3 style="margin-top:0">Fechamento mensal automático</h3>
+    <p class="sutil">Guarda o e-mail da contabilidade e, no dia escolhido, envia sozinho o pacote completo (notas emitidas, notas de entrada, extrato em OFX e planilhas) do <strong>mês anterior</strong>. Usa o e-mail do escritório configurado em <em>E-mail</em>. Se o sistema estiver fechado no dia, o envio sai na primeira vez que for aberto depois.</p>
+    <form id="form-fech" class="grade">
+      <label class="largo">E-mail da contabilidade <span class="dica">(até 5, separados por vírgula)</span><input name="emails" value="${esc(c.emails)}" placeholder="contador@escritorio.com.br"></label>
+      <label class="largo"><span><input type="checkbox" name="ativo" ${c.ativo ? 'checked' : ''}> Enviar automaticamente todo mês</span></label>
+      <label>No dia <select name="dia">${Array.from({ length: 28 }, (_, i) => `<option value="${i + 1}" ${c.dia === i + 1 ? 'selected' : ''}>${i + 1}</option>`).join('')}</select></label>
+      <p class="dica largo">${c.resultado ? `Último envio${c.em ? ' (' + dataHoraBr(c.em.replace(' ', 'T') + 'Z') + ')' : ''}: ${esc(c.resultado)}${c.ultimo ? ' · mês fechado ' + c.ultimo.split('-').reverse().join('/') : ''}` : 'Nenhum envio feito ainda.'}</p>
+      <p class="erro largo" id="erro-fech"></p>
+      <div class="acoes largo"><button class="primario" type="submit">Salvar</button>
+        <label style="display:inline-flex;gap:6px;align-items:center">Enviar agora o mês <input type="month" id="fech-mes" value="${ant}" style="width:auto"></label>
+        <button type="button" id="fech-agora">Enviar agora</button></div>
+    </form>`;
+  const f = $('#form-fech');
+  f.onsubmit = async (ev) => {
+    ev.preventDefault();
+    try { await api('PUT', `${url}/config`, { emails: f.emails.value, ativo: f.ativo.checked, dia: Number(f.dia.value) }); aviso('Fechamento automático salvo.'); carregarFechamento(); }
+    catch (e) { $('#erro-fech').textContent = mensagemErro(e); }
+  };
+  $('#fech-agora').onclick = async (ev) => {
+    const b = ev.target; b.disabled = true; b.textContent = 'Enviando…'; $('#erro-fech').textContent = '';
+    try {
+      await api('PUT', `${url}/config`, { emails: f.emails.value, ativo: f.ativo.checked, dia: Number(f.dia.value) });
+      const r = await api('POST', `${url}/enviar`, { mes: $('#fech-mes').value }); aviso(`Fechamento enviado para ${r.para.join(', ')}.`);
+    } catch (e) { $('#erro-fech').textContent = mensagemErro(e); }
+    carregarFechamento();
+  };
+}
+
 async function telaContabilidade() {
   const e = empresa();
   const hoje0 = new Date(Date.now() - 3 * 3600e3), ini = new Date(Date.UTC(hoje0.getUTCFullYear(), hoje0.getUTCMonth(), 1)).toISOString().slice(0, 10);
@@ -3067,17 +3101,22 @@ async function telaContabilidade() {
         <label>Até <input type="date" name="ate" required value="${fim}"></label>
         <label class="largo"><span><input type="checkbox" name="xml" checked> XML das notas emitidas</span></label>
         <label class="largo"><span><input type="checkbox" name="pdf" checked> PDF (DANFSe) das notas emitidas</span></label>
+        <label class="largo"><span><input type="checkbox" name="entradas" checked> XML das notas de entrada lançadas em Compras</span></label>
+        <label class="largo"><span><input type="checkbox" name="sefaz" checked> XML das notas recebidas da SEFAZ ainda não lançadas</span>
+          <span class="dica">Entradas pela data de emissão, com uma planilha (fornecedor, valor, chave, parcelas). As não lançadas e as canceladas pelo fornecedor vêm marcadas.</span></label>
         <label class="largo"><span><input type="checkbox" name="ofx" checked> Extrato em OFX (do extrato importado; sem ele, boletos recebidos e despesas lançadas)</span>
           <span class="dica">Também vai uma planilha com a mesma movimentação, e outra com a lista das notas. As notas são escolhidas pela competência.</span></label>
         <p class="erro" id="erro-contab"></p>
         <div class="acoes largo"><button class="primario" type="submit" ${e ? '' : 'disabled'}>Gerar pacote (ZIP)</button></div>
       </form>
-    </div>`;
+    </div>
+    <div class="cartao" id="cartao-fechamento"><h3 style="margin-top:0">Fechamento mensal automático</h3><p class="sutil">Carregando…</p></div>`;
+  carregarFechamento();
   $('#form-contab').onsubmit = async (ev) => {
     ev.preventDefault();
     const f = ev.target, b = f.querySelector('[type=submit]');
     b.disabled = true; b.textContent = 'Gerando…'; $('#erro-contab').textContent = '';
-    const p = new URLSearchParams({ empresaId: estado.empresaId, de: f.de.value, ate: f.ate.value, xml: +f.xml.checked, pdf: +f.pdf.checked, ofx: +f.ofx.checked });
+    const p = new URLSearchParams({ empresaId: estado.empresaId, de: f.de.value, ate: f.ate.value, xml: +f.xml.checked, pdf: +f.pdf.checked, ofx: +f.ofx.checked, entradas: +f.entradas.checked, sefaz: +f.sefaz.checked });
     try { await baixar(`/api/contabilidade/exportar?${p}`, `contabilidade_${f.de.value}_${f.ate.value}.zip`); } finally { b.disabled = false; b.textContent = 'Gerar pacote (ZIP)'; }
   };
 }

@@ -14,6 +14,7 @@ import { garantirTiposDosPerfis, migrarServicosLegados } from './servicos/tribut
 import { ErroNegocio } from './servicos/emissao.js';
 import { backupAutomatico } from './servicos/backup.js';
 import { buscarAutomaticamente } from './servicos/nfe-recebidas.js';
+import { fechamentoAutomatico } from './servicos/contabilidade.js';
 
 const raiz = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -50,6 +51,12 @@ export async function criarApp() {
   if (process.env.NFE_BUSCA_AUTOMATICA !== '0') {
     const timerNfe = setInterval(() => { buscarAutomaticamente().catch((e) => app.log.error(e)); }, 10 * 60e3);
     timerNfe.unref();
+  }
+  // Fechamento mensal para a contabilidade: a cada 30 min vê se alguma empresa chegou ao dia de envio
+  if (process.env.FECHAMENTO_AUTOMATICO !== '0') {
+    const timerFech = setInterval(() => { fechamentoAutomatico().catch((e) => app.log.error(e)); }, 30 * 60e3);
+    timerFech.unref();
+    setTimeout(() => { fechamentoAutomatico().catch((e) => app.log.error(e)); }, 60e3).unref();
   }
   return app;
 }
