@@ -535,10 +535,6 @@ async function telaEmitir(notaIdCorrecao) {
           <label class="largo">Ação
             <select name="acao"><option value="NOTA">Somente a nota fiscal</option><option value="NOTA_BOLETO">Nota fiscal + boleto</option><option value="BOLETO">Somente o boleto</option></select>
             <span class="dica" id="dica-acao"></span></label>
-          <label data-boleto>Vencimento do boleto <input type="date" name="vencimento"></label>
-          <label data-boleto>Valor do boleto (R$) <input name="valorBoleto" data-num inputmode="decimal" placeholder="Valor líquido da nota"><span class="dica">Preenchido sozinho com o líquido da nota (serviço menos descontos e retenções). Você pode alterar; apague o campo para voltar ao automático.</span><span class="dica" id="dica-boleto-desc"></span></label>
-          <label data-boleto>Parcelas <input type="number" name="nParcelas" min="1" max="24" value="1"><span class="dica">Mais de 1: um boleto por parcela, cada um com o seu vencimento (editável abaixo).</span></label>
-          <div data-boleto class="largo" id="lista-parcelas" hidden></div>
         </div>
       </fieldset>
 
@@ -605,6 +601,15 @@ async function telaEmitir(notaIdCorrecao) {
             </div></fieldset>` : ''}
           ${empresa()?.ambiente === 1 && estado.usuario.papel !== 'cliente' ? '<label class="largo"><span><input type="checkbox" name="enviarEmail"> Enviar por e-mail ao cliente quando a nota for autorizada</span><span class="dica">Usa o e-mail do cadastro do cliente (e os de cobrança). Configure o servidor em E-mail.</span></label>' : ''}
           <label class="largo">Informações complementares <textarea name="infoComplementar" maxlength="2000">${esc(p.infoComplementar ?? '')}</textarea></label>
+        </div>
+      </fieldset>
+      <fieldset id="bloco-pagamento" hidden><legend>Pagamento / parcelamento</legend>
+        <p class="dica">O valor do boleto parte do líquido da NFS-e (serviço menos descontos e retenções), já calculado acima.</p>
+        <div class="grade">
+          <label data-boleto>Vencimento do boleto <input type="date" name="vencimento"></label>
+          <label data-boleto>Valor do boleto (R$) <input name="valorBoleto" data-num inputmode="decimal" placeholder="Valor líquido da nota"><span class="dica">Preenchido sozinho com o líquido da nota (serviço menos descontos e retenções). Você pode alterar; apague o campo para voltar ao automático.</span><span class="dica" id="dica-boleto-desc"></span></label>
+          <label data-boleto>Parcelas <input type="number" name="nParcelas" min="1" max="24" value="1"><span class="dica">Mais de 1: um boleto por parcela, cada um com o seu vencimento (editável abaixo).</span></label>
+          <div data-boleto class="largo" id="lista-parcelas" hidden></div>
         </div>
       </fieldset>
       <p class="erro" id="erro-emitir" role="alert"></p>
@@ -772,10 +777,10 @@ async function telaEmitir(notaIdCorrecao) {
     const t = tomadores.find((x) => x.id === Number(f.tomadorId.value));
     const bloco = $('#bloco-cobranca');
     bloco.hidden = !t || !!corrigindo;
-    if (!t || corrigindo) return;
+    if (!t || corrigindo) { $('#bloco-pagamento').hidden = true; return; }
     const acao = f.acao.value;
     const boleto = acao !== 'NOTA';
-    bloco.querySelectorAll('[data-boleto]').forEach((x) => (x.hidden = !boleto));
+    $('#bloco-pagamento').hidden = !boleto;
     $('#dica-acao').textContent = `Padrão do cliente: ${NOME_MODO[t.modo_faturamento] ?? 'Nota'}.`;
     // só boleto: não há dados fiscais a preencher
     f.querySelectorAll('fieldset').forEach((fs) => { if (fs.querySelector('[name=tribISSQN]') && !fs.closest('fieldset#bloco-cobranca')) fs.hidden = acao === 'BOLETO'; });

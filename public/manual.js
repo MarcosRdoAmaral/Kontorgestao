@@ -4,7 +4,7 @@
  * aqui (e a data/versão em MANUAL_VERSAO) antes de publicar a versão.
  * `corpo` é HTML escrito à mão (não recebe dados de usuário).
  */
-export const MANUAL_VERSAO = '3.9.0';
+export const MANUAL_VERSAO = '3.9.1';
 
 export const MANUAL = [
   {
@@ -72,7 +72,7 @@ export const MANUAL = [
         <li><strong>Tributação:</strong> traz alíquota, ISSQN, retenções, totais aproximados, município e informações complementares (na data da competência). Trocar a tributação refaz o preenchimento; os campos ainda podem ser ajustados na nota.</li>
         <li><strong>Conferência da tributação:</strong> no fim do formulário, uma tabela mostra cada imposto com base, alíquota e valor (ISS, retenções federais, IBS/CBS informativo), o total retido e o <strong>líquido a receber</strong>, atualizada conforme você digita.</li>
         <li>Informe competência, valor e, se precisar, ajuste descrição e retenções.</li>
-        <li>Se o cliente fatura com boleto, defina o vencimento (já sugerido pela regra do cliente). Para <strong>parcelar</strong>, informe o número de parcelas: o sistema divide o valor e sugere um vencimento por mês; ajuste data e valor de cada parcela (a soma precisa fechar com o boleto). Cada parcela vira um boleto, com o seu vencimento, e todos seguem no e-mail.</li>
+        <li>Se o cliente fatura com boleto, no bloco <strong>Pagamento / parcelamento</strong> (logo depois de Serviço e retenções, onde já está o líquido da NFS-e) defina o vencimento (já sugerido pela regra do cliente). Para <strong>parcelar</strong>, informe o número de parcelas: o sistema divide o valor e sugere um vencimento por mês; ajuste data e valor de cada parcela (a soma precisa fechar com o boleto). Cada parcela vira um boleto, com o seu vencimento, e todos seguem no e-mail.</li>
         <li><strong>Emitir.</strong> O sistema monta a DPS, assina com o certificado e envia à Sefin.</li>
       </ol>
       <h3>Se algo der errado</h3>
