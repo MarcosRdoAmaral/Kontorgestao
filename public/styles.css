@@ -314,3 +314,4 @@ label.check input { width: auto; }
 .rel-grupos details.grupo > summary > .dica { margin-left: auto; margin-right: 10px; min-width: 1.2em; text-align: right; font-weight: 600; letter-spacing: 0; }
 
 .selo-conferir { display: inline-block; margin-left: 6px; padding: 1px 8px; border-radius: 999px; font-size: 12px; font-weight: 600; color: var(--ambar); background: var(--ambar-fundo); }
+.av-fechar { display: inline-flex; align-items: center; gap: 6px; margin: 0 6px; white-space: nowrap; }
