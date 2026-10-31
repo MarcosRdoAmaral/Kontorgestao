@@ -1,16 +1,16 @@
 /**
- * Manual do usuário do Kontor Gestão (mostrado em Relatórios > Documentação).
+ * Manual do usuário do Kontor Gestão Empresas (mostrado em Relatórios > Documentação).
  * REGRA DO PROJETO: toda funcionalidade nova ou alterada precisa atualizar o tópico correspondente
  * aqui (e a data/versão em MANUAL_VERSAO) antes de publicar a versão.
  * `corpo` é HTML escrito à mão (não recebe dados de usuário).
  */
-export const MANUAL_VERSAO = '3.21.1';
+export const MANUAL_VERSAO = '3.22.0';
 
 export const MANUAL = [
   {
     id: 'primeiros-passos', titulo: 'Primeiros passos', resumo: 'Instalação, primeiro acesso e o que configurar antes de emitir.',
     corpo: `
-      <p>O Kontor Gestão emite NFS-e pelo <strong>Emissor Nacional</strong> (Sefin Nacional), para várias empresas ao mesmo tempo, e cuida de boletos, despesas, extrato e relatórios.</p>
+      <p>O Kontor Gestão Empresas emite NFS-e pelo <strong>Emissor Nacional</strong> (Sefin Nacional), para várias empresas ao mesmo tempo, e cuida de boletos, despesas, extrato e relatórios.</p>
       <h3>Antes da primeira nota</h3>
       <ol>
         <li><strong>Primeiro acesso:</strong> informe o nome do escritório e crie o usuário administrador.</li>

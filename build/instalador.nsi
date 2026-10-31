@@ -5,7 +5,7 @@ Unicode true
 !ifndef VERSAO
   !define VERSAO "3.13.1"
 !endif
-!define NOME "Kontor Gestão"
+!define NOME "Kontor Gestão Empresas"
 !define EXE "Kontor Gestão.exe"
 !define CHAVE "Software\Microsoft\Windows\CurrentVersion\Uninstall\KontorGestao"
 
@@ -50,6 +50,9 @@ Section "Instalar"
   File /r "${ORIGEM}/*.*"
   WriteUninstaller "$INSTDIR\Desinstalar.exe"
 
+  ; atalhos com o nome antigo (versões anteriores)
+  Delete "$DESKTOP\Kontor Gestão.lnk"
+  RMDir /r "$SMPROGRAMS\Kontor Gestão"
   CreateShortcut "$DESKTOP\${NOME}.lnk" "$INSTDIR\${EXE}"
   CreateDirectory "$SMPROGRAMS\${NOME}"
   CreateShortcut "$SMPROGRAMS\${NOME}\${NOME}.lnk" "$INSTDIR\${EXE}"

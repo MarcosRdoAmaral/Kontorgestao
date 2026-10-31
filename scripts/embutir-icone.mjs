@@ -17,8 +17,8 @@ const partes = versao.split('.').map(Number);
 v.setFileVersion(partes[0], partes[1] ?? 0, partes[2] ?? 0, 0, v.lang ?? 1033);
 v.setProductVersion(partes[0], partes[1] ?? 0, partes[2] ?? 0, 0, v.lang ?? 1033);
 v.setStringValues({ lang: v.getAllLanguagesForStringValues()[0]?.lang ?? 1033, codepage: 1200 }, {
-  ProductName: 'Kontor Gestão', FileDescription: 'Kontor Gestão', CompanyName: 'Kontor Gestão',
-  InternalName: 'Kontor Gestão', OriginalFilename: 'Kontor Gestão.exe', LegalCopyright: 'Kontor Gestão',
+  ProductName: 'Kontor Gestão Empresas', FileDescription: 'Kontor Gestão Empresas', CompanyName: 'Kontor Gestão Empresas',
+  InternalName: 'Kontor Gestão', OriginalFilename: 'Kontor Gestão.exe', LegalCopyright: 'Kontor Gestão Empresas',
 });
 v.outputToResourceEntries(res.entries);
 res.outputResource(bin);

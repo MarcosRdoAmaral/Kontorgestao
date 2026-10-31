@@ -8,10 +8,11 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 
-const NOME = 'Kontor Gestão';
+const NOME = 'Kontor Gestão Empresas';
+const NOME_DADOS = 'Kontor Gestão'; // nome interno: define a pasta de dados (%APPDATA%\Kontor Gestão). Não mudar, senão os dados "somem".
 const PORTA_PREFERIDA = 38245;
 
-app.setName(NOME);
+app.setName(NOME_DADOS);
 if (!app.requestSingleInstanceLock()) app.quit();
 
 const raizApp = app.getAppPath();
@@ -122,7 +123,7 @@ async function salvarBackup() {
   const dia = new Date(Date.now() - 3 * 3600e3).toISOString().slice(0, 10);
   const r = await dialog.showSaveDialog(janela, {
     title: 'Salvar backup', defaultPath: path.join(app.getPath('documents'), `nfse-backup-${dia}.db`),
-    filters: [{ name: 'Backup da Kontor Gestão', extensions: ['db'] }],
+    filters: [{ name: 'Backup do Kontor Gestão Empresas', extensions: ['db'] }],
   });
   if (r.canceled || !r.filePath) return;
   try {
@@ -134,10 +135,10 @@ async function salvarBackup() {
 }
 
 async function restaurarBackup() {
-  const r = await dialog.showOpenDialog(janela, { title: 'Escolha o arquivo de backup', properties: ['openFile'], filters: [{ name: 'Backup da Kontor Gestão', extensions: ['db'] }] });
+  const r = await dialog.showOpenDialog(janela, { title: 'Escolha o arquivo de backup', properties: ['openFile'], filters: [{ name: 'Backup do Kontor Gestão Empresas', extensions: ['db'] }] });
   if (r.canceled || !r.filePaths[0]) return;
   const origem = r.filePaths[0];
-  if (!ehSqlite(origem)) return dialog.showErrorBox('Arquivo inválido', 'Este arquivo não é um backup da Kontor Gestão.');
+  if (!ehSqlite(origem)) return dialog.showErrorBox('Arquivo inválido', 'Este arquivo não é um backup do Kontor Gestão Empresas.');
   const c = await dialog.showMessageBox(janela, {
     type: 'warning', buttons: ['Restaurar e reiniciar', 'Cancelar'], defaultId: 1, cancelId: 1,
     message: 'Restaurar este backup?',

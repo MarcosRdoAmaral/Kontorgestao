@@ -1,4 +1,4 @@
-# Kontor Gestão — Emissor de NFS-e (Sistema Nacional)
+# Kontor Gestão Empresas — Emissor de NFS-e (Sistema Nacional)
 
 Emissor de NFS-e pelo **Emissor Nacional** (API Sefin Nacional, leiaute DPS 1.01), multiempresa, em dois formatos:
 
@@ -7,7 +7,7 @@ Emissor de NFS-e pelo **Emissor Nacional** (API Sefin Nacional, leiaute DPS 1.01
 
 ## Aplicativo de Windows
 - Instalação com "próximo, próximo, concluir", **sem pedir senha de administrador** (instala na pasta do usuário).
-- Banco SQLite local em `%APPDATA%\Kontor Gestão\dados`. Desinstalar **não apaga** os dados.
+- Banco SQLite local em `%APPDATA%\Kontor Gestão Empresas\dados`. Desinstalar **não apaga** os dados.
 - No primeiro uso, tela de boas-vindas cria o escritório e o administrador.
 - A chave que protege os certificados A1 fica no **cofre do Windows (DPAPI)**, atrelada ao usuário do computador.
 - Backup automático diário (últimos 30) + botão "Baixar backup" + menu Arquivo > Salvar/Restaurar backup.

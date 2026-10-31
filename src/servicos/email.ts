@@ -60,7 +60,7 @@ export async function testarConfig(escritorioId: number, para: string) {
   try {
     await fabrica(c).sendMail({
       from: `"${c.remetente_nome}" <${c.remetente_email}>`, to: para,
-      subject: 'Teste de e-mail — Kontor Gestão', text: 'Se você recebeu esta mensagem, o envio de NFS-e por e-mail está configurado corretamente.',
+      subject: 'Teste de e-mail — Kontor Gestão Empresas', text: 'Se você recebeu esta mensagem, o envio de NFS-e por e-mail está configurado corretamente.',
     });
   } catch (e) { throw new ErroNegocio(traduzirErro(e), 502); }
 }
@@ -138,11 +138,11 @@ export function historicoEmails(notaId: number) {
 export async function enviarCodigoRecuperacao(escritorioId: number, para: string, nome: string, codigo: string): Promise<boolean> {
   const c = lerConfig(escritorioId);
   if (!c) return false;
-  const linhas = [`Olá, ${nome}!`, '', `Seu código para redefinir a senha do Kontor Gestão é: ${codigo}`, '',
+  const linhas = [`Olá, ${nome}!`, '', `Seu código para redefinir a senha do Kontor Gestão Empresas é: ${codigo}`, '',
     'Ele vale por 15 minutos. Ao informá-lo na tela de login, sua senha volta para a senha padrão e o sistema pedirá que você crie uma nova.',
     'Se você não pediu isso, ignore esta mensagem: nada será alterado.'];
   try {
-    await fabrica(c).sendMail({ from: `"${c.remetente_nome}" <${c.remetente_email}>`, to: para, subject: 'Código para redefinir sua senha — Kontor Gestão', text: linhas.join('\n') });
+    await fabrica(c).sendMail({ from: `"${c.remetente_nome}" <${c.remetente_email}>`, to: para, subject: 'Código para redefinir sua senha — Kontor Gestão Empresas', text: linhas.join('\n') });
     return true;
   } catch { return false; }
 }
@@ -175,7 +175,7 @@ export async function enviarPacoteContabilidade(escritorioId: number, para: stri
   if (!c) throw new ErroNegocio('Configure o e-mail do escritório em E-mail antes de enviar o fechamento.');
   if (zip.length > 20 * 1024 * 1024) throw new ErroNegocio(`O pacote tem ${(zip.length / 1048576).toFixed(1)} MB, acima do que o e-mail aceita. Baixe pelo sistema e envie por outro meio.`);
   const nome = empresa.nome_fantasia || empresa.razao_social;
-  const linhas = ['Olá!', '', `Segue o fechamento de ${rotuloMes} de ${empresa.razao_social} (${empresa.documento}).`, '', ...resumo, '', 'O pacote vai em anexo (ZIP). Gerado automaticamente pelo Kontor Gestão.'];
+  const linhas = ['Olá!', '', `Segue o fechamento de ${rotuloMes} de ${empresa.razao_social} (${empresa.documento}).`, '', ...resumo, '', 'O pacote vai em anexo (ZIP). Gerado automaticamente pelo Kontor Gestão Empresas.'];
   try {
     await fabrica(c).sendMail({
       from: `"${c.remetente_nome}" <${c.remetente_email}>`, to: para.join(', '), ...(empresa.email ? { replyTo: empresa.email } : {}),

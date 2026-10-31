@@ -1,5 +1,5 @@
 // ---------------------------------------------------------------------------
-// Kontor Gestão — interface (JavaScript puro, sem build)
+// Kontor Gestão Empresas — interface (JavaScript puro, sem build)
 // ---------------------------------------------------------------------------
 
 const $ = (s, el = document) => el.querySelector(s);
@@ -1821,7 +1821,7 @@ async function telaDocumentacao() {
   $('#man-imprimir').onclick = () => {
     const t = MANUAL.find((x) => x.id === est.topico);
     const box = $('#man-corpo'); const antes = box.innerHTML;
-    box.innerHTML = `<h1>Manual do Kontor Gestão — versão ${MANUAL_VERSAO}</h1>` + MANUAL.map((x) => `<section><h2>${esc(x.titulo)}</h2>${x.corpo}</section>`).join('');
+    box.innerHTML = `<h1>Manual do Kontor Gestão Empresas — versão ${MANUAL_VERSAO}</h1>` + MANUAL.map((x) => `<section><h2>${esc(x.titulo)}</h2>${x.corpo}</section>`).join('');
     document.body.classList.add('imprimindo-manual');
     const voltar = () => { document.body.classList.remove('imprimindo-manual'); box.innerHTML = antes; window.removeEventListener('afterprint', voltar); };
     window.addEventListener('afterprint', voltar); setTimeout(() => window.print(), 50);
