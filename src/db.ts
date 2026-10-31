@@ -698,6 +698,11 @@ const migracoes: string[] = [
   ALTER TABLE empresas ADD COLUMN fechamento_ultimo TEXT;
   ALTER TABLE empresas ADD COLUMN fechamento_em TEXT;
   ALTER TABLE empresas ADD COLUMN fechamento_resultado TEXT;`,
+  // 28: carteira Pix (copia e cola, sem boleto) e rodapé do demonstrativo de cobrança
+  `ALTER TABLE tomadores ADD COLUMN forma_cobranca TEXT NOT NULL DEFAULT 'BOLETO' CHECK (forma_cobranca IN ('BOLETO','PIX'));
+  ALTER TABLE cobrancas ADD COLUMN forma TEXT NOT NULL DEFAULT 'BOLETO' CHECK (forma IN ('BOLETO','PIX'));
+  ALTER TABLE cobrancas ADD COLUMN pix_copia_cola TEXT;
+  ALTER TABLE empresas ADD COLUMN demonstrativo_rodape TEXT;`,
 ];
 
 export function migrar(): void {

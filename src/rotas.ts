@@ -7,8 +7,8 @@ import { EdicaoUsuario, NovoUsuario, confirmarRecuperacao, criarUsuario, editarU
 import { config } from './config.js';
 import { ConfigSmtp, ListaEmails, configPublica, enviarNotaPorEmail, historicoEmails, salvarConfig, testarConfig } from './servicos/email.js';
 import { ativarLicenca, exigirLicenca, statusLicenca } from './licenca.js';
-import { BoletoAvulso, EntradaFaturamento, faturar, gerarBoletoAvulso, listarCobrancas } from './servicos/faturamento.js';
-import { ContaBancaria, obterModelosWhatsapp, reemitirCobranca, salvarModelosWhatsapp, boletoPdf, cancelarCobranca, gerarRemessaEmpresa, listarRemessas, marcarPago, obterCobranca, obterConta, obterRemessa, processarRetorno, salvarConta } from './servicos/cobranca.js';
+import { BoletoAvulso, EntradaFaturamento, enviarCobrancaPorEmail, faturar, gerarBoletoAvulso, listarCobrancas } from './servicos/faturamento.js';
+import { ContaBancaria, obterModelosWhatsapp, reemitirCobranca, salvarModelosWhatsapp, boletoPdf, demonstrativoPdf, informarPix, cancelarCobranca, gerarRemessaEmpresa, listarRemessas, marcarPago, obterCobranca, obterConta, obterRemessa, processarRetorno, salvarConta } from './servicos/cobranca.js';
 import { Despesa, criarDespesa, editarDespesa, excluirDespesa, listarCategorias, listarDespesas, painelFinanceiro, salvarCategorias } from './servicos/financeiro.js';
 import { ClassificacaoCartao, classificarCartao, excluirFatura, faturasDoMes, importarFatura } from './servicos/cartao.js';
 import { Classificacao, balancoExtrato, candidatosBoleto, candidatosDespesa, classificar, conciliar, excluirImportacao, extratoDoMes, importarExtrato, ligarDespesa } from './servicos/extrato.js';
@@ -96,6 +96,8 @@ const Tomador = z.object({
   desc_pontual_dias: z.number().int().min(0).max(60).nullish().transform((v) => v ?? null),
   /** true = o cadastro foi conferido (tira a marca "falta conferir"). */
   conferido: z.boolean().nullish(),
+  /** Carteira de cobrança: boleto (Ailos) ou Pix copia e cola. */
+  forma_cobranca: z.enum(['BOLETO', 'PIX']).nullish(),
   descricao_modelo: DescricaoModelo.nullish().transform((m) => (m ? JSON.stringify(m) : null)),
   /** Serviços que o sistema sempre usa com este cliente, com o valor de cada um. */
   servicos_padrao: z.array(z.object({
@@ -335,6 +337,7 @@ export async function rotas(app: FastifyInstance) {
         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(id, d.tipo_doc, d.documento, d.nome, d.inscricao_municipal ?? null, d.email || null, d.fone, d.cep,
         d.cod_municipio ?? null, d.logradouro ?? null, d.numero ?? null, d.complemento ?? null, d.bairro ?? null,
         d.modo_faturamento, d.vencimento_tipo, d.vencimento_valor, d.email_cobranca || null, d.enviar_email_auto, d.cidade || null, d.uf || null, d.desconto_valor, d.desconto_motivo, d.descricao_modelo, d.multa_pct, d.juros_pct_mes, d.desc_pontual_pct, d.desc_pontual_dias);
+      if (d.forma_cobranca) db.prepare('UPDATE tomadores SET forma_cobranca = ? WHERE id = ?').run(d.forma_cobranca, Number(r.lastInsertRowid));
       salvarServicosPadrao(id, Number(r.lastInsertRowid), d.servicos_padrao);
       return { id: Number(r.lastInsertRowid) };
     });
@@ -351,6 +354,7 @@ export async function rotas(app: FastifyInstance) {
           d.logradouro ?? null, d.numero ?? null, d.complemento ?? null, d.bairro ?? null,
           d.modo_faturamento, d.vencimento_tipo, d.vencimento_valor, d.email_cobranca || null, d.enviar_email_auto, d.cidade || null, d.uf || null, d.desconto_valor, d.desconto_motivo, d.descricao_modelo, d.multa_pct, d.juros_pct_mes, d.desc_pontual_pct, d.desc_pontual_dias, id);
       if (d.conferido) db.prepare('UPDATE tomadores SET conferir = 0, conferir_motivo = NULL WHERE id = ?').run(id);
+      if (d.forma_cobranca) db.prepare('UPDATE tomadores SET forma_cobranca = ? WHERE id = ?').run(d.forma_cobranca, id);
       salvarServicosPadrao(t.empresa_id, id, d.servicos_padrao);
       return { ok: true };
     });
@@ -584,6 +588,31 @@ export async function rotas(app: FastifyInstance) {
       cobrancaDoUsuario(req, id);
       const { pdf, nome } = await boletoPdf(id);
       return reply.type('application/pdf').header('Content-Disposition', `inline; filename="${nome}"`).send(pdf);
+    });
+    api.get('/api/cobrancas/:id/demonstrativo', async (req, reply) => {
+      const id = Number((req.params as any).id);
+      cobrancaDoUsuario(req, id);
+      const { pdf, nome } = await demonstrativoPdf(id);
+      return reply.type('application/pdf').header('Content-Disposition', `inline; filename="${nome}"`).send(pdf);
+    });
+    api.post('/api/cobrancas/:id/pix', { preHandler: exigirPapel('admin', 'operador') }, async (req) => {
+      const id = Number((req.params as any).id);
+      cobrancaDoUsuario(req, id);
+      return informarPix(id, z.object({ codigo: z.string().max(1000) }).parse(req.body).codigo);
+    });
+    api.post('/api/cobrancas/:id/email', { preHandler: exigirPapel('admin', 'operador') }, async (req) => {
+      const id = Number((req.params as any).id);
+      cobrancaDoUsuario(req, id);
+      return enviarCobrancaPorEmail(u(req).escritorio_id, id);
+    });
+    api.get('/api/empresas/:id/demonstrativo', async (req) => {
+      const id = Number((req.params as any).id); checarEmpresa(req, id);
+      return { rodape: (db.prepare('SELECT demonstrativo_rodape FROM empresas WHERE id = ?').get(id) as any)?.demonstrativo_rodape ?? '' };
+    });
+    api.put('/api/empresas/:id/demonstrativo', { preHandler: exigirPapel('admin', 'operador') }, async (req) => {
+      const id = Number((req.params as any).id); checarEmpresa(req, id);
+      const d = z.object({ rodape: z.string().trim().max(120) }).parse(req.body);
+      db.prepare('UPDATE empresas SET demonstrativo_rodape = ? WHERE id = ?').run(d.rodape || null, id); return { ok: true };
     });
     api.post('/api/cobrancas/:id/cancelar', { preHandler: exigirPapel('admin', 'operador') }, async (req) => {
       const id = Number((req.params as any).id);

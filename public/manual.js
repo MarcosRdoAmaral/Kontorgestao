@@ -4,7 +4,7 @@
  * aqui (e a data/versão em MANUAL_VERSAO) antes de publicar a versão.
  * `corpo` é HTML escrito à mão (não recebe dados de usuário).
  */
-export const MANUAL_VERSAO = '3.22.0';
+export const MANUAL_VERSAO = '3.23.0';
 
 export const MANUAL = [
   {
@@ -120,6 +120,14 @@ export const MANUAL = [
       <p>A tela <strong>Cobranças</strong> lista os boletos da empresa com situação (pendente, pronto, enviado ao banco, registrado, pago, cancelado).</p>
       <h3>Multa, juros e desconto por cliente</h3>
       <p>No cadastro do cliente, aba <strong>Descontos</strong>, você pode definir <em>multa</em> e <em>juros ao mês</em> próprios (em branco vale o padrão dos dados bancários da empresa; 0 isenta o cliente) e um <em>desconto por pagamento antecipado</em>: um percentual do boleto, válido até certo número de dias antes do vencimento (0 = até o vencimento). O desconto vai na remessa ao banco como desconto até a data e sai nas instruções impressas; depois do prazo vale o valor cheio. O boleto guarda as condições vigentes na data em que foi criado, então mudar o cadastro depois não altera boletos já emitidos.</p>
+      <h3>Carteira Pix</h3>
+      <p>Quem não tem convênio de boleto pode cobrar por Pix. No cadastro do cliente (<em>Faturamento</em>), escolha <strong>Carteira de cobrança: Pix copia e cola</strong>. Em Cobranças, as abas <em>Carteira boleto</em> e <em>Carteira Pix</em> separam os dois tipos.</p>
+      <ol>
+        <li>Gere a cobrança Pix no aplicativo do banco, com o valor da cobrança.</li>
+        <li>Na cobrança do sistema, clique em <strong>Informar Pix</strong> e cole o código <em>copia e cola</em>. O sistema confere o código e recusa se o valor for diferente do da cobrança.</li>
+        <li>O <strong>Demonstrativo</strong> (PDF com logo, serviços, total e QR Code) fica pronto; o botão <strong>E-mail</strong> envia ao cliente com o copia e cola no texto.</li>
+      </ol>
+      <p>O demonstrativo também vai anexo nos e-mails de boleto e nota. O texto do rodapé é ajustado no botão <em>Demonstrativo</em>, na tela de Cobranças.</p>
       <h3>Fluxo com o banco (Ailos)</h3>
       <ol>
         <li>Configure os <em>Dados bancários</em> da empresa (em Empresas).</li>

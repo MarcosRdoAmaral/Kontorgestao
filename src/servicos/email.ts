@@ -152,16 +152,24 @@ export async function enviarMensagemBoleto(escritorioId: number, para: string[],
   const c = lerConfig(escritorioId);
   if (!c) throw new ErroNegocio('Configure o e-mail do escritório em E-mail antes de enviar.');
   const emp = db.prepare('SELECT e.razao_social, e.nome_fantasia, e.email FROM empresas e WHERE e.id = ?').get(cob.empresa_id) as any;
-  const linhas = [
+  const pix = cob.forma === 'PIX';
+  const ref = cob.referencia ? ` (referência ${cob.referencia})` : '';
+  const linhas = pix ? [
     `Olá${tomador?.nome ? ', ' + tomador.nome : ''}!`, '',
-    `Segue o boleto de cobrança emitido por ${emp.razao_social}.`, '',
+    `Segue a cobrança de ${emp.razao_social}${ref}, para pagamento por Pix.`, '',
+    `Vencimento: ${cob.vencimento.split('-').reverse().join('/')}`, `Valor: ${brl(cob.valor)}`, '',
+    'Pix copia e cola:', cob.pix_copia_cola ?? '', '',
+    'O demonstrativo, com o QR Code, segue em anexo (PDF). Confira o valor e o favorecido antes de confirmar o pagamento.',
+  ] : [
+    `Olá${tomador?.nome ? ', ' + tomador.nome : ''}!`, '',
+    `Segue o boleto de cobrança emitido por ${emp.razao_social}${ref}.`, '',
     `Vencimento: ${cob.vencimento.split('-').reverse().join('/')}`, `Valor: ${brl(cob.valor)}`, `Linha digitável: ${cob.linha_digitavel}`, '',
-    'O boleto segue em anexo (PDF).',
+    'O boleto e o demonstrativo seguem em anexo (PDF).',
   ];
   try {
     await fabrica(c).sendMail({
       from: `"${c.remetente_nome}" <${c.remetente_email}>`, to: para.join(', '), ...(emp.email ? { replyTo: emp.email } : {}),
-      subject: `Boleto com vencimento em ${cob.vencimento.split('-').reverse().join('/')} — ${emp.nome_fantasia || emp.razao_social}`,
+      subject: `${pix ? 'Cobrança Pix' : 'Boleto'} com vencimento em ${cob.vencimento.split('-').reverse().join('/')} — ${emp.nome_fantasia || emp.razao_social}`,
       text: linhas.join('\n'),
       html: `<div style="font-family:Arial,sans-serif;font-size:14px;color:#222">${linhas.map((l) => (l ? `<p style="margin:0 0 8px">${esc(l)}</p>` : '')).join('')}</div>`,
       attachments: anexos,
