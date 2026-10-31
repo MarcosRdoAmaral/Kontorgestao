@@ -57,7 +57,7 @@ a { color: var(--laranja); }
 .lateral { background: var(--lateral); border-right: 1px solid var(--lateral-borda); color: var(--tinta); padding: 20px 16px; display: flex; flex-direction: column; gap: 16px; position: sticky; top: 0; height: 100vh; overflow-y: auto; }
 .lateral > * { flex-shrink: 0; } /* sem isso, em janelas baixas os blocos encolhem e o logo é cortado */
 .fixo-lateral { position: sticky; top: -20px; z-index: 2; background: var(--lateral); margin: -20px -16px 0; padding: 20px 16px 12px; display: flex; flex-direction: column; gap: 16px; border-bottom: 1px solid var(--lateral-borda); } /* logo, empresa e certificado ficam fixos; só o menu rola */
-.marca img { width: 100%; max-width: 168px; height: auto; display: block; }
+.marca img { width: 100%; max-width: 208px; height: auto; display: block; }
 .seletor-empresa span { display: block; font-size: .8rem; color: var(--tinta-2); margin-bottom: 4px; }
 .info-empresa { font-size: .8rem; color: var(--tinta-2); line-height: 1.5; }
 .info-empresa .alerta { color: var(--ambar); }
@@ -315,3 +315,7 @@ label.check input { width: auto; }
 
 .selo-conferir { display: inline-block; margin-left: 6px; padding: 1px 8px; border-radius: 999px; font-size: 12px; font-weight: 600; color: var(--ambar); background: var(--ambar-fundo); }
 .av-fechar { display: inline-flex; align-items: center; gap: 6px; margin: 0 6px; white-space: nowrap; }
+
+/* Tema claro: logo com texto escuro, sem a placa preta */
+:root[data-tema="branco-laranja"] .marca img, :root[data-tema="branco-laranja"] .login-caixa .logo { content: url(/logo-claro.svg); background: none; padding: 0; }
+:root[data-tema="branco-laranja"] .marca { background: none; }
