@@ -5,7 +5,8 @@ import { cifrar, cifrarTexto } from './cofre.js';
 import { MODULOS, conferirSenha, configurarPrimeiroAcesso, empresaPermitida, exigirLogin, exigirPapel, gerarToken, modulosDoUsuario, restritoAEmpresas, sistemaConfigurado, type Usuario } from './auth.js';
 import { EdicaoUsuario, NovoUsuario, confirmarRecuperacao, criarUsuario, editarUsuario, limparFalhas, listarUsuarios, loginBloqueado, redefinirSenha, registrarFalha, solicitarRecuperacao, trocarMinhaSenha } from './servicos/usuarios.js';
 import { config } from './config.js';
-import { ConfigSmtp, ListaEmails, configPublica, enviarNotaPorEmail, historicoEmails, salvarConfig, testarConfig } from './servicos/email.js';
+import { ConfigSmtp, ListaEmails, assinaturaDoEscritorio, configPublica, enviarModeloTeste, enviarNotaPorEmail, historicoEmails, previaModelo, salvarAssinatura, salvarConfig, testarConfig } from './servicos/email.js';
+import { ModeloEditado, listarModelos, restaurarModelo, salvarModelo } from './servicos/modelos-email.js';
 import { ativarLicenca, exigirLicenca, statusLicenca } from './licenca.js';
 import { BoletoAvulso, EntradaFaturamento, enviarCobrancaPorEmail, faturar, gerarBoletoAvulso, listarCobrancas } from './servicos/faturamento.js';
 import { ContaBancaria, obterModelosWhatsapp, reemitirCobranca, salvarModelosWhatsapp, boletoPdf, demonstrativoPdf, informarPix, cancelarCobranca, gerarRemessaEmpresa, listarRemessas, marcarPago, obterCobranca, obterConta, obterRemessa, processarRetorno, salvarConta } from './servicos/cobranca.js';
@@ -433,6 +434,22 @@ export async function rotas(app: FastifyInstance) {
       await testarConfig(u(req).escritorio_id, para);
       return { ok: true };
     });
+    // modelos de e-mail e assinatura
+    api.get('/api/email/modelos', { preHandler: exigirPapel('admin') }, async () => listarModelos());
+    api.put('/api/email/modelos/:chave', { preHandler: exigirPapel('admin') }, async (req) => salvarModelo((req.params as any).chave, ModeloEditado.parse(req.body)));
+    api.delete('/api/email/modelos/:chave', { preHandler: exigirPapel('admin') }, async (req) => restaurarModelo((req.params as any).chave));
+    api.post('/api/email/modelos/:chave/previa', { preHandler: exigirPapel('admin') }, async (req) => previaModelo(u(req).escritorio_id, (req.params as any).chave, req.body ? ModeloEditado.parse(req.body) : undefined));
+    api.post('/api/email/modelos/:chave/teste', { preHandler: exigirPapel('admin') }, async (req) => {
+      const d = ModeloEditado.extend({ para: z.string().email('E-mail de destino inválido') }).parse(req.body);
+      await enviarModeloTeste(u(req).escritorio_id, (req.params as any).chave, d.para, { assunto: d.assunto, corpo: d.corpo });
+      return { ok: true };
+    });
+    api.get('/api/email/assinatura', { preHandler: exigirPapel('admin') }, async (req) => {
+      const a = assinaturaDoEscritorio(u(req).escritorio_id);
+      return { tem: !!a, imagem: a ? `data:${a.mime};base64,${a.img.toString('base64')}` : null };
+    });
+    api.put('/api/email/assinatura', { preHandler: exigirPapel('admin'), bodyLimit: 2 * 1024 * 1024 }, async (req) =>
+      salvarAssinatura(u(req).escritorio_id, z.object({ imagem: z.string().nullable() }).parse(req.body).imagem));
     api.post('/api/notas/:id/email', { preHandler: exigirPapel('admin', 'operador') }, async (req) => {
       const id = Number((req.params as any).id);
       notaDoUsuario(req, id);

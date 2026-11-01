@@ -4,6 +4,7 @@ import type { Usuario } from '../auth.js';
 import { ajustarVencimento } from './diautil.js';
 import { EntradaEmissao, ErroNegocio, comRetencoesDoServico, emitir } from './emissao.js';
 import { enviarMensagemBoleto, enviarNotaPorEmail } from './email.js';
+import type { ItemLista } from './modelos-email.js';
 import { exigirLicenca } from '../licenca.js';
 import { boletoPdf, criarCobranca, demonstrativoPdf, listarCobrancas as listar, obterConta, obterCobranca, pendenciasPagador, referenciaDa, registrarEmailCobranca } from './cobranca.js';
 
@@ -133,17 +134,16 @@ export async function faturar(u: Usuario, entrada: EntradaFaturamento) {
     else {
       try {
         const extras: { filename: string; content: Buffer; contentType: string }[] = [];
-        const linhasExtras: string[] = temBoleto ? [''] : [];
+        const boletos: ItemLista[] = [];
         for (const c of emitidos) {
           const pix = c.forma === 'PIX';
           const n = emitidos.length > 1 ? ` ${emitidos.indexOf(c) + 1}/${emitidos.length}` : '';
           if (!pix) { const b = await boletoPdf(c.id); extras.push({ filename: b.nome, content: b.pdf, contentType: 'application/pdf' }); }
           const dm = await demonstrativoPdf(c.id); extras.push({ filename: emitidos.length > 1 ? dm.nome.replace('.pdf', `_${emitidos.indexOf(c) + 1}.pdf`) : dm.nome, content: dm.pdf, contentType: 'application/pdf' });
-          linhasExtras.push(`${pix ? 'Cobrança Pix' : 'Boleto'}${n}: vencimento em ${c.vencimento.split('-').reverse().join('/')}, valor R$ ${c.valor.toFixed(2).replace('.', ',')}.`,
-            pix ? `Pix copia e cola: ${c.pix_copia_cola}` : `Linha digitável: ${c.linha_digitavel}`);
+          boletos.push({ rotulo: `${pix ? 'Cobrança Pix' : 'Boleto'}${n}`, valor: `R$ ${c.valor.toFixed(2).replace('.', ',')}`,
+            detalhe: `Vencimento ${c.vencimento.split('-').reverse().join('/')} · ${pix ? `Pix copia e cola: ${c.pix_copia_cola}` : `Linha digitável ${c.linha_digitavel}`}` });
         }
-        if (temBoleto) linhasExtras.push(emitidos.every((c) => c.forma === 'PIX') ? 'O demonstrativo com o QR Code do Pix segue em anexo (PDF).' : 'O boleto e o demonstrativo seguem em anexo (PDF).');
-        if (resultado.nota) await enviarNotaPorEmail(resultado.nota.id, u.escritorio_id, unicos, u.id, 'emissao', { extras, linhasExtras });
+        if (resultado.nota) await enviarNotaPorEmail(resultado.nota.id, u.escritorio_id, unicos, u.id, 'emissao', { extras, boletos });
         else await enviarMensagemBoleto(u.escritorio_id, unicos, cob, tomador, extras);
         for (const c of cobs) registrarEmailCobranca(c.id, 'ENVIADO', unicos.join(', '));
         resultado.email = { status: 'ENVIADO', para: unicos.join(', ') };
