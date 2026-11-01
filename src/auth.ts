@@ -42,7 +42,7 @@ type Regra = { m?: string; r: RegExp; mod: Modulo[] | 'adm' | 'livre' };
 const LER_NOTA: Modulo[] = ['notas', 'painel', 'cobrancas', 'emitir'];
 /** Qual módulo cada rota exige. Rota que não está aqui é negada (lista fechada). */
 const REGRAS: Regra[] = [
-  { r: /^\/api\/me(\/empresa|\/senha)?$/, mod: 'livre' },
+  { r: /^\/api\/me(\/empresa|\/senha|\/avatar)?$/, mod: 'livre' },
   { m: 'GET', r: /^\/api\/licenca$/, mod: 'livre' },
   { m: 'GET', r: /^\/api\/inicio$/, mod: 'livre' },
   { m: 'GET', r: /^\/api\/consulta\/cnpj\//, mod: 'livre' },

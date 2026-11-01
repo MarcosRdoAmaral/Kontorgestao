@@ -733,6 +733,8 @@ const migracoes: string[] = [
   ALTER TABLE cobrancas ADD COLUMN cora_pdf_url TEXT;
   ALTER TABLE cobrancas ADD COLUMN cora_pdf BLOB;
   CREATE UNIQUE INDEX idx_cobrancas_cora ON cobrancas(cora_id) WHERE cora_id IS NOT NULL;`,
+  // avatar escolhido pelo usuário (Configurações > Minha conta)
+  `ALTER TABLE usuarios ADD COLUMN avatar TEXT;`,
 ];
 
 export function migrar(): void {
