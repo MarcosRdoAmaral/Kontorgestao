@@ -404,18 +404,18 @@ async function iniciar() {
   if (estado.usuario.trocar_senha) { $('#app').hidden = true; return trocarSenha({ obrigatoria: true }); }
   await carregarEmpresas();
   atualizarLicenca();
-  if (!location.hash || !telaPermitida((location.hash.split('/')[1] || 'painel'))) location.hash = '#/' + (estado.usuario.modulos[0] ?? 'config');
+  if (!location.hash || !telaPermitida((location.hash.split('/')[1] || 'inicio'))) location.hash = '#/inicio';
   rotear();
 }
 
 /** A tela pertence a algum módulo liberado para o usuário? (o servidor confere de novo em cada chamada) */
 function telaPermitida(nome) {
   const modulo = { painel: 'painel', emitir: 'emitir', notas: 'notas', nota: 'notas', cobrancas: 'cobrancas', banco: 'empresas', despesas: 'despesas', compras: 'compras', entradas: 'compras', 'compra-nova': 'compras', 'nfe-sefaz': 'compras', tributacao: 'tributacao', extrato: 'despesas', cartao: 'despesas', agenda: 'emitir', relatorios: 'relatorios', tomadores: 'tomadores', servicos: 'servicos', empresas: 'empresas' }[nome];
-  return nome === 'config' || (modulo && estado.usuario.modulos.includes(modulo));
+  return nome === 'config' || nome === 'inicio' || (modulo && estado.usuario.modulos.includes(modulo));
 }
 
 const rotas = {
-  painel: telaPainel, emitir: telaEmitir, notas: telaNotas, nota: telaNota,
+  inicio: telaInicio, painel: telaPainel, emitir: telaEmitir, notas: telaNotas, nota: telaNota,
   cobrancas: telaCobrancas, banco: telaBanco, despesas: telaDespesas, compras: telaCompras, entradas: telaCompras, 'compra-nova': telaCompraManual, 'nfe-sefaz': telaNfeSefaz, tributacao: telaTributacao, extrato: telaExtrato, cartao: telaCartao, agenda: telaAgenda, relatorios: telaRelatorios, tomadores: telaTomadores, servicos: telaServicos, empresas: telaEmpresas, config: telaConfig,
 };
 
@@ -426,7 +426,7 @@ function rotear() {
   const manual = nome === 'relatorios' && param === 'documentacao'; // o manual é de todos os usuários
   if (['usuarios', 'email', 'backup', 'licenca'].includes(nome)) { location.hash = '#/config/' + nome; return; } // endereços antigos
   if (!manual && !telaPermitida(nome)) { conteudo.innerHTML = '<div class="vazio"><p>Seu usuário não tem acesso a esta funcionalidade.</p></div>'; return; }
-  const precisaEmpresa = !manual && !['painel', 'empresas', 'nota', 'config'].includes(nome);
+  const precisaEmpresa = !manual && !['inicio', 'painel', 'empresas', 'nota', 'config'].includes(nome);
   if (precisaEmpresa && !empresa()) {
     conteudo.innerHTML = `<div class="vazio"><p>Cadastre a primeira empresa para começar a emitir.</p>
       ${estado.usuario.papel !== 'cliente' ? '<a href="#/empresas">Cadastrar empresa</a>' : ''}</div>`;
@@ -3672,6 +3672,8 @@ const ICONES = {
   alerta: 'M12 3 2 20h20zM12 9v5M12 17h.01',
   usuario: 'M20 21v-1a5 5 0 0 0-5-5H9a5 5 0 0 0-5 5v1M12 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8z',
   chevron: 'M6 9l6 6 6-6',
+  raio: 'M13 2 4 14h7l-1 8 9-12h-7z',
+  foguete: 'M5 15c-1.5 1.5-2 5-2 5s3.5-.5 5-2M9 13l2 2M14.5 4.5c2.5-1.5 5-1.5 5.5-1s.5 3-1 5.5l-6 6-4.5-4.5zM9 9H5l-2 3 4 1M15 15v4l-3 2-1-4M15 10a1 1 0 1 0 0-2 1 1 0 0 0 0 2z',
 };
 const icone = (k, cls = 'ico') => (ICONES[k] ? `<svg class="${cls}" viewBox="0 0 24 24" aria-hidden="true"><path d="${ICONES[k]}"/></svg>` : '');
 
@@ -3726,6 +3728,84 @@ async function atualizarSino(forcar = false) {
   const n = lembretes.filter((l) => l.nivel !== 'INFO').length;
   $('#topo-badge').hidden = !n; $('#topo-badge').textContent = n > 9 ? '9+' : String(n);
   $('#topo-sino').classList.toggle('tem-atencao', lembretes.some((l) => l.nivel === 'ATENCAO'));
-  $('#topo-painel').innerHTML = `<header><b>Lembretes de hoje</b>${typeof telaInicio === 'function' ? `<a href="#/inicio">Ver tudo ${icone('seta', 'ico ico-p')}</a>` : ''}</header>${listaLembretes(lembretes)}`;
+  $('#topo-painel').innerHTML = `<header><b>Lembretes de hoje</b></header>${listaLembretes(lembretes)}`;
   $('#topo-painel').querySelectorAll('a').forEach((a) => (a.onclick = () => { $('#topo-painel').hidden = true; $('#topo-sino').setAttribute('aria-expanded', 'false'); }));
 }
+
+// ---------------------------------------------------------------------------
+// Início: boas-vindas, acesso rápido, dica e mensagem do dia (os lembretes ficam no sininho do topo)
+// ---------------------------------------------------------------------------
+async function telaInicio() {
+  const agora = new Date();
+  const h = agora.getHours();
+  const saudacao = h < 12 ? 'Bom dia' : h < 18 ? 'Boa tarde' : 'Boa noite';
+  const dia = Math.floor((Date.now() - agora.getTimezoneOffset() * 6e4) / 864e5);
+  const nome = String(estado.usuario?.nome ?? '').split(' ')[0];
+  const dataLonga = agora.toLocaleDateString('pt-BR', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+  const pode = (m) => m.split(' ').some((x) => estado.usuario.modulos.includes(x));
+  const acessos = INICIO.acessos.filter((a) => pode(a.modulo)).slice(0, 4);
+  const cartao = (ic, titulo, corpo, cls = '') => `<section class="cartao inicio-cartao ${cls}"><header class="inicio-cab"><span class="inicio-ic">${icone(ic)}</span><h2>${titulo}</h2></header>${corpo}</section>`;
+  conteudo.innerHTML = `
+    <div class="inicio2">
+      <div class="inicio2-principal">
+        <section class="inicio-hero">
+          <div class="inicio-hero-texto">
+            <p class="inicio-hero-data">${icone('calendario')}${esc(dataLonga.charAt(0).toUpperCase() + dataLonga.slice(1))}</p>
+            <h1>${saudacao}${nome ? `, <span>${esc(nome)}</span>` : ''}!</h1>
+            <p class="inicio-hero-sub">${esc(INICIO.subtitulo)}</p>
+            <span class="inicio-traco2" aria-hidden="true"></span>
+          </div>
+          <img src="/logo.svg" alt="${esc(INICIO.produto)}" class="inicio-logo inicio-hero-logo">
+        </section>
+        ${acessos.length ? `<section class="inicio-acessos"><h2>${icone('raio')}Acesso rápido</h2>
+          <div class="inicio-acessos-grade">${acessos.map((a) => `<a class="inicio-atalho" href="${a.href}"><span class="inicio-ic">${icone(a.icone)}</span><strong>${esc(a.titulo)}</strong><span class="inicio-atalho-sub">${esc(a.sub)}</span>${icone('seta', 'ico ico-p inicio-atalho-seta')}</a>`).join('')}</div></section>` : ''}
+        <a class="inicio-banner" href="#/relatorios/documentacao">
+          <span class="inicio-banner-ic">${icone('foguete')}</span>
+          <span class="inicio-banner-texto"><strong>Sua rotina ainda mais <span>simples.</span></strong><span>Conheça todas as funcionalidades do ${esc(INICIO.produto)} no manual.</span></span>
+          <span class="inicio-banner-botao">Ver o manual ${icone('seta', 'ico ico-p')}</span>
+        </a>
+      </div>
+      <aside class="inicio2-lado">
+        ${cartao('lampada', 'Dica do dia', `<p>${esc(INICIO.dicas[dia % INICIO.dicas.length])}</p>`)}
+        ${cartao('sol', 'Para o seu dia', `<p>${esc(INICIO.mensagens[dia % INICIO.mensagens.length])}</p>`, 'inicio-mensagem')}
+        <p class="dica inicio-dica-sino">${icone('sino', 'ico ico-p')} Os lembretes do dia ficam no sininho, no alto da tela.</p>
+      </aside>
+    </div>`;
+}
+
+const INICIO = {
+  produto: 'Kontor Gestão Empresas',
+  subtitulo: 'Aqui você encontra tudo o que precisa para emitir, cobrar e acompanhar o caixa da sua empresa.',
+  acessos: [
+    { href: '#/emitir', icone: 'emitir', titulo: 'Emitir nota', sub: 'NFS-e em poucos cliques', modulo: 'emitir' },
+    { href: '#/notas', icone: 'notas', titulo: 'Notas emitidas', sub: 'Consulte e envie', modulo: 'notas' },
+    { href: '#/cobrancas', icone: 'cobrancas', titulo: 'Cobranças', sub: 'Boletos e Pix', modulo: 'cobrancas' },
+    { href: '#/painel', icone: 'painel', titulo: 'Painel do mês', sub: 'Faturado e recebido', modulo: 'painel' },
+    { href: '#/tomadores', icone: 'tomadores', titulo: 'Clientes', sub: 'Cadastro e cobrança', modulo: 'tomadores' },
+    { href: '#/despesas', icone: 'despesas', titulo: 'Despesas e balanço', sub: 'Receitas × despesas', modulo: 'despesas' },
+  ],
+  dicas: [
+    'Na Emissão automática, as notas e boletos do mês ficam prontos na data de cada cliente: é só conferir e confirmar.',
+    'Cadastre os serviços padrão de cada cliente: na emissão, o serviço e o valor já vêm preenchidos.',
+    'Clientes que pagam por Pix ficam na carteira Pix: cole o código copia e cola e o demonstrativo sai com o QR Code.',
+    'Em Configurações > Modelos de e-mail, ajuste o texto de cada e-mail que vai para os clientes.',
+    'O extrato em PDF pode ser importado e ligado aos boletos: o que foi pago já aparece como recebido.',
+    'Lance as despesas fixas do mês: o balanço mostra o lucro de verdade, e não só a receita.',
+    'Pressione F2 no campo do cliente para buscar por nome, CNPJ ou e-mail.',
+    'O sininho no alto da tela mostra as cobranças vencidas e as notas com erro.',
+    'Em Configurações > Aparência você escolhe as cores do sistema.',
+    'Faça backup com frequência em Configurações > Backup.',
+  ],
+  mensagens: [
+    'Um passo de cada vez: o dia rende mais quando a primeira tarefa é a mais importante.',
+    'Pequenas organizações diárias evitam grandes correrias no fim do mês.',
+    'Cliente bem atendido é o melhor marketing que existe.',
+    'Faça uma pausa curta, respire fundo e volte com a cabeça leve.',
+    'Nota emitida no dia certo é dinheiro entrando no dia certo.',
+    'Um café, uma lista e foco: o dia está nas suas mãos.',
+    'Organização não é fazer mais, é fazer o certo na hora certa.',
+    'Celebre as pequenas vitórias: elas somam muito no fim do mês.',
+    'Caixa organizado é decisão mais tranquila.',
+    'Termine o dia anotando a primeira tarefa de amanhã: a manhã começa mais fácil.',
+  ],
+};

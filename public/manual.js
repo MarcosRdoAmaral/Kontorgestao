@@ -4,7 +4,7 @@
  * aqui (e a data/versão em MANUAL_VERSAO) antes de publicar a versão.
  * `corpo` é HTML escrito à mão (não recebe dados de usuário).
  */
-export const MANUAL_VERSAO = '3.28.0';
+export const MANUAL_VERSAO = '3.29.0';
 
 export const MANUAL = [
   {
@@ -23,6 +23,12 @@ export const MANUAL = [
       <h3>Como o sistema é organizado</h3>
       <p>No alto do menu lateral fica a <strong>empresa selecionada</strong>: quase todas as telas mostram os dados dela. Troque a empresa ali a qualquer momento. O restante do menu segue o fluxo do dia a dia: emitir, acompanhar notas, cobrar, controlar despesas e consultar relatórios.</p>
       <p class="dica">O menu mostra só o que o seu usuário tem permissão de usar (Configurações &gt; Usuários e acessos). Este manual está liberado para todos os usuários: em Relatórios &gt; Documentação, ou no item Documentação do menu para quem não tem o acesso a Relatórios.</p>`,
+  },
+  {
+    id: 'inicio', titulo: 'Início e lembretes', resumo: 'Tela de abertura com acesso rápido, dica e mensagem do dia; lembretes no sininho.',
+    corpo: `
+      <p>Ao abrir o programa, a tela <strong>Início</strong> mostra a saudação, a logo, o <strong>acesso rápido</strong> às telas mais usadas (conforme os acessos do usuário), a <strong>dica do dia</strong> e uma <strong>mensagem</strong> para o dia.</p>
+      <p>Os <strong>lembretes</strong> ficam no <strong>sininho</strong>, no alto de todas as telas: cobranças vencidas e que vencem hoje, notas rejeitadas ou com erro nos últimos 15 dias e certificados digitais vencendo em até 30 dias. O número mostra quantos pedem ação (vermelho quando há algo atrasado); clique num lembrete para ir direto à tela. Ao lado do sininho fica o seu nome, com atalhos para <em>Minha conta</em>, <em>Aparência</em> e <em>Sair</em>.</p>`,
   },
   {
     id: 'empresas', titulo: 'Empresas', resumo: 'Cadastro do prestador, certificado, logo, dados bancários e emissão sem certificado.',
