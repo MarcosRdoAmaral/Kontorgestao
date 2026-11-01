@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import crypto from 'node:crypto';
+process.env.LICENCA_CHAVE_PUBLICA ??= ''; // sem controle de licença neste teste
 import { zipSync, strToU8 } from 'fflate';
 
 /** xlsx mínimo: cabeçalho, CNPJ como número (sem o zero à esquerda), CNPJ como texto formatado, CNPJ inválido, CPF, repetido. */

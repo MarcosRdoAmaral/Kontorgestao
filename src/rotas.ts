@@ -10,7 +10,7 @@ import { EdicaoUsuario, NovoUsuario, confirmarRecuperacao, criarUsuario, editarU
 import { config } from './config.js';
 import { ConfigSmtp, ListaEmails, assinaturaDoEscritorio, configPublica, enviarModeloTeste, enviarNotaPorEmail, historicoEmails, previaModelo, salvarAssinatura, salvarConfig, testarConfig } from './servicos/email.js';
 import { ModeloEditado, listarModelos, restaurarModelo, salvarModelo } from './servicos/modelos-email.js';
-import { ativarLicenca, exigirLicenca, statusLicenca } from './licenca.js';
+import { ativarLicenca, exigirLicenca, exigirLimite, PLANOS, SUPORTE_WHATSAPP, statusLicenca, usoAtual } from './licenca.js';
 import { BoletoAvulso, EntradaFaturamento, enviarCobrancaPorEmail, faturar, gerarBoletoAvulso, listarCobrancas } from './servicos/faturamento.js';
 import { ContaCoraEntrada, obterContaCora, salvarContaCora, removerContaCora, testarCora, sincronizarTudo, cancelarNaCora } from './servicos/cora.js';
 import { ContaBancaria, obterModelosWhatsapp, reemitirCobranca, salvarModelosWhatsapp, boletoPdf, demonstrativoPdf, informarPix, cancelarCobranca, gerarRemessaEmpresa, listarRemessas, marcarPago, obterCobranca, obterConta, obterRemessa, processarRetorno, salvarConta } from './servicos/cobranca.js';
@@ -249,6 +249,7 @@ export async function rotas(app: FastifyInstance) {
 
     api.post('/api/empresas', { preHandler: exigirPapel('admin', 'operador') }, async (req) => {
       const d = Empresa.parse(req.body);
+      exigirLimite('empresas');
       const r = db.prepare(`INSERT INTO empresas (escritorio_id, documento, razao_social, nome_fantasia, inscricao_municipal, cod_municipio, uf, email,
         op_simp_nac, reg_ap_trib_sn, reg_esp_trib, p_tot_trib_sn, ambiente, serie, modo_emissao, portal_login, portal_senha_enc) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
         .run(u(req).escritorio_id, d.documento, d.razao_social, d.nome_fantasia ?? null, d.inscricao_municipal ?? null, d.cod_municipio,
@@ -348,6 +349,7 @@ export async function rotas(app: FastifyInstance) {
       const id = Number((req.params as any).id);
       checarEmpresa(req, id);
       const d = Tomador.parse(req.body);
+      exigirLimite('clientes', d.documento);
       conferirServicosPadrao(id, d.servicos_padrao);
       const r = db.prepare(`INSERT INTO tomadores (empresa_id, tipo_doc, documento, nome, inscricao_municipal, email, fone, cep, cod_municipio, logradouro, numero, complemento, bairro,
         modo_faturamento, vencimento_tipo, vencimento_valor, email_cobranca, enviar_email_auto, cidade, uf, desconto_valor, desconto_motivo, descricao_modelo, multa_pct, juros_pct_mes, desc_pontual_pct, desc_pontual_dias)
@@ -724,7 +726,7 @@ export async function rotas(app: FastifyInstance) {
       return processarRetorno(id, d.conteudo);
     });
 
-    api.get('/api/licenca', async () => statusLicenca());
+    api.get('/api/licenca', async () => ({ ...statusLicenca(), planos: PLANOS, uso: usoAtual(), suporteWhatsapp: SUPORTE_WHATSAPP }));
     api.post('/api/licenca', { preHandler: exigirPapel('admin') }, async (req) => {
       const d = z.object({ codigo: z.string().min(10) }).parse(req.body);
       return ativarLicenca(d.codigo);

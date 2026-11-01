@@ -10,6 +10,7 @@ const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'nfse-setup-'));
 process.env.DATABASE_PATH = path.join(tmp, 'db.sqlite');
 process.env.STORAGE_DIR = path.join(tmp, 'arq');
 process.env.BACKUP_DIR = path.join(tmp, 'backups');
+process.env.LICENCA_CHAVE_PUBLICA ??= ''; // sem controle de licença nos testes que cadastram vários
 process.env.MASTER_KEY = crypto.randomBytes(32).toString('base64');
 process.env.SESSION_SECRET = 'x';
 process.env.NFSE_DESKTOP = '1';
