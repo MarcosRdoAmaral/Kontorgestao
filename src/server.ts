@@ -1,3 +1,4 @@
+import { sincronizarAutomatico } from './servicos/cora.js';
 import Fastify from 'fastify';
 import fastifyStatic from '@fastify/static';
 import multipart from '@fastify/multipart';
@@ -51,6 +52,11 @@ export async function criarApp() {
   if (process.env.NFE_BUSCA_AUTOMATICA !== '0') {
     const timerNfe = setInterval(() => { buscarAutomaticamente().catch((e) => app.log.error(e)); }, 10 * 60e3);
     timerNfe.unref();
+  }
+  // Cora: a cada 10 min registra boletos pendentes, dá baixa nos pagos e traz o extrato
+  if (process.env.CORA_AUTOMATICO !== '0') {
+    const timerCora = setInterval(() => { sincronizarAutomatico().catch((e) => app.log.error(e)); }, 10 * 60e3);
+    timerCora.unref();
   }
   // Fechamento mensal para a contabilidade: a cada 30 min vê se alguma empresa chegou ao dia de envio
   if (process.env.FECHAMENTO_AUTOMATICO !== '0') {
