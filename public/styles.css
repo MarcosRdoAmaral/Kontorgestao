@@ -53,7 +53,7 @@ a { color: var(--laranja); }
 .login-caixa h1 { text-align: center; font-size: 1.2rem; }
 
 /* Estrutura */
-.app { display: grid; grid-template-columns: 250px 1fr; min-height: 100vh; }
+.app { display: grid; grid-template-columns: 266px 1fr; min-height: 100vh; }
 .lateral { background: var(--lateral); border-right: 1px solid var(--lateral-borda); color: var(--tinta); padding: 20px 16px; display: flex; flex-direction: column; gap: 16px; position: sticky; top: 0; height: 100vh; overflow-y: auto; }
 .lateral > * { flex-shrink: 0; } /* sem isso, em janelas baixas os blocos encolhem e o logo é cortado */
 .fixo-lateral { position: sticky; top: -20px; z-index: 2; background: var(--lateral); margin: -20px -16px 0; padding: 20px 16px 12px; display: flex; flex-direction: column; gap: 16px; border-bottom: 1px solid var(--lateral-borda); } /* logo, empresa e certificado ficam fixos; só o menu rola */
@@ -448,3 +448,39 @@ label.check input { width: auto; }
 @media (max-width: 1280px) { .me-colunas { grid-template-columns: 1fr; } .me-previa { position: static; } }
 @media (max-width: 860px) { .me { grid-template-columns: 1fr; } .me-lista { position: static; } }
 .ass-img { max-width: 480px; width: 100%; height: auto; display: block; background: #fff; border-radius: 6px; margin: 8px 0; }
+
+/* Ícones, barra do topo e sininho */
+.ico { width: 18px; height: 18px; flex: none; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+.ico-p { width: 15px; height: 15px; }
+#menu a { display: flex; align-items: center; gap: 11px; }
+#menu a .ico { opacity: .8; }
+#menu a.ativo .ico, #menu a:hover .ico { opacity: 1; color: var(--laranja); }
+.barra-topo { display: flex; justify-content: flex-end; align-items: center; gap: 14px; padding: 12px 28px 0; position: relative; z-index: 30; }
+.topo-sino-caixa, .topo-usuario-caixa { position: relative; }
+.topo-sino { position: relative; width: 42px; height: 42px; padding: 0; display: grid; place-items: center; border-radius: 50%; background: var(--superficie); border: 1px solid var(--borda-leve); color: var(--tinta); }
+.topo-sino .ico { width: 21px; height: 21px; }
+.topo-sino:hover { border-color: var(--laranja); color: var(--laranja); }
+.topo-badge { position: absolute; top: -3px; right: -3px; min-width: 19px; height: 19px; padding: 0 5px; border-radius: 99px; background: var(--g-pend); color: #1a1405; font-size: .7rem; font-weight: 700; display: grid; place-items: center; border: 2px solid var(--papel); }
+.topo-sino.tem-atencao .topo-badge { background: var(--g-atencao); color: #2a0a0a; }
+.topo-usuario { display: flex; align-items: center; gap: 9px; padding: 4px 12px 4px 4px; border-radius: 99px; background: var(--superficie); border: 1px solid var(--borda-leve); color: var(--tinta); }
+.topo-usuario:hover { border-color: var(--laranja); }
+.topo-avatar { width: 34px; height: 34px; border-radius: 50%; display: grid; place-items: center; background: var(--laranja-fundo); color: var(--laranja); font-weight: 700; font-size: .82rem; border: 1px solid var(--laranja-forte); }
+.topo-ola { font-size: .9rem; }
+.topo-painel, .topo-menu { position: absolute; right: 0; top: calc(100% + 8px); background: var(--superficie); border: 1px solid var(--borda-botao); border-radius: 14px; box-shadow: 0 18px 44px var(--sombra); padding: 12px; }
+.topo-painel { width: min(400px, 90vw); }
+.topo-painel header { display: flex; justify-content: space-between; align-items: center; margin: 2px 4px 10px; }
+.topo-painel header a { display: inline-flex; align-items: center; gap: 4px; font-size: .85rem; text-decoration: none; }
+.topo-menu { min-width: 220px; display: grid; gap: 2px; }
+.topo-menu-nome { margin: 2px 8px 8px; font-weight: 600; }
+.topo-menu a, .topo-menu button { display: flex; align-items: center; gap: 10px; padding: 9px 10px; border-radius: 8px; color: var(--tinta); text-decoration: none; background: transparent; border: 0; text-align: left; font: inherit; }
+.topo-menu a:hover, .topo-menu button:hover { background: var(--superficie-2); }
+.inicio-lembretes .ico { opacity: .6; }
+.selo-cert { display: inline-flex; align-items: center; gap: 5px; }
+.selo-cert .ico { width: 15px; height: 15px; }
+.selo-cert.ok .ico { color: var(--g-ok); }
+.selo-cert.aviso .ico { color: var(--g-pend); }
+.selo-cert.ruim .ico { color: var(--g-atencao); }
+main:focus, main:focus-visible { outline: none; }
+#menu a { gap: 9px; }
+#menu a .ico { width: 17px; height: 17px; }
+#menu details.grupo > a { margin-left: 4px; padding-left: 10px; }

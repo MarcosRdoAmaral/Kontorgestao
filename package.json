@@ -1,6 +1,6 @@
 {
   "name": "nfse-nacional",
-  "version": "3.27.0",
+  "version": "3.28.0",
   "description": "Kontor Gestão Empresas — emissor de NFS-e (Sistema Nacional) para Windows",
   "main": "electron/main.mjs",
   "kontor": {

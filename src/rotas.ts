@@ -2,6 +2,7 @@ import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { db } from './db.js';
 import { cifrar, cifrarTexto } from './cofre.js';
+import { lembretesDoUsuario } from './servicos/lembretes.js';
 import { MODULOS, conferirSenha, configurarPrimeiroAcesso, empresaPermitida, exigirLogin, exigirPapel, gerarToken, modulosDoUsuario, restritoAEmpresas, sistemaConfigurado, type Usuario } from './auth.js';
 import { EdicaoUsuario, NovoUsuario, confirmarRecuperacao, criarUsuario, editarUsuario, limparFalhas, listarUsuarios, loginBloqueado, redefinirSenha, registrarFalha, solicitarRecuperacao, trocarMinhaSenha } from './servicos/usuarios.js';
 import { config } from './config.js';
@@ -220,6 +221,13 @@ export async function rotas(app: FastifyInstance) {
     api.post('/api/usuarios/:id/redefinir-senha', async (req) => {
       redefinirSenha(u(req), Number((req.params as any).id));
       return { ok: true };
+    });
+
+    // ---------- Lembretes do sininho do topo ----------
+    api.get('/api/inicio', async (req) => {
+      const usr = u(req);
+      const ids = restritoAEmpresas(usr) ? (db.prepare('SELECT empresa_id FROM usuario_empresas WHERE usuario_id = ?').all(usr.id) as { empresa_id: number }[]).map((x) => x.empresa_id) : null;
+      return { lembretes: lembretesDoUsuario(usr.escritorio_id, modulosDoUsuario(usr), ids) };
     });
 
     // ---------- Empresas (prestadores) ----------

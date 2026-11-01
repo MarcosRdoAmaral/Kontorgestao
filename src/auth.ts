@@ -44,6 +44,7 @@ const LER_NOTA: Modulo[] = ['notas', 'painel', 'cobrancas', 'emitir'];
 const REGRAS: Regra[] = [
   { r: /^\/api\/me(\/empresa|\/senha)?$/, mod: 'livre' },
   { m: 'GET', r: /^\/api\/licenca$/, mod: 'livre' },
+  { m: 'GET', r: /^\/api\/inicio$/, mod: 'livre' },
   { m: 'GET', r: /^\/api\/consulta\/cnpj\//, mod: 'livre' },
   { m: 'GET', r: /^\/api\/empresas$/, mod: 'livre' },
   { r: /^\/api\/empresas\/\d+\/contabilidade(\/|$)/, mod: 'adm' },
