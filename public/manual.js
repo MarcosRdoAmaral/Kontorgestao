@@ -4,7 +4,7 @@
  * aqui (e a data/versão em MANUAL_VERSAO) antes de publicar a versão.
  * `corpo` é HTML escrito à mão (não recebe dados de usuário).
  */
-export const MANUAL_VERSAO = '3.25.0';
+export const MANUAL_VERSAO = '3.26.0';
 
 export const MANUAL = [
   {
@@ -249,7 +249,7 @@ export const MANUAL = [
         <li><strong>E-mail:</strong> servidor SMTP usado para enviar notas e boletos aos clientes e para a recuperação de senha.</li>
         <li><strong>Assinatura:</strong> na mesma aba, uma imagem (PNG ou JPG) que vai no fim de todos os e-mails aos clientes.</li>
         <li><strong>Modelos de e-mail:</strong> o texto de cada e-mail (nota, cancelamento, boleto, Pix e fechamento para a contabilidade). Clique nos campos automáticos (como <code>{{cliente}}</code> e <code>{{valor}}</code>) para inserir, veja a prévia ao vivo, envie um teste para você e, se quiser, restaure o texto sugerido. Se um campo estiver vazio em um envio, a linha dele não vai no e-mail.</li>
-        <li><strong>Aparência:</strong> escolha entre <em>Preto e laranja</em>, <em>Branco e laranja</em> e <em>Azul e dourado</em>. Vale para o computador.</li>
+        <li><strong>Aparência:</strong> escolha entre <em>Preto e laranja</em>, <em>Branco e laranja</em>, <em>Azul e dourado</em> e <em>Azul e roxo</em>. Vale para o computador.</li>
         <li><strong>Backup:</strong> o sistema faz cópia automática diária; também dá para baixar um backup quando quiser. Guarde uma cópia fora do computador.</li>
         <li><strong>Licença:</strong> mostra a situação e permite informar um novo código. Nos <strong>15 dias</strong> antes do vencimento (da licença ou do período de teste) o menu mostra "Licença vence em N dia(s)" em destaque e o sistema abre um aviso uma vez por dia, com o código do computador para pedir a renovação. Vencida a licença, só a emissão é bloqueada.</li>
         <li><strong>Atualizações:</strong> quando sai uma versão nova, aparece um aviso no topo com três opções: <em>Atualizar agora</em> (baixa, faz a cópia de segurança e instala), <em>Baixar e instalar ao fechar</em> (baixa agora e instala sozinho quando você fechar o programa) e <em>Só baixar</em> (deixa pronta; depois é só clicar em <em>Instalar agora</em>). Os dados são preservados.</li>
