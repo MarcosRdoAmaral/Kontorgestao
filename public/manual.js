@@ -4,7 +4,7 @@
  * aqui (e a data/versão em MANUAL_VERSAO) antes de publicar a versão.
  * `corpo` é HTML escrito à mão (não recebe dados de usuário).
  */
-export const MANUAL_VERSAO = '3.31.1';
+export const MANUAL_VERSAO = '3.32.0';
 
 export const MANUAL = [
   {
@@ -143,6 +143,8 @@ export const MANUAL = [
         <li>O <strong>Demonstrativo</strong> (PDF com logo, serviços, total e QR Code) fica pronto; o botão <strong>E-mail</strong> envia ao cliente com o copia e cola no texto.</li>
       </ol>
       <p>O demonstrativo também vai anexo nos e-mails de boleto e nota. O texto do rodapé é ajustado no botão <em>Demonstrativo</em>, na tela de Cobranças.</p>
+      <h3>Carta de cobrança</h3>
+      <p>Numa cobrança vencida, o menu <em>⋯</em> tem <em>Carta de cobrança (PDF)</em>: um aviso no papel timbrado com todas as cobranças vencidas e não pagas daquele cliente, os dias de atraso e a estimativa de multa e juros até hoje (pelas regras de cada cobrança), com o total atualizado e espaço para assinatura.</p>
       <h3>Fluxo com o banco (Ailos)</h3>
       <ol>
         <li>Configure os <em>Dados bancários</em> da empresa (em Empresas).</li>
@@ -238,14 +240,14 @@ export const MANUAL = [
       <p>A nota é emitida em um dia, o boleto vence em outro e é pago em outro. Por isso cada relatório informa <strong>qual data filtra o período</strong> e mostra as demais nas colunas.</p>
       <p>Os relatórios ficam em <strong>grupos</strong>, na lista à esquerda da tela:</p>
       <ul>
-        <li><strong>Faturamento:</strong> Receitas emitidas (por data de emissão) e Faturamento por mês (notas, canceladas e recebido).</li>
-        <li><strong>Contas a receber:</strong> por vencimento, em aberto por emissão, recebimentos (data do pagamento), saldo vencido por cliente (faixas de atraso), posição por cliente e prazo de recebimento por cliente (prazo e atraso médios, % pago em dia).</li>
+        <li><strong>Faturamento:</strong> Receitas emitidas (por data de emissão) e Faturamento por mês (notas, canceladas e recebido) e Faturamento por cidade/UF do cliente.</li>
+        <li><strong>Contas a receber:</strong> por vencimento, em aberto por emissão, recebimentos (data do pagamento), saldo vencido por cliente (faixas de atraso), posição por cliente e prazo de recebimento por cliente (prazo e atraso médios, % pago em dia) e contas a receber por carteira (boleto × Pix, com subtotal de cada uma).</li>
         <li><strong>Despesas e pagamentos:</strong> despesas lançadas (com forma de pagamento e origem), por categoria, por forma de pagamento (PIX, débito, crédito, dinheiro), parcelas do cartão a vencer e compras (NF-e de entrada).</li>
         <li><strong>Fiscal e retenções:</strong> notas emitidas e tributos, livro de serviços prestados (ISS a recolher e ISS retido pelo tomador) e retenções por cliente (PIS, COFINS, CSLL, IRRF, INSS e ISS).</li>
         <li><strong>Resultado e caixa:</strong> resultado mensal (o balanço mês a mês), fluxo de caixa por categoria e pendências do extrato (sem classificação ou crédito sem boleto ligado).</li>
-        <li><strong>Clientes:</strong> curva ABC (classes A, B e C pelo faturamento) e clientes sem faturamento no período.</li>
+        <li><strong>Clientes:</strong> curva ABC (classes A, B e C pelo faturamento) e clientes sem faturamento no período e clientes com cadastro incompleto (o que falta e o que isso atrapalha: nota, boleto ou e-mail).</li>
       </ul>
-      <p>Clique no relatório na lista, escolha o período, o cliente e a situação (quando houver) e clique em <em>Gerar</em>. Exporte para <strong>Excel (CSV)</strong> ou <strong>PDF</strong>.</p>`,
+      <p>Clique no relatório na lista, escolha o período, o cliente e a situação (quando houver) e clique em <em>Gerar</em>. Exporte para <strong>Excel (CSV)</strong> ou <strong>PDF</strong>; o PDF sai no papel timbrado da empresa (logo, CNPJ, endereço e contato no cabeçalho e o rodapé do demonstrativo em todas as páginas).</p>`,
   },
   {
     id: 'contabilidade', titulo: 'Exportar para a contabilidade', resumo: 'Pacote com extrato em OFX, PDF e XML das notas.',

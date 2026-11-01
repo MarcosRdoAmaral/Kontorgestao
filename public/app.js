@@ -1049,6 +1049,7 @@ async function telaCobrancas() {
     ].join('');
     const mais = [
       c.forma === 'PIX' && podeEditar && ativo(c) && c.pix_copia_cola ? `<button data-pix="${c.id}">Trocar o Pix</button>` : '',
+      ativo(c) && c.vencimento < hoje ? `<button data-carta="${c.id}">Carta de cobrança (PDF)</button>` : '',
       podeEditar ? `<button data-reemitir="${c.id}">Reemitir</button>` : '',
       podeEditar && ativo(c) ? `<button data-pago="${c.id}">Marcar pago</button><button data-cancelar="${c.id}">Cancelar</button>` : '',
     ].join('');
@@ -1080,6 +1081,7 @@ async function telaCobrancas() {
       ${remessas.map((r) => `<tr><td>${r.numero}</td><td>${esc(r.criado_em)}</td><td>${r.qtd_titulos}</td><td class="num">${brl(r.valor_total)}</td><td><button data-remessa="${r.id}" data-nome="${esc(r.nome_arquivo)}">Baixar arquivo</button></td></tr>`).join('')}</tbody></table></div>
       <p class="dica">Envie o arquivo no Ailos Conta Online: Cobrança Bancária → Arquivo de Cobrança. O arquivo de retorno fica no mesmo menu; importe-o aqui para dar baixa nos pagamentos.</p>` : ''}`;
   conteudo.querySelectorAll('[data-carteira]').forEach((a) => (a.onclick = (ev) => { ev.preventDefault(); st.carteira = a.dataset.carteira; telaCobrancas(); }));
+  conteudo.querySelectorAll('[data-carta]').forEach((b) => (b.onclick = () => baixar(`/api/cobrancas/${b.dataset.carta}/carta`, `Carta_Cobranca_${b.dataset.carta}.pdf`, true)));
   conteudo.querySelectorAll('[data-demo]').forEach((b) => (b.onclick = () => baixar(`/api/cobrancas/${b.dataset.demo}/demonstrativo`, `Demonstrativo_${b.dataset.demo}.pdf`, true)));
   conteudo.querySelectorAll('[data-pix]').forEach((b) => (b.onclick = () => informarPixDialogo(lista.find((x) => x.id === Number(b.dataset.pix)), telaCobrancas)));
   conteudo.querySelectorAll('[data-email]').forEach((b) => (b.onclick = async () => {
@@ -2027,9 +2029,9 @@ async function telaRelatorios(aba) {
     const box = $('#res-rel'); box.innerHTML = '<p class="sutil">Gerando…</p>';
     try {
       const r = await api('GET', `/api/empresas/${estado.empresaId}/relatorios/${est.rel}?${qs('json')}`);
-      box.innerHTML = `<h2>${esc(r.titulo)}</h2><p class="sutil">${esc(r.subtitulo)} · ${r.linhas.length} registro(s)</p>
+      box.innerHTML = `<h2>${esc(r.titulo)}</h2><p class="sutil">${esc(r.subtitulo)} · ${r.linhas.filter((l) => !l._subtotal).length} registro(s)</p>
         ${r.linhas.length ? `<div class="rolagem"><table class="tabela"><thead><tr>${r.colunas.map((c) => `<th class="${c.tipo === 'moeda' || c.tipo === 'inteiro' ? 'num' : ''}">${esc(c.nome)}</th>`).join('')}</tr></thead><tbody>
-          ${r.linhas.map((l) => `<tr>${r.colunas.map((c) => `<td class="${c.tipo === 'moeda' || c.tipo === 'inteiro' ? 'num' : ''}">${fmtCel(l[c.k], c.tipo)}</td>`).join('')}</tr>`).join('')}
+          ${r.linhas.map((l) => `<tr${l._subtotal ? ' class="rel-subtotal"' : ''}>${r.colunas.map((c) => `<td class="${c.tipo === 'moeda' || c.tipo === 'inteiro' ? 'num' : ''}">${fmtCel(l[c.k], c.tipo)}</td>`).join('')}</tr>`).join('')}
           ${r.colunas.some((c) => c.soma) ? `<tr><td><strong>TOTAL</strong></td>${r.colunas.slice(1).map((c) => `<td class="num"><strong>${c.soma ? fmtCel(r.totais[c.k], c.tipo) : ''}</strong></td>`).join('')}</tr>` : ''}
           </tbody></table></div>` : '<div class="vazio">Nenhum registro neste período.</div>'}`;
     } catch (e) { box.innerHTML = `<p class="erro">${esc(mensagemErro(e))}</p>`; }

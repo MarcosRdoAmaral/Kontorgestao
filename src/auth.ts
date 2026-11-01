@@ -60,7 +60,7 @@ const REGRAS: Regra[] = [
   { r: /^\/api\/empresas\/\d+\/cora\/(sincronizar)$/, mod: ['cobrancas', 'banco'] },
   { r: /^\/api\/empresas\/\d+\/cora(\/testar)?$/, mod: ['banco', 'empresas'] },
   { r: /^\/api\/empresas\/\d+\/conta-bancaria$/, mod: ['banco', 'empresas'] },
-  { r: /^\/api\/(empresas\/\d+\/(cobrancas|remessas|retorno|boleto-avulso)|cobrancas\/\d+\/(cancelar|pagar|reemitir|pix|email)|empresas\/\d+\/(modelos-whatsapp|demonstrativo)|remessas\/\d+\/arquivo)$/, mod: ['cobrancas'] },
+  { r: /^\/api\/(empresas\/\d+\/(cobrancas|remessas|retorno|boleto-avulso)|cobrancas\/\d+\/(cancelar|pagar|reemitir|pix|email|carta)|empresas\/\d+\/(modelos-whatsapp|demonstrativo)|remessas\/\d+\/arquivo)$/, mod: ['cobrancas'] },
   { m: 'GET', r: /^\/api\/cobrancas\/\d+\/(boleto|demonstrativo)$/, mod: ['cobrancas', 'notas', 'emitir'] },
   { m: 'POST', r: /^\/api\/(notas|faturar)$/, mod: ['emitir'] },
   { m: 'GET', r: /^\/api\/relatorios$|^\/api\/empresas\/\d+\/relatorios\/[a-z-]+$/, mod: ['relatorios'] },

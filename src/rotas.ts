@@ -1,4 +1,6 @@
 import type { FastifyInstance, FastifyRequest } from 'fastify';
+import { cartaCobrancaPdf } from './servicos/carta-cobranca.js';
+import { emitenteDaEmpresa } from './pdf/timbrado.js';
 import { z } from 'zod';
 import { db } from './db.js';
 import { cifrar, cifrarTexto } from './cofre.js';
@@ -554,8 +556,7 @@ export async function rotas(app: FastifyInstance) {
       const nome = `${r.id}_${q.de}_${q.ate}`;
       if (q.formato === 'csv') return reply.type('text/csv; charset=utf-8').header('Content-Disposition', `attachment; filename="${nome}.csv"`).send(relatorioCsv(r));
       if (q.formato === 'pdf') {
-        const emp = (db.prepare('SELECT razao_social FROM empresas WHERE id = ?').get(id) as any)?.razao_social ?? '';
-        return reply.type('application/pdf').header('Content-Disposition', `attachment; filename="${nome}.pdf"`).send(await relatorioPdf(r, emp));
+        return reply.type('application/pdf').header('Content-Disposition', `attachment; filename="${nome}.pdf"`).send(await relatorioPdf(r, emitenteDaEmpresa(id)));
       }
       return r;
     });
@@ -638,6 +639,12 @@ export async function rotas(app: FastifyInstance) {
       const id = Number((req.params as any).id);
       cobrancaDoUsuario(req, id);
       const { pdf, nome } = await boletoPdf(id);
+      return reply.type('application/pdf').header('Content-Disposition', `inline; filename="${nome}"`).send(pdf);
+    });
+    api.get('/api/cobrancas/:id/carta', async (req, reply) => {
+      const id = Number((req.params as any).id);
+      const c = cobrancaDoUsuario(req, id) as any;
+      const { pdf, nome } = await cartaCobrancaPdf(c.empresa_id, c.tomador_id);
       return reply.type('application/pdf').header('Content-Disposition', `inline; filename="${nome}"`).send(pdf);
     });
     api.get('/api/cobrancas/:id/demonstrativo', async (req, reply) => {
