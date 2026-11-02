@@ -2,6 +2,7 @@ import crypto from 'node:crypto';
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import { config } from './config.js';
 import { db } from './db.js';
+import { MODULOS_PAGOS, modulosLiberados, recusaModuloPago } from './licenca.js';
 
 export type Papel = 'admin' | 'operador' | 'cliente';
 export type Tipo = 'adm' | 'normal';
@@ -33,6 +34,14 @@ export interface Usuario {
 
 /** Módulos que o usuário pode usar (adm: todos). */
 export function modulosDoUsuario(u: Pick<Usuario, 'tipo' | 'permissoes'>): Modulo[] {
+  const todos = modulosPermitidos(u);
+  if (!todos.some((m) => MODULOS_PAGOS[m])) return todos;
+  const lib = modulosLiberados(); // módulos vendidos à parte só com a licença que os traz
+  return todos.filter((m) => !MODULOS_PAGOS[m] || lib.includes(m));
+}
+
+/** Módulos marcados para o usuário (adm: todos), independentemente da licença. */
+export function modulosPermitidos(u: Pick<Usuario, 'tipo' | 'permissoes'>): Modulo[] {
   if (u.tipo === 'adm') return TODOS_MODULOS;
   if (u.permissoes == null) return TODOS_MODULOS.filter((m) => m !== 'excluir'); // exclusão nunca é liberada por padrão
   try { return (JSON.parse(u.permissoes) as string[]).filter((m): m is Modulo => m in MODULOS); } catch { return []; }
@@ -86,6 +95,8 @@ const REGRAS: Regra[] = [
 /** null = permitido; senão a mensagem de recusa. */
 export function recusaRota(u: Usuario, metodo: string, caminho: string): string | null {
   if (u.trocar_senha && !/^\/api\/me(\/senha)?$/.test(caminho)) return 'Defina uma nova senha para continuar.';
+  const pago = recusaModuloPago(caminho); // módulo vendido à parte: nem o administrador usa sem contratar
+  if (pago) return pago;
   const regra = REGRAS.find((x) => (!x.m || x.m === metodo) && x.r.test(caminho));
   if (!regra) return 'Sem permissão para esta ação.';
   if (regra.mod === 'livre') return null;
