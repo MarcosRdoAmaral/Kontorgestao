@@ -4,7 +4,7 @@
  * aqui (e a data/versão em MANUAL_VERSAO) antes de publicar a versão.
  * `corpo` é HTML escrito à mão (não recebe dados de usuário).
  */
-export const MANUAL_VERSAO = '3.34.1';
+export const MANUAL_VERSAO = '3.35.0';
 
 export const MANUAL = [
   {
@@ -139,7 +139,7 @@ export const MANUAL = [
       <p>Quem não tem convênio de boleto pode cobrar por Pix. No cadastro do cliente (<em>Faturamento</em>), escolha <strong>Carteira de cobrança: Pix copia e cola</strong>. Em Cobranças, as abas <em>Carteira boleto</em> e <em>Carteira Pix</em> separam os dois tipos.</p>
       <ol>
         <li>Gere a cobrança Pix no aplicativo do banco, com o valor da cobrança.</li>
-        <li>Na cobrança do sistema, clique em <strong>Informar Pix</strong> e cole o código <em>copia e cola</em>. O sistema confere o código e recusa se o valor for diferente do da cobrança.</li>
+        <li>Na cobrança do sistema, clique em <strong>Informar Pix</strong> e cole o código <em>copia e cola</em>. O sistema confere o código e recusa se o valor for diferente do da cobrança. <strong>Pix gerado pelo Kontor:</strong> cadastre a chave Pix da empresa (InfinitePay ou qualquer banco) em Empresas &gt; Dados bancários &gt; <em>Pix gerado pelo Kontor</em>. A partir daí, cada cobrança da carteira Pix já sai com o Pix copia e cola e o QR Code no valor certo, sem precisar abrir o aplicativo do banco; o dinheiro cai direto na conta da chave. O botão <em>Gerar o Pix das cobranças pendentes</em> resolve as que já estavam lançadas, e no <em>Informar Pix</em> há o botão <em>Gerar com a chave Pix da empresa</em>. A baixa do pagamento continua manual. Faça um Pix de teste de pequeno valor antes de enviar aos clientes.</li>
         <li>O <strong>Demonstrativo</strong> (PDF com logo, serviços, total e QR Code) fica pronto; o botão <strong>E-mail</strong> envia ao cliente com o copia e cola no texto.</li>
       </ol>
       <p>O demonstrativo também vai anexo nos e-mails de boleto e nota. O texto do rodapé é ajustado no botão <em>Demonstrativo</em>, na tela de Cobranças.</p>
