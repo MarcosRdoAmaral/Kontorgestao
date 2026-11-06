@@ -8,7 +8,7 @@ import { lembretesDoUsuario } from './servicos/lembretes.js';
 import { MODULOS, conferirSenha, configurarPrimeiroAcesso, empresaPermitida, exigirLogin, exigirPapel, gerarToken, modulosDoUsuario, modulosPermitidos, restritoAEmpresas, sistemaConfigurado, type Usuario } from './auth.js';
 import { EdicaoUsuario, NovoUsuario, confirmarRecuperacao, criarUsuario, editarUsuario, limparFalhas, listarUsuarios, loginBloqueado, redefinirSenha, registrarFalha, solicitarRecuperacao, trocarMinhaSenha } from './servicos/usuarios.js';
 import { config } from './config.js';
-import { ConfigSmtp, ListaEmails, assinaturaDoEscritorio, configPublica, enviarModeloTeste, enviarNotaPorEmail, historicoEmails, previaModelo, salvarAssinatura, salvarConfig, testarConfig } from './servicos/email.js';
+import { ConfigSmtp, ListaEmails, assinaturaDoEscritorio, configPublica, enviarModeloTeste, enviarNotaPorEmail, enviarOrcamentoPorEmail, historicoEmails, previaModelo, salvarAssinatura, salvarConfig, testarConfig } from './servicos/email.js';
 import { ModeloEditado, listarModelos, restaurarModelo, salvarModelo } from './servicos/modelos-email.js';
 import { MODULOS_PAGOS, modulosLiberados, ativarLicenca, exigirLicenca, exigirLimite, PLANOS, SUPORTE_WHATSAPP, statusLicenca, usoAtual } from './licenca.js';
 import { BoletoAvulso, EntradaFaturamento, enviarCobrancaPorEmail, faturar, gerarBoletoAvulso, listarCobrancas } from './servicos/faturamento.js';
@@ -38,6 +38,7 @@ import { codMunicipioValido, cTribNacValido, documentoValido, limparDoc, soDigit
 import { EntradaEmissao, ErroNegocio, cancelar, danfse, emitir, enviar, excluirNota, importarNotaXml, obterNota, reconciliar } from './servicos/emissao.js';
 import { MOTIVOS_CANCELAMENTO } from './nfse/evento.js';
 
+import { EntradaOrcamento, atualizarOrcamento, conferirAntesDeEmitir, conversao, criarOrcamento, duplicarOrcamento, excluirOrcamento, listarOrcamentos, mudarSituacao, obterOrcamento, orcamentoPdf, vincularNota } from './servicos/orcamentos.js';
 const u = (req: FastifyRequest) => req.usuario as Usuario;
 
 function checarEmpresa(req: FastifyRequest, empresaId: number) {
@@ -528,14 +529,48 @@ export async function rotas(app: FastifyInstance) {
       const entrada = EntradaEmissao.parse(req.body);
       checarEmpresa(req, entrada.empresaId);
       exigirLicenca();
-      return emitir(u(req), entrada);
+      if (entrada.orcamentoId) conferirAntesDeEmitir(entrada.empresaId, entrada.orcamentoId, entrada.orcamentoItemId, entrada.valor);
+      const nota = await emitir(u(req), entrada);
+      if (entrada.orcamentoId && nota?.id) vincularNota(entrada.empresaId, entrada.orcamentoId, entrada.orcamentoItemId, nota.id, entrada.valor);
+      return nota;
+    });
+
+    // ---- orçamentos de serviços ----
+    const idEmp = (req: FastifyRequest) => { const id = Number((req.params as any).id); checarEmpresa(req, id); return id; };
+    const idOrc = (req: FastifyRequest) => Number((req.params as any).oid);
+    api.get('/api/empresas/:id/orcamentos', async (req) => listarOrcamentos(idEmp(req)));
+    api.post('/api/empresas/:id/orcamentos', async (req) => criarOrcamento(idEmp(req), u(req).id, EntradaOrcamento.parse(req.body)));
+    api.get('/api/empresas/:id/orcamentos/:oid', async (req) => obterOrcamento(idEmp(req), idOrc(req)));
+    api.put('/api/empresas/:id/orcamentos/:oid', async (req) => atualizarOrcamento(idEmp(req), idOrc(req), EntradaOrcamento.parse(req.body)));
+    api.delete('/api/empresas/:id/orcamentos/:oid', async (req) => excluirOrcamento(idEmp(req), idOrc(req)));
+    api.post('/api/empresas/:id/orcamentos/:oid/duplicar', async (req) => duplicarOrcamento(idEmp(req), u(req).id, idOrc(req)));
+    api.post('/api/empresas/:id/orcamentos/:oid/situacao', async (req) => {
+      const b = z.object({ acao: z.enum(['ENVIADO', 'APROVADO', 'RECUSADO', 'REABRIR']), motivo: z.string().trim().max(500).nullish() }).parse(req.body);
+      return mudarSituacao(idEmp(req), idOrc(req), b.acao, b.motivo);
+    });
+    api.get('/api/empresas/:id/orcamentos/:oid/conversao', async (req) => {
+      const q = z.object({ item: z.coerce.number().int().optional(), valor: z.coerce.number().optional() }).parse(req.query);
+      return conversao(idEmp(req), idOrc(req), q.item ?? null, q.valor ?? null);
+    });
+    api.get('/api/empresas/:id/orcamentos/:oid/pdf', async (req, reply) => {
+      const { pdf, nome } = await orcamentoPdf(idEmp(req), idOrc(req));
+      return reply.header('content-type', 'application/pdf').header('content-disposition', `inline; filename="${nome}"`).send(pdf);
+    });
+    api.post('/api/empresas/:id/orcamentos/:oid/email', async (req) => {
+      const empresaId = idEmp(req);
+      const b = z.object({ para: ListaEmails }).parse(req.body);
+      await enviarOrcamentoPorEmail(u(req).escritorio_id, empresaId, idOrc(req), b.para);
+      return obterOrcamento(empresaId, idOrc(req)).faturado > 0 ? obterOrcamento(empresaId, idOrc(req)) : mudarSituacao(empresaId, idOrc(req), 'ENVIADO');
     });
 
     // "Um comando": nota + boleto + e-mail conforme o cadastro do cliente
     api.post('/api/faturar', async (req) => {
       const entrada = EntradaFaturamento.parse(req.body);
       checarEmpresa(req, entrada.empresaId);
-      return faturar(u(req), entrada);
+      if (entrada.orcamentoId) conferirAntesDeEmitir(entrada.empresaId, entrada.orcamentoId, entrada.orcamentoItemId, entrada.valor);
+      const r = await faturar(u(req), entrada);
+      if (entrada.orcamentoId && r.nota?.id) vincularNota(entrada.empresaId, entrada.orcamentoId, entrada.orcamentoItemId, r.nota.id, entrada.valor);
+      return r;
     });
 
     api.get('/api/empresas/:id/contabilidade/config', async (req) => { const id = Number((req.params as any).id); checarEmpresa(req, id); return configFechamento(id); });

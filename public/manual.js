@@ -4,7 +4,7 @@
  * aqui (e a data/versão em MANUAL_VERSAO) antes de publicar a versão.
  * `corpo` é HTML escrito à mão (não recebe dados de usuário).
  */
-export const MANUAL_VERSAO = '3.35.2';
+export const MANUAL_VERSAO = '3.36.0';
 
 export const MANUAL = [
   {
@@ -92,6 +92,20 @@ export const MANUAL = [
         <li><strong>Sem resposta da Sefin:</strong> use <em>Consultar na Sefin</em> antes de reenviar; a nota pode já ter sido gerada e é recuperada sem duplicar.</li>
       </ul>
       <p class="dica">Em produção restrita as notas são de teste e não têm valor fiscal.</p>`,
+  },
+  {
+    id: 'orcamentos', titulo: 'Orçamentos', resumo: 'Propostas de serviço que o cliente aprova e viram nota fiscal, inclusive em partes.',
+    corpo: `
+      <p>Em <strong>Orçamentos</strong> você monta a proposta de serviços para o cliente, envia, acompanha a resposta e, aprovada, transforma em nota fiscal.</p>
+      <ol>
+        <li><strong>Novo orçamento:</strong> escolha o cliente cadastrado (ou digite nome, e-mail e WhatsApp de quem ainda não é cliente), inclua um ou mais serviços com quantidade e valor, desconto, validade e condições.</li>
+        <li><strong>Enviar:</strong> <em>Ver PDF</em> abre a proposta no papel timbrado da empresa; <em>Enviar por e-mail</em> manda o PDF anexo; <em>WhatsApp</em> abre a conversa com a mensagem pronta (baixe o PDF para anexar). Enviar marca o orçamento como Enviado.</li>
+        <li><strong>Resposta do cliente:</strong> use <em>Cliente aprovou</em> ou <em>Cliente recusou</em> (com o motivo). Passada a validade sem resposta, o orçamento aparece como Vencido. <em>Voltar a rascunho</em> reabre a edição.</li>
+        <li><strong>Converter em nota:</strong> escolha uma nota somando os serviços ou só um item e informe o valor. A tela de emissão abre preenchida para você conferir; o orçamento só é vinculado quando a nota é emitida.</li>
+      </ol>
+      <h3>Faturamento parcial</h3>
+      <p>Para faturar em partes (sinal de 50%, por etapa), reduza o valor na conversão. O saldo continua no orçamento, que fica <strong>Faturado em parte</strong> até ser totalmente faturado. Nota rejeitada ou cancelada devolve o valor ao saldo.</p>
+      <p class="dica">Orçamento com nota emitida não pode mais ser alterado nem excluído; para uma nova proposta, use <em>Duplicar</em>. Só orçamentos de serviços.</p>`,
   },
   {
     id: 'notas', titulo: 'Notas emitidas', resumo: 'Consultar, baixar, enviar, cancelar, excluir e importar XML.',

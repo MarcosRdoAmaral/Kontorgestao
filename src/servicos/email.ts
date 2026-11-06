@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { db } from '../db.js';
 import { cifrarTexto, decifrarTexto } from '../cofre.js';
 import { ErroNegocio, danfse } from './emissao.js';
+import { obterOrcamento, orcamentoPdf } from './orcamentos.js';
 import { camposDesconhecidos, camposMes, dataBr, exemplo as exemploDe, moeda, renderizar, type ItemLista } from './modelos-email.js';
 
 export const ConfigSmtp = z.object({
@@ -202,6 +203,26 @@ export async function enviarPacoteContabilidade(escritorioId: number, para: stri
       from: `"${c.remetente_nome}" <${c.remetente_email}>`, to: para.join(', '), ...(empresa.email ? { replyTo: empresa.email } : {}),
       subject: msg.assunto, text: msg.texto, html: msg.html,
       attachments: [{ filename: nomeZip, content: zip, contentType: 'application/zip' }],
+    }));
+  } catch (e) { throw new ErroNegocio(traduzirErro(e), 502); }
+}
+
+/** Orçamento em PDF para o cliente. Marca o orçamento como enviado. */
+export async function enviarOrcamentoPorEmail(escritorioId: number, empresaId: number, orcamentoId: number, para: string[]) {
+  const c = lerConfig(escritorioId);
+  if (!c) throw new ErroNegocio('Configure o e-mail do escritório em E-mail antes de enviar.');
+  const o = obterOrcamento(empresaId, orcamentoId);
+  const emp = db.prepare('SELECT razao_social, nome_fantasia, email FROM empresas WHERE id = ?').get(empresaId) as any;
+  const nome = emp.nome_fantasia || emp.razao_social;
+  const { pdf, nome: arquivo } = await orcamentoPdf(empresaId, orcamentoId);
+  const validade = o.validade ? ` O orçamento vale até ${dataBr(o.validade)}.` : '';
+  const texto = `Olá${o.cliente ? `, ${o.cliente}` : ''}!\n\nSegue em anexo o orçamento nº ${o.numero}, no valor total de ${moeda(o.total)}.${validade}\n\nQualquer dúvida é só responder este e-mail.\n\n${nome}`;
+  const esc = (t: string) => t.replace(/&/g, '&amp;').replace(/</g, '&lt;');
+  try {
+    await fabrica(c).sendMail(assinar(escritorioId, {
+      from: `"${c.remetente_nome}" <${c.remetente_email}>`, to: para.join(', '), ...(emp.email ? { replyTo: emp.email } : {}),
+      subject: `Orçamento nº ${o.numero} - ${nome}`, text: texto, html: `<div style="font-family:Arial,sans-serif;font-size:14px;line-height:1.5">${esc(texto).replace(/\n/g, '<br>')}</div>`,
+      attachments: [{ filename: arquivo, content: pdf, contentType: 'application/pdf' }],
     }));
   } catch (e) { throw new ErroNegocio(traduzirErro(e), 502); }
 }

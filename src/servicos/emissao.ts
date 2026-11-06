@@ -87,6 +87,9 @@ export const EntradaEmissao = z.object({
   infoComplementar: z.string().max(2000).nullish(),
   /** Tipo de documento (tributação) usado nesta nota; em branco vale o do serviço ou o padrão da empresa. */
   tipoDocumentoId: z.number().int().nullish(),
+  /** Nota emitida a partir de um orçamento (e, se for o caso, de um item dele). */
+  orcamentoId: z.number().int().nullish(),
+  orcamentoItemId: z.number().int().nullish(),
   ibscbs: z.object({ indFinal: z.union([z.literal(0), z.literal(1)]), cIndOp: z.string(), indDest: z.union([z.literal(0), z.literal(1)]), cst: z.string(), cClassTrib: z.string() }).nullish(),
   /** Totais aproximados de tributos (Lei 12.741) — usado por empresas não optantes do Simples. */
   pTotTrib: z.object({ fed: z.number().min(0).max(100).nullish(), est: z.number().min(0).max(100).nullish(), mun: z.number().min(0).max(100).nullish() }).nullish(),

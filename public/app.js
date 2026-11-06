@@ -419,12 +419,12 @@ async function iniciar() {
 
 /** A tela pertence a algum módulo liberado para o usuário? (o servidor confere de novo em cada chamada) */
 function telaPermitida(nome) {
-  const modulo = { painel: 'painel', emitir: 'emitir', notas: 'notas', nota: 'notas', cobrancas: 'cobrancas', banco: 'empresas', despesas: 'despesas', compras: 'compras', entradas: 'compras', 'compra-nova': 'compras', 'nfe-sefaz': 'compras', tributacao: 'tributacao', extrato: 'despesas', cartao: 'despesas', agenda: 'emitir', relatorios: 'relatorios', tomadores: 'tomadores', servicos: 'servicos', empresas: 'empresas' }[nome];
+  const modulo = { painel: 'painel', emitir: 'emitir', orcamentos: 'emitir', orcamento: 'emitir', notas: 'notas', nota: 'notas', cobrancas: 'cobrancas', banco: 'empresas', despesas: 'despesas', compras: 'compras', entradas: 'compras', 'compra-nova': 'compras', 'nfe-sefaz': 'compras', tributacao: 'tributacao', extrato: 'despesas', cartao: 'despesas', agenda: 'emitir', relatorios: 'relatorios', tomadores: 'tomadores', servicos: 'servicos', empresas: 'empresas' }[nome];
   return nome === 'config' || nome === 'inicio' || (modulo && estado.usuario.modulos.includes(modulo));
 }
 
 const rotas = {
-  inicio: telaInicio, painel: telaPainel, emitir: telaEmitir, notas: telaNotas, nota: telaNota,
+  inicio: telaInicio, painel: telaPainel, emitir: telaEmitir, orcamentos: telaOrcamentos, orcamento: telaOrcamento, notas: telaNotas, nota: telaNota,
   cobrancas: telaCobrancas, banco: telaBanco, despesas: telaDespesas, compras: telaCompras, entradas: telaCompras, 'compra-nova': telaCompraManual, 'nfe-sefaz': telaNfeSefaz, tributacao: telaTributacao, extrato: telaExtrato, cartao: telaCartao, agenda: telaAgenda, relatorios: telaRelatorios, tomadores: telaTomadores, servicos: telaServicos, empresas: telaEmpresas, config: telaConfig,
 };
 
@@ -517,7 +517,8 @@ async function telaPainel() {
 async function telaEmitir(param) {
   // #/emitir/ID corrige uma nota recusada; #/emitir/clonar-ID emite uma nota nova a partir de outra já emitida
   const clonarId = /^clonar-(\d+)$/.exec(param ?? '')?.[1];
-  const notaIdCorrecao = clonarId ? null : param;
+  const orcP = /^orc-(\d+):(\d*):([\d.]*)$/.exec(param ?? '');
+  const notaIdCorrecao = clonarId || orcP ? null : param;
   const origem = clonarId ? await api('GET', `/api/notas/${clonarId}`) : null;
   if (origem && origem.empresa_id !== estado.empresaId && estado.empresas.some((x) => x.id === origem.empresa_id)) {
     estado.empresaId = origem.empresa_id;
@@ -532,7 +533,10 @@ async function telaEmitir(param) {
   ]);
   const tiposSaida = (tiposResp.tipos ?? []).filter((t) => t.sentido === 'SAIDA');
   const corrigindo = notaIdCorrecao ? await api('GET', `/api/notas/${notaIdCorrecao}`) : null;
+  // #/emitir/orc-ID:ITEM:VALOR emite a nota de um orçamento (item e valor em branco = soma dos itens, pelo saldo)
+  const orc = orcP ? await api('GET', `/api/empresas/${e.id}/orcamentos/${orcP[1]}/conversao?${new URLSearchParams({ ...(orcP[2] ? { item: orcP[2] } : {}), ...(orcP[3] ? { valor: orcP[3] } : {}) })}`) : null;
   let p = corrigindo?.payload ?? {};
+  if (orc) p = { tomadorId: orc.tomadorId, servicoId: orc.servicoId, descricao: orc.descricao, valor: orc.valor.toFixed(2).replace('.', ','), competencia: hoje() };
   if (origem) {
     // nota importada do portal (ou antiga) não guarda o formulário original: completa com o que está no registro
     p = { tomadorId: origem.tomador_id, descricao: origem.descricao, valor: String(origem.valor_servico).replace('.', ','), ...(origem.payload?.importadoDoPortal ? {} : origem.payload) };
@@ -541,9 +545,10 @@ async function telaEmitir(param) {
 
   conteudo.innerHTML = `
     <div class="topo"><div>
-      <h1>${corrigindo ? `Corrigir e reenviar DPS nº ${corrigindo.n_dps}` : origem ? 'Emitir nota a partir de outra' : 'Emitir nota'}</h1>
+      <h1>${corrigindo ? `Corrigir e reenviar DPS nº ${corrigindo.n_dps}` : orc ? `Emitir nota do orçamento nº ${orc.numero}` : origem ? 'Emitir nota a partir de outra' : 'Emitir nota'}</h1>
       <p class="sutil">${esc(e.razao_social)} — ${fmtDoc(e.documento)}</p>
     </div></div>
+    ${orc ? `<div class="banner">Orçamento nº ${orc.numero} de <strong>${esc(orc.cliente ?? '')}</strong>: valor desta nota ${brl(orc.valor)} (ainda falta faturar até ${brl(orc.maximo)}). Confira o cliente, o serviço e a tributação antes de emitir. ${orc.tomadorId ? '' : '<strong>Este orçamento não tem cliente cadastrado: escolha ou cadastre o cliente abaixo.</strong>'}</div>` : ''}
     ${origem ? `<div class="banner">Copiado da ${origem.n_nfse ? `NFS-e nº ${origem.n_nfse}` : `DPS ${origem.serie}/${origem.n_dps}`} (${esc(origem.tomador_nome ?? 'sem tomador')}, ${brl(origem.valor_servico)}). Isto emite uma <strong>nota nova</strong>, com outro número: confira a competência, o valor e a descrição antes de emitir. <a href="#/nota/${origem.id}">Voltar para a nota</a></div>` : ''}
     ${e.ambiente === 2 ? '<div class="banner teste">Esta empresa está em produção restrita: as notas são de teste e não têm valor fiscal.</div>' : ''}
     ${e.modo_emissao === 'PORTAL' ? '<div class="banner teste">Esta empresa emite as notas pelo portal do Emissor Nacional (sem certificado). Aqui você gera o <strong>boleto</strong>; a nota é emitida no portal e importada em <a href="#/notas">Notas emitidas</a>.</div>' : !e.tem_certificado ? '<div class="banner teste">Cadastre o certificado A1 da empresa antes de emitir.</div>' : ''}
@@ -949,6 +954,7 @@ async function telaEmitir(param) {
     for (const k in pad) f.elements[k].value = pad[k];
     recalcular();
   };
+  if (orc?.servicoId) { f.servicoId.value = String(orc.servicoId); f.servicoId.onchange(); f.descricao.value = orc.descricao; f.valor.value = p.valor; }
   f.onsubmit = async (ev) => {
     ev.preventDefault();
     if (portal && !f.tomadorId.value) { $('#erro-emitir').textContent = 'Escolha o cliente para gerar o boleto.'; return; }
@@ -963,6 +969,7 @@ async function telaEmitir(param) {
       aliquota: d.aliquota, tribISSQN: Number(d.tribISSQN), issRetido: Number(d.issRetido), tpImunidade: Number(d.tribISSQN) === 2 ? tpImunidadeServico : null,
       retencoes: { irrf: d.irrf, cp: d.cp, csll: d.csll, pis: d.pis, cofins: d.cofins, pPis: d.pPis, pCofins: d.pCofins }, infoComplementar: d.infoComplementar,
       pTotTrib: empresa()?.op_simp_nac === 1 ? { fed: d.tFed, est: d.tEst, mun: d.tMun } : undefined,
+      ...(orc ? { orcamentoId: orc.orcamentoId, orcamentoItemId: orc.itemId } : {}),
     };
     const botao = f.querySelector('[type=submit]');
     botao.disabled = true; botao.textContent = 'Enviando à Sefin…';
@@ -3836,6 +3843,7 @@ async function telaBackup() {
 // Ícones (traço fino, herdam a cor do tema), menu com ícones, sininho e usuário no topo
 // ---------------------------------------------------------------------------
 const ICONES = {
+  orcamentos: 'M6 3h9l4 4v14H6zM14 3v5h5M9 12h7M9 16h7',
   inicio: 'M3 10.5 12 3l9 7.5V20a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z',
   visao: 'M4 4h7v7H4zM13 4h7v7h-7zM4 13h7v7H4zM13 13h7v7h-7z',
   painel: 'M4 4h7v7H4zM13 4h7v7h-7zM4 13h7v7H4zM13 13h7v7h-7z',
@@ -4099,5 +4107,189 @@ function escolherAvatar(aoMudar) {
       try { await api('PUT', '/api/me/avatar', { avatar }); estado.usuario.avatar = avatar; pintarAvatarTopo(); d.close(); aviso('Avatar atualizado.'); aoMudar?.(); }
       catch (e) { $('#erro-avatar').textContent = mensagemErro(e); }
     }));
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Orçamentos de serviços: propostas ao cliente que viram nota fiscal (inclusive em partes)
+// ---------------------------------------------------------------------------
+const ROTULO_ORC = { RASCUNHO: 'Rascunho', ENVIADO: 'Enviado', APROVADO: 'Aprovado', RECUSADO: 'Recusado', VENCIDO: 'Vencido', PARCIAL: 'Faturado em parte', FATURADO: 'Faturado' };
+const COR_ORC = { RASCUNHO: 'var(--tinta-2, #8a8a8a)', ENVIADO: 'var(--ambar)', APROVADO: 'var(--verde)', RECUSADO: 'var(--vermelho)', VENCIDO: 'var(--vermelho)', PARCIAL: 'var(--ambar)', FATURADO: 'var(--verde)' };
+const seloOrc = (s) => `<span class="selo-estado" style="--c:${COR_ORC[s] ?? 'var(--laranja)'}">${ROTULO_ORC[s] ?? s}</span>`;
+
+async function telaOrcamentos() {
+  const e = empresa();
+  const lista = await api('GET', `/api/empresas/${e.id}/orcamentos`);
+  const f = (telaOrcamentos.filtro ??= { sit: '', q: '' });
+  const abertos = lista.filter((o) => ['ENVIADO', 'APROVADO', 'PARCIAL'].includes(o.situacao));
+  conteudo.innerHTML = `
+    <div class="topo"><div><h1>Orçamentos</h1><p class="sutil">${esc(e.razao_social)}: propostas de serviço que viram nota fiscal.</p></div>
+      <button type="button" class="primario" id="novo-orc">Novo orçamento</button></div>
+    ${lista.length ? `<p class="sutil">${abertos.length} em andamento, somando ${brl(abertos.reduce((s, o) => s + o.saldo, 0))} ainda por faturar.</p>
+    <div class="filtros"><label>Situação <select id="orc-sit"><option value="">Todas</option>${Object.entries(ROTULO_ORC).map(([k, v]) => `<option value="${k}">${v}</option>`).join('')}</select></label>
+      <label>Buscar <input id="orc-q" type="search" placeholder="Cliente ou número" value="${esc(f.q)}"></label></div>` : ''}
+    <div id="orc-lista"></div>`;
+  $('#novo-orc').onclick = () => { location.hash = '#/orcamento/novo'; };
+  const pintar = () => {
+    const q = f.q.trim().toLowerCase();
+    const l = lista.filter((o) => (!f.sit || o.situacao === f.sit) && (!q || String(o.numero) === q || (o.cliente ?? '').toLowerCase().includes(q)));
+    $('#orc-lista').innerHTML = l.length ? `<div class="rolagem"><table class="tabela"><thead><tr><th>Nº</th><th>Cliente</th><th>Criado em</th><th>Validade</th><th class="num">Total</th><th class="num">A faturar</th><th>Situação</th></tr></thead><tbody>
+      ${l.map((o) => `<tr class="clicavel" data-orc="${o.id}"><td>${o.numero}</td><td>${esc(o.cliente ?? '')}</td><td>${dataBr(o.criado_em)}</td><td>${dataBr(o.validade) || '—'}</td><td class="num">${brl(o.total)}</td><td class="num">${o.situacao === 'RECUSADO' ? '—' : brl(o.saldo)}</td><td>${seloOrc(o.situacao)}</td></tr>`).join('')}
+      </tbody></table></div>` : `<div class="vazio"><p>${lista.length ? 'Nenhum orçamento com este filtro.' : 'Nenhum orçamento ainda. Monte o primeiro e, quando o cliente aprovar, transforme em nota fiscal.'}</p></div>`;
+    $('#orc-lista').querySelectorAll('[data-orc]').forEach((tr) => (tr.onclick = () => { location.hash = `#/orcamento/${tr.dataset.orc}`; }));
+  };
+  if ($('#orc-sit')) { $('#orc-sit').value = f.sit; $('#orc-sit').onchange = (ev) => { f.sit = ev.target.value; pintar(); }; $('#orc-q').oninput = (ev) => { f.q = ev.target.value; pintar(); }; }
+  pintar();
+}
+
+async function telaOrcamento(param) {
+  const e = empresa();
+  const novo = !param || param === 'novo';
+  const [tomadores, servicos, o] = await Promise.all([
+    api('GET', `/api/empresas/${e.id}/tomadores`), api('GET', `/api/empresas/${e.id}/servicos`),
+    novo ? null : api('GET', `/api/empresas/${e.id}/orcamentos/${param}`),
+  ]);
+  const travado = !!o?.notas.length; // com notas emitidas o orçamento não muda mais
+  const mais = (d) => new Date(Date.parse(hoje()) + d * 864e5).toISOString().slice(0, 10);
+  const base = `/api/empresas/${e.id}/orcamentos`;
+  const itens0 = o?.itens.length ? o.itens : [{ servico_id: null, descricao: '', quantidade: 1, valor_unitario: '' }];
+  const num = (v) => (v === '' || v == null ? '' : String(v).replace('.', ','));
+
+  conteudo.innerHTML = `
+    <div class="topo"><div>
+      <h1>${novo ? 'Novo orçamento' : `Orçamento nº ${o.numero}`} ${o ? seloOrc(o.situacao) : ''}</h1>
+      <p class="sutil">${esc(e.razao_social)}${o ? ` · criado em ${dataBr(o.criado_em)}${o.enviado_em ? ` · enviado em ${dataBr(o.enviado_em)}` : ''}${o.motivo_recusa ? ` · motivo da recusa: ${esc(o.motivo_recusa)}` : ''}` : ''}</p>
+    </div><a href="#/orcamentos">Voltar para a lista</a></div>
+    ${o ? `<div class="acoes" id="orc-acoes">
+      <button type="button" id="o-pdf">Ver PDF</button><button type="button" id="o-email">Enviar por e-mail</button><button type="button" id="o-wa">WhatsApp</button>
+      ${!travado && o.situacao_base === 'RASCUNHO' ? '<button type="button" id="o-enviado">Marcar como enviado</button>' : ''}
+      ${!travado && ['RASCUNHO', 'ENVIADO'].includes(o.situacao_base) ? '<button type="button" id="o-aprovado">Cliente aprovou</button>' : ''}
+      ${!travado && o.situacao_base !== 'RECUSADO' ? '<button type="button" id="o-recusado">Cliente recusou</button>' : ''}
+      ${!travado && o.situacao_base !== 'RASCUNHO' ? '<button type="button" id="o-reabrir">Voltar a rascunho</button>' : ''}
+      ${o.saldo > 0 && o.situacao_base !== 'RECUSADO' ? '<button type="button" class="primario" id="o-converter">Converter em nota</button>' : ''}
+      <button type="button" id="o-duplicar">Duplicar</button>
+      ${!travado ? '<button type="button" class="perigo" id="o-excluir">Excluir</button>' : ''}</div>` : ''}
+    ${travado ? '<div class="banner">Este orçamento já tem notas emitidas e não pode mais ser alterado. Para uma nova proposta, use <strong>Duplicar</strong>.</div>' : ''}
+    <form id="form-orc"><fieldset ${travado ? 'disabled' : ''}><legend>Cliente</legend>
+      <div class="grade">
+        <label class="largo">Cliente cadastrado <select name="tomadorId"><option value="">Ainda não cadastrado (informar o nome abaixo)</option>
+          ${tomadores.map((t) => `<option value="${t.id}" ${o?.tomador_id === t.id ? 'selected' : ''}>${esc(t.nome)}${t.documento ? ' — ' + fmtDoc(t.documento) : ''}</option>`).join('')}</select></label>
+        <label>Nome (quem recebe o orçamento) <input name="clienteNome" maxlength="200" value="${esc(o?.cliente_nome ?? '')}"></label>
+        <label>E-mail <input name="clienteEmail" type="email" value="${esc(o?.cliente_email ?? '')}"></label>
+        <label>WhatsApp <input name="clienteFone" value="${esc(o?.cliente_fone ?? '')}" placeholder="(47) 99999-9999"></label>
+      </div><p class="dica">Para emitir a nota é preciso um cliente cadastrado; se ainda não existe, cadastre em Clientes e escolha-o aqui.</p></fieldset>
+      <fieldset ${travado ? 'disabled' : ''}><legend>Serviços</legend>
+        <div class="rolagem"><table class="tabela" id="orc-itens"><thead><tr><th>Serviço cadastrado</th><th>Descrição</th><th class="num">Qtd.</th><th class="num">Valor unit. (R$)</th><th class="num">Total</th><th></th></tr></thead><tbody></tbody></table></div>
+        <div class="acoes"><button type="button" id="orc-add">Adicionar item</button></div>
+        <div class="grade"><label>Desconto (R$) <input name="desconto" data-num inputmode="decimal" value="${num(o?.desconto || '')}"></label>
+          <label>Validade da proposta <input type="date" name="validade" value="${o ? o.validade ?? '' : mais(15)}"></label></div>
+        <p class="total-orc" id="orc-total"></p></fieldset>
+      <fieldset ${travado ? 'disabled' : ''}><legend>Condições</legend><div class="grade">
+        <label class="largo">Condições de pagamento e prazo <textarea name="condicoes" rows="3" maxlength="2000" placeholder="Ex.: 50% na aprovação e o restante na entrega">${esc(o?.condicoes ?? '')}</textarea></label>
+        <label class="largo">Observações <textarea name="observacoes" rows="3" maxlength="2000">${esc(o?.observacoes ?? '')}</textarea></label></div></fieldset>
+      <p class="erro" id="erro-orc"></p>
+      ${travado ? '' : `<div class="acoes"><button type="submit" class="primario">${novo ? 'Criar orçamento' : 'Salvar alterações'}</button></div>`}
+    </form>
+    ${o?.notas.length ? `<h2>Notas emitidas deste orçamento</h2><div class="rolagem"><table class="tabela"><thead><tr><th>Nota</th><th>Competência</th><th class="num">Valor</th><th>Situação</th></tr></thead><tbody>
+      ${o.notas.map((n) => `<tr class="clicavel" data-nota="${n.id}"><td>${n.n_nfse ? `NFS-e ${n.n_nfse}` : `DPS ${n.n_dps}`}</td><td>${dataBr(n.competencia)}</td><td class="num">${brl(n.valor)}</td><td>${carimbo(n.status)}</td></tr>`).join('')}</tbody></table></div>
+      <p class="sutil">Faturado ${brl(o.faturado)} de ${brl(o.total)}${o.saldo > 0 ? ` · falta ${brl(o.saldo)}` : ''}. Nota rejeitada ou cancelada devolve o valor ao saldo.</p>` : ''}`;
+
+  const f = $('#form-orc'), corpoTabela = $('#orc-itens tbody');
+  const totais = () => {
+    let bruto = 0;
+    corpoTabela.querySelectorAll('tr').forEach((tr) => {
+      const q = numero(tr.querySelector('[name=quantidade]').value) || 0, v = numero(tr.querySelector('[name=valorUnitario]').value) || 0;
+      const t = Math.round((q * v + Number.EPSILON) * 100) / 100; bruto += t; tr.querySelector('.t-item').textContent = brl(t);
+    });
+    const desc = numero(f.desconto.value) || 0;
+    $('#orc-total').innerHTML = `Itens ${brl(bruto)}${desc ? ` · desconto ${brl(desc)}` : ''} · <strong>Total ${brl(bruto - desc)}</strong>`;
+  };
+  const addItem = (i) => {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `<td><select name="servicoId"><option value="">Livre</option>${servicos.map((s) => `<option value="${s.id}" ${i.servico_id === s.id ? 'selected' : ''}>${esc(s.nome)}</option>`).join('')}</select></td>
+      <td><input name="descricao" maxlength="500" required value="${esc(i.descricao)}"></td>
+      <td><input name="quantidade" data-num inputmode="decimal" value="${num(i.quantidade)}" size="5" required></td>
+      <td><input name="valorUnitario" data-num inputmode="decimal" value="${num(i.valor_unitario)}" size="10" required></td>
+      <td class="num t-item"></td><td><button type="button" class="me-mini" data-rm title="Remover item" aria-label="Remover item">×</button></td>`;
+    tr.querySelector('[name=servicoId]').onchange = (ev) => {
+      const s = servicos.find((x) => x.id === Number(ev.target.value)); if (!s) return;
+      tr.querySelector('[name=descricao]').value = s.descricao; if (s.valor_padrao) tr.querySelector('[name=valorUnitario]').value = num(s.valor_padrao); totais();
+    };
+    tr.querySelector('[data-rm]').onclick = () => { if (corpoTabela.rows.length > 1) { tr.remove(); totais(); } };
+    tr.oninput = totais;
+    corpoTabela.appendChild(tr);
+  };
+  itens0.forEach(addItem);
+  $('#orc-add').onclick = () => { addItem({ servico_id: null, descricao: '', quantidade: 1, valor_unitario: '' }); totais(); corpoTabela.lastElementChild.querySelector('[name=servicoId]').focus(); };
+  f.desconto.oninput = totais; totais();
+
+  f.onsubmit = async (ev) => {
+    ev.preventDefault();
+    const d = lerForm(f);
+    const itens = [...corpoTabela.querySelectorAll('tr')].map((tr) => ({
+      servicoId: tr.querySelector('[name=servicoId]').value ? Number(tr.querySelector('[name=servicoId]').value) : null,
+      descricao: tr.querySelector('[name=descricao]').value.trim(), quantidade: numero(tr.querySelector('[name=quantidade]').value), valorUnitario: numero(tr.querySelector('[name=valorUnitario]').value) ?? 0,
+    }));
+    const corpo = { tomadorId: d.tomadorId ? Number(d.tomadorId) : null, clienteNome: d.clienteNome, clienteEmail: d.clienteEmail ?? '', clienteFone: d.clienteFone, validade: d.validade ?? '', condicoes: d.condicoes, observacoes: d.observacoes, desconto: d.desconto ?? 0, itens };
+    try {
+      const r = novo ? await api('POST', base, corpo) : await api('PUT', `${base}/${o.id}`, corpo);
+      aviso(novo ? `Orçamento nº ${r.numero} criado.` : 'Orçamento salvo.');
+      location.hash = `#/orcamento/${r.id}`; if (!novo) telaOrcamento(String(r.id));
+    } catch (err) { $('#erro-orc').textContent = mensagemErro(err); }
+  };
+  if (!o) return;
+
+  const recarregar = () => telaOrcamento(String(o.id));
+  const mudar = async (acao, motivo) => { try { await api('POST', `${base}/${o.id}/situacao`, { acao, motivo }); recarregar(); } catch (err) { aviso(mensagemErro(err)); } };
+  conteudo.querySelectorAll('[data-nota]').forEach((tr) => (tr.onclick = () => { location.hash = `#/nota/${tr.dataset.nota}`; }));
+  $('#o-pdf').onclick = () => baixar(`${base}/${o.id}/pdf`, `Orcamento_${o.numero}.pdf`, true);
+  $('#o-enviado') && ($('#o-enviado').onclick = () => mudar('ENVIADO'));
+  $('#o-aprovado') && ($('#o-aprovado').onclick = () => mudar('APROVADO'));
+  $('#o-reabrir') && ($('#o-reabrir').onclick = () => mudar('REABRIR'));
+  $('#o-recusado') && ($('#o-recusado').onclick = () => { const m = prompt('Motivo da recusa (opcional):'); if (m !== null) mudar('RECUSADO', m); });
+  $('#o-duplicar').onclick = async () => { try { const r = await api('POST', `${base}/${o.id}/duplicar`); aviso(`Orçamento nº ${r.numero} criado a partir deste.`); location.hash = `#/orcamento/${r.id}`; } catch (err) { aviso(mensagemErro(err)); } };
+  $('#o-excluir') && ($('#o-excluir').onclick = async () => {
+    if (!confirm(`Excluir o orçamento nº ${o.numero}?`)) return;
+    try { await api('DELETE', `${base}/${o.id}`); aviso('Orçamento excluído.'); location.hash = '#/orcamentos'; } catch (err) { aviso(mensagemErro(err)); }
+  });
+  $('#o-email').onclick = () => abrirDialogo(`<form id="form-oe"><h2>Enviar orçamento nº ${o.numero} por e-mail</h2>
+    <p class="sutil">O PDF segue em anexo, com o e-mail do escritório configurado.</p>
+    <label>Para <input name="para" required value="${esc(o.email ?? '')}" placeholder="cliente@empresa.com"></label>
+    <p class="erro" id="erro-oe"></p><div class="acoes"><button type="submit" class="primario">Enviar</button><button type="button" id="oe-cancelar">Cancelar</button></div></form>`, (d) => {
+    $('#oe-cancelar').onclick = () => d.close();
+    $('#form-oe').onsubmit = async (ev) => {
+      ev.preventDefault(); const b = ev.submitter ?? ev.target.querySelector('[type=submit]'); b.disabled = true; b.textContent = 'Enviando…';
+      try { await api('POST', `${base}/${o.id}/email`, { para: ev.target.para.value.split(/[,;\s]+/).filter(Boolean) }); d.close(); aviso('Orçamento enviado por e-mail.'); recarregar(); }
+      catch (err) { $('#erro-oe').textContent = mensagemErro(err); b.disabled = false; b.textContent = 'Enviar'; }
+    };
+  });
+  $('#o-wa').onclick = () => abrirDialogo(`<form id="form-ow"><h2>WhatsApp para ${esc(o.cliente ?? '')}</h2>
+    <p class="sutil">O WhatsApp abre com a mensagem pronta. Baixe o PDF antes e anexe na conversa.</p>
+    <label>WhatsApp do cliente (com DDD) <input name="fone" required value="${esc(o.fone ?? '')}" placeholder="(47) 99999-9999"></label>
+    <label>Mensagem <textarea name="msg" rows="6">${esc(`Olá${o.cliente ? `, ${o.cliente}` : ''}! Segue o orçamento nº ${o.numero} da ${e.nome_fantasia || e.razao_social}, no valor de ${brl(o.total)}.${o.validade ? ` Ele vale até ${dataBr(o.validade)}.` : ''}\nQualquer dúvida, é só me chamar.`)}</textarea></label>
+    <div class="acoes"><button type="button" id="ow-pdf">Baixar o PDF</button><button type="submit" class="primario">Abrir o WhatsApp</button><button type="button" id="ow-cancelar">Cancelar</button></div></form>`, (d) => {
+    $('#ow-cancelar').onclick = () => d.close();
+    $('#ow-pdf').onclick = () => baixar(`${base}/${o.id}/pdf`, `Orcamento_${o.numero}.pdf`);
+    $('#form-ow').onsubmit = async (ev) => {
+      ev.preventDefault();
+      let fone = ev.target.fone.value.replace(/\D/g, ''); if (fone.length <= 11) fone = '55' + fone;
+      window.open(`https://wa.me/${fone}?text=${encodeURIComponent(ev.target.msg.value)}`, '_blank');
+      d.close(); if (o.situacao_base === 'RASCUNHO') mudar('ENVIADO');
+    };
+  });
+  $('#o-converter') && ($('#o-converter').onclick = () => {
+    const livres = o.itens.filter((i) => i.total - i.faturado > 0.004);
+    abrirDialogo(`<form id="form-oc"><h2>Converter o orçamento nº ${o.numero} em nota</h2>
+      <p class="sutil">Falta faturar <strong>${brl(o.saldo)}</strong>. A tela de emissão abre preenchida para você conferir antes de emitir.</p>
+      <label class="linha"><input type="radio" name="modo" value="todos" checked> Uma nota somando os serviços do orçamento</label>
+      ${livres.length > 1 || (livres.length === 1 && o.itens.length > 1) ? livres.map((i) => `<label class="linha"><input type="radio" name="modo" value="${i.id}"> Só o item: ${esc(i.descricao.slice(0, 60))} (falta ${brl(i.total - i.faturado)})</label>`).join('') : ''}
+      <label>Valor desta nota (R$) <input name="valor" data-num inputmode="decimal" value="${num(o.saldo)}"></label>
+      <p class="dica">Para faturar em partes (por exemplo, 50% de sinal), reduza o valor. O resto continua disponível neste orçamento.</p>
+      <div class="acoes"><button type="submit" class="primario">Abrir a emissão</button><button type="button" id="oc-cancelar">Cancelar</button></div></form>`, (d) => {
+      const valor = $('#form-oc').valor, modo = () => $('#form-oc').querySelector('[name=modo]:checked').value;
+      $('#form-oc').querySelectorAll('[name=modo]').forEach((r) => (r.onchange = () => { const i = o.itens.find((x) => String(x.id) === modo()); valor.value = num(i ? Math.min(i.total - i.faturado, o.saldo) : o.saldo); }));
+      $('#oc-cancelar').onclick = () => d.close();
+      $('#form-oc').onsubmit = (ev) => { ev.preventDefault(); const v = numero(valor.value); d.close(); location.hash = `#/emitir/orc-${o.id}:${modo() === 'todos' ? '' : modo()}:${v ?? ''}`; };
+    });
   });
 }

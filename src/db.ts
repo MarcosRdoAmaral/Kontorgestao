@@ -735,6 +735,48 @@ const migracoes: string[] = [
   CREATE UNIQUE INDEX idx_cobrancas_cora ON cobrancas(cora_id) WHERE cora_id IS NOT NULL;`,
   // avatar escolhido pelo usuário (Configurações > Minha conta)
   `ALTER TABLE usuarios ADD COLUMN avatar TEXT;`,
+  // orçamentos de serviços, com itens e vínculo com as notas emitidas a partir deles
+  `CREATE TABLE orcamentos (
+    id INTEGER PRIMARY KEY,
+    empresa_id INTEGER NOT NULL REFERENCES empresas(id),
+    numero INTEGER NOT NULL,
+    tomador_id INTEGER REFERENCES tomadores(id),
+    cliente_nome TEXT,
+    cliente_email TEXT,
+    cliente_fone TEXT,
+    situacao TEXT NOT NULL DEFAULT 'RASCUNHO' CHECK (situacao IN ('RASCUNHO','ENVIADO','APROVADO','RECUSADO')),
+    validade TEXT,
+    condicoes TEXT,
+    observacoes TEXT,
+    desconto REAL NOT NULL DEFAULT 0,
+    total REAL NOT NULL,
+    motivo_recusa TEXT,
+    enviado_em TEXT,
+    decidido_em TEXT,
+    criado_por INTEGER REFERENCES usuarios(id),
+    criado_em TEXT NOT NULL DEFAULT (datetime('now')),
+    atualizado_em TEXT NOT NULL DEFAULT (datetime('now')),
+    UNIQUE (empresa_id, numero)
+  );
+  CREATE INDEX ix_orcamentos_empresa ON orcamentos(empresa_id, criado_em);
+  CREATE TABLE orcamento_itens (
+    id INTEGER PRIMARY KEY,
+    orcamento_id INTEGER NOT NULL REFERENCES orcamentos(id) ON DELETE CASCADE,
+    ordem INTEGER NOT NULL,
+    servico_id INTEGER REFERENCES servicos(id),
+    descricao TEXT NOT NULL,
+    quantidade REAL NOT NULL DEFAULT 1,
+    valor_unitario REAL NOT NULL,
+    total REAL NOT NULL
+  );
+  CREATE TABLE orcamento_notas (
+    id INTEGER PRIMARY KEY,
+    orcamento_id INTEGER NOT NULL REFERENCES orcamentos(id) ON DELETE CASCADE,
+    nota_id INTEGER NOT NULL UNIQUE REFERENCES notas(id),
+    item_id INTEGER REFERENCES orcamento_itens(id) ON DELETE SET NULL,
+    valor REAL NOT NULL,
+    criado_em TEXT NOT NULL DEFAULT (datetime('now'))
+  );`,
 ];
 
 export function migrar(): void {

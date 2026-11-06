@@ -60,6 +60,7 @@ const REGRAS: Regra[] = [
   { r: /^\/api\/(usuarios|email\/config|email\/testar|email\/modelos|email\/assinatura|backup|tabelas|licenca|contabilidade)(\/|$)/, mod: 'adm' },
   { r: /^\/api\/empresas(\/\d+)?$|^\/api\/empresas\/\d+\/(certificado|logo)$/, mod: ['empresas'] },
   { m: 'POST', r: /^\/api\/tomadores\/\d+\/descricao$/, mod: ['emitir', 'tomadores'] },
+  { r: /^\/api\/empresas\/\d+\/orcamentos(\/\d+(\/(duplicar|situacao|conversao|pdf|email))?)?$/, mod: ['emitir'] },
   { m: 'GET', r: /^\/api\/empresas\/\d+\/tomadores$/, mod: ['tomadores', 'emitir', 'cobrancas'] },
   { r: /^\/api\/empresas\/\d+\/tomadores(\/planilha\/(analisar|importar))?$|^\/api\/tomadores\/\d+$/, mod: ['tomadores'] },
   { m: 'GET', r: /^\/api\/empresas\/\d+\/servicos$/, mod: ['servicos', 'emitir'] },
