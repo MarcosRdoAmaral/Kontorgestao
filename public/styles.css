@@ -588,3 +588,68 @@ main:focus, main:focus-visible { outline: none; }
 label.linha { display: flex; align-items: center; gap: 8px; margin: 6px 0; }
 label.linha input { width: auto; }
 .selo-estado { display: inline-block; padding: 2px 10px; border-radius: 999px; font-size: .75rem; font-weight: 600; color: var(--c); border: 1px solid currentColor; vertical-align: middle; white-space: nowrap; }
+
+/* Orçamento: layout em cartões (cliente, serviços, resumo e rodapé) */
+.orc-topo { display: flex; align-items: center; gap: 16px; margin-bottom: 18px; }
+.orc-topo h1 { margin: 0 0 2px; }
+.orc-topo p { margin: 0; }
+.orc-ico { flex: none; width: 46px; height: 46px; border-radius: 50%; display: grid; place-items: center; background: var(--laranja-fundo); border: 1px solid var(--laranja-forte); color: var(--laranja); }
+.orc-ico .ico { width: 22px; height: 22px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.orc-ico.grande { width: 62px; height: 62px; border-radius: 16px; background: var(--superficie); }
+.orc-ico.grande .ico { width: 30px; height: 30px; }
+.orc-fs { border: 0; padding: 0; margin: 0; background: none; min-width: 0; }
+.orc-card { background: var(--superficie); border: 1px solid var(--linha); border-radius: 16px; padding: 18px 20px; margin: 0 0 16px; }
+.orc-cab { display: flex; align-items: center; gap: 14px; margin-bottom: 14px; flex-wrap: wrap; }
+.orc-tit { flex: 1; min-width: 180px; }
+.orc-tit h2 { margin: 0; font-size: 1.15rem; }
+.orc-tit p { margin: 2px 0 0; color: var(--tinta-2); font-size: .9rem; }
+.orc-busca, .orc-add { display: flex; gap: 12px; align-items: center; }
+.orc-busca { margin-bottom: 12px; }
+.orc-add { flex: 1 1 360px; justify-content: flex-end; }
+.orc-campo { display: flex; align-items: center; gap: 10px; background: var(--campo); border: 1px solid var(--borda-campo); border-radius: 12px; padding: 0 14px; flex: 1; min-width: 0; margin: 0; }
+.orc-campo:focus-within { border-color: var(--laranja); box-shadow: 0 0 0 3px var(--foco); }
+.orc-campo .ico, .orc-ouro .ico, .orc-r .ico, .orc-info .ico { width: 20px; height: 20px; flex: none; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.orc-campo .ico { color: var(--tinta-2); }
+.orc-campo input { border: 0; background: none; box-shadow: none; padding: 12px 0; }
+.orc-campo input:focus { box-shadow: none; }
+.orc-ouro { display: inline-flex; align-items: center; gap: 8px; white-space: nowrap; padding: 11px 18px; border-radius: 12px; border: 1.5px solid var(--laranja); color: var(--laranja); background: transparent; font-weight: 600; text-decoration: none; cursor: pointer; }
+.orc-ouro:hover { background: var(--laranja-fundo); }
+.orc-info { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; background: var(--campo); border: 1px solid var(--borda-campo); border-radius: 12px; padding: 12px 16px; }
+.orc-info label { display: flex; align-items: center; gap: 12px; margin: 0; min-width: 0; color: var(--tinta-2); }
+.orc-info label > span, .orc-r > span { display: flex; flex-direction: column; min-width: 0; flex: 1; }
+.orc-info small, .orc-r small { color: var(--tinta-2); font-size: .78rem; }
+.orc-info input { border: 0; background: none; padding: 2px 0; box-shadow: none; color: var(--tinta); }
+.orc-info input:focus { box-shadow: none; border-bottom: 1px solid var(--laranja); border-radius: 0; }
+.orc-tab { width: 100%; border-collapse: collapse; }
+.orc-tab th { text-align: left; font-weight: 600; font-size: .9rem; padding: 12px 10px; background: var(--superficie-2); }
+.orc-tab th:first-child { border-radius: 10px 0 0 10px; } .orc-tab th:last-child { border-radius: 0 10px 10px 0; }
+.orc-tab td { padding: 10px; border-bottom: 1px solid var(--linha); vertical-align: middle; }
+.orc-tab .c { text-align: center; } .orc-tab .num { text-align: right; white-space: nowrap; }
+.orc-tab select, .orc-tab input { background: transparent; border-color: transparent; padding: 7px 8px; }
+.orc-tab select:hover, .orc-tab input:hover { border-color: var(--borda-campo); }
+.orc-tab td:nth-child(2) input { color: var(--laranja); }
+.orc-qtd { display: inline-flex; align-items: center; gap: 8px; }
+.orc-qtd button { width: 32px; height: 32px; padding: 0; border-radius: 50%; display: grid; place-items: center; font-size: 1.1rem; line-height: 1; }
+.orc-qtd input { width: 56px; text-align: center; background: var(--campo); border-color: var(--borda-campo); }
+.orc-val { width: 120px; text-align: right; }
+.orc-lixo { border: 0; background: none; padding: 6px; color: var(--tinta); cursor: pointer; }
+.orc-lixo:hover { color: var(--vermelho); background: none; }
+.orc-lixo .ico { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.orc-vazio { margin: 4px 0 0; color: var(--tinta-2); text-align: center; padding: 18px 0; }
+.orc-resumo { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); background: var(--superficie); border: 1px solid var(--linha); border-radius: 16px; margin: 0 0 16px; }
+.orc-r { display: flex; align-items: center; gap: 14px; padding: 16px 20px; margin: 0; border-left: 1px solid var(--linha); color: var(--laranja); }
+.orc-r:first-child { border-left: 0; }
+.orc-r .ico { width: 30px; height: 30px; }
+.orc-r input { background: var(--campo); border-color: var(--borda-campo); padding: 8px 10px; }
+.orc-r strong { color: var(--tinta); font-size: 1.3rem; }
+.orc-tot strong { color: var(--laranja); font-size: 1.9rem; }
+.orc-cond summary { cursor: pointer; font-weight: 600; }
+.orc-cond .grade { margin-top: 12px; }
+.orc-rodape { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-top: 4px; }
+.orc-cancelar { display: inline-flex; align-items: center; gap: 10px; padding: 14px 28px; border-radius: 14px; border: 1.5px solid var(--borda-botao); color: var(--tinta); text-decoration: none; font-weight: 600; }
+.orc-cancelar:hover { border-color: var(--laranja); }
+.orc-salvar { display: inline-flex; align-items: center; gap: 10px; padding: 14px 32px; border-radius: 14px; background: var(--laranja); border-color: var(--laranja); color: var(--sobre-acento); font-weight: 700; font-size: 1.05rem; cursor: pointer; }
+.orc-salvar:hover { background: var(--laranja-hover); }
+.orc-cancelar .ico, .orc-salvar .ico { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round; }
+@media (max-width: 760px) { .orc-busca, .orc-add { flex-wrap: wrap; } .orc-r { border-left: 0; border-top: 1px solid var(--linha); } .orc-r:first-child { border-top: 0; } }
+#orc-acoes { margin-bottom: 16px; }

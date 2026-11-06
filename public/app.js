@@ -3843,6 +3843,20 @@ async function telaBackup() {
 // Ícones (traço fino, herdam a cor do tema), menu com ícones, sininho e usuário no topo
 // ---------------------------------------------------------------------------
 const ICONES = {
+  'o-busca': 'M11 4a7 7 0 1 0 0 14 7 7 0 0 0 0-14zM21 21l-4.3-4.3',
+  'o-mais': 'M12 5v14M5 12h14',
+  'o-lixo': 'M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3',
+  'o-users': 'M9 11a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7zM2.5 20c.5-3.6 3-5.5 6.5-5.5s6 1.9 6.5 5.5M16 4.5a3.2 3.2 0 0 1 0 6.2M18 14.8c2 .6 3.2 2.2 3.5 5.2',
+  'o-caixa': 'M12 3 20 7.5v9L12 21l-8-4.5v-9zM4 7.5l8 4.5 8-4.5M12 12v9',
+  'o-cal': 'M5 5h14a1 1 0 0 1 1 1v13a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1zM4 10h16M8 3v4M16 3v4',
+  'o-tag': 'M3 12V4h8l10 10-8 8zM7.5 8.5h.01',
+  'o-lista': 'M8 6h12M8 12h12M8 18h12M4 6h.01M4 12h.01M4 18h.01',
+  'o-moedas': 'M4 6c0-1.7 3.6-3 8-3s8 1.3 8 3-3.6 3-8 3-8-1.3-8-3zM4 6v6c0 1.7 3.6 3 8 3s8-1.3 8-3V6M4 12v6c0 1.7 3.6 3 8 3s8-1.3 8-3v-6',
+  'o-ok': 'M5 12.5l4.5 4.5L19 7',
+  'o-voltar': 'M15 5l-7 7 7 7',
+  'o-predio': 'M5 21V4h10v17M15 9h4v12M3 21h18M8 8h4M8 12h4M8 16h4',
+  'o-email': 'M3 6h18v12H3zM3 7l9 7 9-7',
+  'o-zap': 'M4 20l1.2-4.1A8 8 0 1 1 8.2 19zM9 9c0 3 3 6 6 6l1-1.5-2-1-1 .8c-1-.4-2-1.4-2.4-2.4l.8-1-1-2z',
   orcamentos: 'M6 3h9l4 4v14H6zM14 3v5h5M9 12h7M9 16h7',
   inicio: 'M3 10.5 12 3l9 7.5V20a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z',
   visao: 'M4 4h7v7H4zM13 4h7v7h-7zM4 13h7v7H4zM13 13h7v7h-7z',
@@ -4152,14 +4166,18 @@ async function telaOrcamento(param) {
   const travado = !!o?.notas.length; // com notas emitidas o orçamento não muda mais
   const mais = (d) => new Date(Date.parse(hoje()) + d * 864e5).toISOString().slice(0, 10);
   const base = `/api/empresas/${e.id}/orcamentos`;
-  const itens0 = o?.itens.length ? o.itens : [{ servico_id: null, descricao: '', quantidade: 1, valor_unitario: '' }];
+  const itens0 = o?.itens.length ? o.itens : [];
   const num = (v) => (v === '' || v == null ? '' : String(v).replace('.', ','));
 
+  const tomOpc = (t) => `${t.nome}${t.documento ? ' — ' + fmtDoc(t.documento) : ''}`;
+  const tomAtual = o?.tomador_id ? tomadores.find((t) => t.id === o.tomador_id) : null;
+  const cabeca = (ic, titulo, sub, extra = '') => `<header class="orc-cab"><span class="orc-ico">${icone(ic)}</span><div class="orc-tit"><h2>${titulo}</h2><p>${sub}</p></div>${extra}</header>`;
+
   conteudo.innerHTML = `
-    <div class="topo"><div>
+    <div class="orc-topo"><span class="orc-ico grande">${icone('orcamentos')}</span><div>
       <h1>${novo ? 'Novo orçamento' : `Orçamento nº ${o.numero}`} ${o ? seloOrc(o.situacao) : ''}</h1>
-      <p class="sutil">${esc(e.razao_social)}${o ? ` · criado em ${dataBr(o.criado_em)}${o.enviado_em ? ` · enviado em ${dataBr(o.enviado_em)}` : ''}${o.motivo_recusa ? ` · motivo da recusa: ${esc(o.motivo_recusa)}` : ''}` : ''}</p>
-    </div><a href="#/orcamentos">Voltar para a lista</a></div>
+      <p class="sutil">${novo ? 'Crie um orçamento de forma rápida e organizada' : `${esc(e.razao_social)} · criado em ${dataBr(o.criado_em)}${o.enviado_em ? ` · enviado em ${dataBr(o.enviado_em)}` : ''}${o.motivo_recusa ? ` · motivo da recusa: ${esc(o.motivo_recusa)}` : ''}`}</p>
+    </div></div>
     ${o ? `<div class="acoes" id="orc-acoes">
       <button type="button" id="o-pdf">Ver PDF</button><button type="button" id="o-email">Enviar por e-mail</button><button type="button" id="o-wa">WhatsApp</button>
       ${!travado && o.situacao_base === 'RASCUNHO' ? '<button type="button" id="o-enviado">Marcar como enviado</button>' : ''}
@@ -4170,25 +4188,41 @@ async function telaOrcamento(param) {
       <button type="button" id="o-duplicar">Duplicar</button>
       ${!travado ? '<button type="button" class="perigo" id="o-excluir">Excluir</button>' : ''}</div>` : ''}
     ${travado ? '<div class="banner">Este orçamento já tem notas emitidas e não pode mais ser alterado. Para uma nova proposta, use <strong>Duplicar</strong>.</div>' : ''}
-    <form id="form-orc"><fieldset ${travado ? 'disabled' : ''}><legend>Cliente</legend>
-      <div class="grade">
-        <label class="largo">Cliente cadastrado <select name="tomadorId"><option value="">Ainda não cadastrado (informar o nome abaixo)</option>
-          ${tomadores.map((t) => `<option value="${t.id}" ${o?.tomador_id === t.id ? 'selected' : ''}>${esc(t.nome)}${t.documento ? ' — ' + fmtDoc(t.documento) : ''}</option>`).join('')}</select></label>
-        <label>Nome (quem recebe o orçamento) <input name="clienteNome" maxlength="200" value="${esc(o?.cliente_nome ?? '')}"></label>
-        <label>E-mail <input name="clienteEmail" type="email" value="${esc(o?.cliente_email ?? '')}"></label>
-        <label>WhatsApp <input name="clienteFone" value="${esc(o?.cliente_fone ?? '')}" placeholder="(47) 99999-9999"></label>
-      </div><p class="dica">Para emitir a nota é preciso um cliente cadastrado; se ainda não existe, cadastre em Clientes e escolha-o aqui.</p></fieldset>
-      <fieldset ${travado ? 'disabled' : ''}><legend>Serviços</legend>
-        <div class="rolagem"><table class="tabela" id="orc-itens"><thead><tr><th>Serviço cadastrado</th><th>Descrição</th><th class="num">Qtd.</th><th class="num">Valor unit. (R$)</th><th class="num">Total</th><th></th></tr></thead><tbody></tbody></table></div>
-        <div class="acoes"><button type="button" id="orc-add">Adicionar item</button></div>
-        <div class="grade"><label>Desconto (R$) <input name="desconto" data-num inputmode="decimal" value="${num(o?.desconto || '')}"></label>
-          <label>Validade da proposta <input type="date" name="validade" value="${o ? o.validade ?? '' : mais(15)}"></label></div>
-        <p class="total-orc" id="orc-total"></p></fieldset>
-      <fieldset ${travado ? 'disabled' : ''}><legend>Condições</legend><div class="grade">
+    <form id="form-orc"><fieldset class="orc-fs" ${travado ? 'disabled' : ''}>
+      <section class="orc-card">
+        ${cabeca('o-users', 'Cliente', 'Selecione ou cadastre um cliente')}
+        <div class="orc-busca">
+          <label class="orc-campo orc-pesq">${icone('o-busca')}<input id="orc-cli" list="orc-cli-lista" autocomplete="off" placeholder="Buscar cliente por nome ou CNPJ…" value="${esc(tomAtual ? tomOpc(tomAtual) : '')}" aria-label="Buscar cliente"></label>
+          <a class="orc-ouro" href="#/tomadores">${icone('o-mais')} Novo cliente</a>
+        </div>
+        <datalist id="orc-cli-lista">${tomadores.map((t) => `<option value="${esc(tomOpc(t))}"></option>`).join('')}</datalist>
+        <input type="hidden" name="tomadorId" value="${o?.tomador_id ?? ''}">
+        <div class="orc-info">
+          <label>${icone('o-predio')}<span><small>Nome</small><input name="clienteNome" maxlength="200" value="${esc(o?.cliente_nome ?? '')}" placeholder="Quem recebe o orçamento"></span></label>
+          <label>${icone('o-email')}<span><small>E-mail</small><input name="clienteEmail" type="email" value="${esc(o?.cliente_email ?? '')}" placeholder="cliente@empresa.com.br"></span></label>
+          <label>${icone('o-zap')}<span><small>WhatsApp</small><input name="clienteFone" value="${esc(o?.cliente_fone ?? '')}" placeholder="(47) 99999-9999"></span></label>
+        </div>
+        <p class="dica">Para emitir a nota é preciso um cliente cadastrado; se ainda não existe, use <strong>Novo cliente</strong> e escolha-o aqui.</p>
+      </section>
+      <section class="orc-card">
+        ${cabeca('o-caixa', 'Serviços', 'Adicione os serviços que serão orçados', `<div class="orc-add"><label class="orc-campo orc-pesq">${icone('o-busca')}<input id="orc-serv" list="orc-serv-lista" autocomplete="off" placeholder="Buscar serviço…" aria-label="Buscar serviço"></label><button type="button" id="orc-add" class="orc-ouro">${icone('o-mais')} Adicionar serviço</button></div>`)}
+        <datalist id="orc-serv-lista">${servicos.map((sv) => `<option value="${esc(sv.nome)}"></option>`).join('')}</datalist>
+        <div class="rolagem"><table class="orc-tab" id="orc-itens"><thead><tr><th>Serviço</th><th>Descrição</th><th class="c">Qtd.</th><th class="num">Valor unit. (R$)</th><th class="num">Total (R$)</th><th class="c">Ações</th></tr></thead><tbody></tbody></table></div>
+        <p class="orc-vazio" id="orc-vazio">Nenhum serviço adicionado ainda. Busque um serviço acima ou clique em “Adicionar serviço” para um item livre.</p>
+      </section>
+      <section class="orc-resumo">
+        <label class="orc-r">${icone('o-cal')}<span><small>Validade da proposta</small><input type="date" name="validade" value="${o ? o.validade ?? '' : mais(15)}"></span></label>
+        <label class="orc-r">${icone('o-tag')}<span><small>Desconto (R$)</small><input name="desconto" data-num inputmode="decimal" value="${num(o?.desconto || '')}" placeholder="0,00"></span></label>
+        <div class="orc-r">${icone('o-lista')}<span><small>Itens</small><strong id="orc-n">0</strong></span></div>
+        <div class="orc-r orc-tot">${icone('o-moedas')}<span><small>Total do orçamento</small><strong id="orc-total"></strong></span></div>
+      </section>
+      <details class="orc-card orc-cond" ${o?.condicoes || o?.observacoes ? 'open' : ''}><summary>Condições de pagamento e observações</summary><div class="grade">
         <label class="largo">Condições de pagamento e prazo <textarea name="condicoes" rows="3" maxlength="2000" placeholder="Ex.: 50% na aprovação e o restante na entrega">${esc(o?.condicoes ?? '')}</textarea></label>
-        <label class="largo">Observações <textarea name="observacoes" rows="3" maxlength="2000">${esc(o?.observacoes ?? '')}</textarea></label></div></fieldset>
+        <label class="largo">Observações <textarea name="observacoes" rows="3" maxlength="2000">${esc(o?.observacoes ?? '')}</textarea></label></div></details>
+      </fieldset>
       <p class="erro" id="erro-orc"></p>
-      ${travado ? '' : `<div class="acoes"><button type="submit" class="primario">${novo ? 'Criar orçamento' : 'Salvar alterações'}</button></div>`}
+      <div class="orc-rodape"><a class="orc-cancelar" href="#/orcamentos">${icone('o-voltar')} ${travado ? 'Voltar' : 'Cancelar'}</a>
+        ${travado ? '' : `<button type="submit" class="orc-salvar">${icone('o-ok')} ${novo ? 'Salvar orçamento' : 'Salvar alterações'}</button>`}</div>
     </form>
     ${o?.notas.length ? `<h2>Notas emitidas deste orçamento</h2><div class="rolagem"><table class="tabela"><thead><tr><th>Nota</th><th>Competência</th><th class="num">Valor</th><th>Situação</th></tr></thead><tbody>
       ${o.notas.map((n) => `<tr class="clicavel" data-nota="${n.id}"><td>${n.n_nfse ? `NFS-e ${n.n_nfse}` : `DPS ${n.n_dps}`}</td><td>${dataBr(n.competencia)}</td><td class="num">${brl(n.valor)}</td><td>${carimbo(n.status)}</td></tr>`).join('')}</tbody></table></div>
@@ -4197,30 +4231,47 @@ async function telaOrcamento(param) {
   const f = $('#form-orc'), corpoTabela = $('#orc-itens tbody');
   const totais = () => {
     let bruto = 0;
-    corpoTabela.querySelectorAll('tr').forEach((tr) => {
+    const linhas = corpoTabela.querySelectorAll('tr');
+    linhas.forEach((tr) => {
       const q = numero(tr.querySelector('[name=quantidade]').value) || 0, v = numero(tr.querySelector('[name=valorUnitario]').value) || 0;
       const t = Math.round((q * v + Number.EPSILON) * 100) / 100; bruto += t; tr.querySelector('.t-item').textContent = brl(t);
     });
     const desc = numero(f.desconto.value) || 0;
-    $('#orc-total').innerHTML = `Itens ${brl(bruto)}${desc ? ` · desconto ${brl(desc)}` : ''} · <strong>Total ${brl(bruto - desc)}</strong>`;
+    $('#orc-n').textContent = linhas.length; $('#orc-total').textContent = brl(Math.max(0, bruto - desc));
+    $('#orc-vazio').hidden = linhas.length > 0; $('#orc-itens').hidden = linhas.length === 0;
   };
   const addItem = (i) => {
     const tr = document.createElement('tr');
-    tr.innerHTML = `<td><select name="servicoId"><option value="">Livre</option>${servicos.map((s) => `<option value="${s.id}" ${i.servico_id === s.id ? 'selected' : ''}>${esc(s.nome)}</option>`).join('')}</select></td>
-      <td><input name="descricao" maxlength="500" required value="${esc(i.descricao)}"></td>
-      <td><input name="quantidade" data-num inputmode="decimal" value="${num(i.quantidade)}" size="5" required></td>
-      <td><input name="valorUnitario" data-num inputmode="decimal" value="${num(i.valor_unitario)}" size="10" required></td>
-      <td class="num t-item"></td><td><button type="button" class="me-mini" data-rm title="Remover item" aria-label="Remover item">×</button></td>`;
+    tr.innerHTML = `<td><select name="servicoId" aria-label="Serviço"><option value="">Livre</option>${servicos.map((sv) => `<option value="${sv.id}" ${i.servico_id === sv.id ? 'selected' : ''}>${esc(sv.nome)}</option>`).join('')}</select></td>
+      <td><input name="descricao" maxlength="500" required value="${esc(i.descricao)}" aria-label="Descrição"></td>
+      <td class="c"><div class="orc-qtd"><button type="button" data-menos aria-label="Diminuir">−</button><input name="quantidade" data-num inputmode="decimal" value="${num(i.quantidade)}" required aria-label="Quantidade"><button type="button" data-mais aria-label="Aumentar">+</button></div></td>
+      <td class="num"><input name="valorUnitario" data-num inputmode="decimal" value="${num(i.valor_unitario)}" required class="orc-val" aria-label="Valor unitário"></td>
+      <td class="num t-item"></td><td class="c"><button type="button" class="orc-lixo" data-rm title="Remover serviço" aria-label="Remover serviço">${icone('o-lixo')}</button></td>`;
+    const q = tr.querySelector('[name=quantidade]');
     tr.querySelector('[name=servicoId]').onchange = (ev) => {
-      const s = servicos.find((x) => x.id === Number(ev.target.value)); if (!s) return;
-      tr.querySelector('[name=descricao]').value = s.descricao; if (s.valor_padrao) tr.querySelector('[name=valorUnitario]').value = num(s.valor_padrao); totais();
+      const sv = servicos.find((x) => x.id === Number(ev.target.value)); if (!sv) return;
+      tr.querySelector('[name=descricao]').value = sv.descricao; if (sv.valor_padrao) tr.querySelector('[name=valorUnitario]').value = num(sv.valor_padrao); totais();
     };
-    tr.querySelector('[data-rm]').onclick = () => { if (corpoTabela.rows.length > 1) { tr.remove(); totais(); } };
+    tr.querySelector('[data-menos]').onclick = () => { q.value = num(Math.max(1, (numero(q.value) || 1) - 1)); totais(); };
+    tr.querySelector('[data-mais]').onclick = () => { q.value = num((numero(q.value) || 0) + 1); totais(); };
+    tr.querySelector('[data-rm]').onclick = () => { tr.remove(); totais(); };
     tr.oninput = totais;
     corpoTabela.appendChild(tr);
+    return tr;
   };
   itens0.forEach(addItem);
-  $('#orc-add').onclick = () => { addItem({ servico_id: null, descricao: '', quantidade: 1, valor_unitario: '' }); totais(); corpoTabela.lastElementChild.querySelector('[name=servicoId]').focus(); };
+  $('#orc-add').onclick = () => {
+    const campo = $('#orc-serv'), sv = servicos.find((x) => x.nome.toLowerCase() === campo.value.trim().toLowerCase());
+    const tr = addItem(sv ? { servico_id: sv.id, descricao: sv.descricao, quantidade: 1, valor_unitario: sv.valor_padrao ?? '' } : { servico_id: null, descricao: '', quantidade: 1, valor_unitario: '' });
+    campo.value = ''; totais(); tr.querySelector(sv ? '[name=quantidade]' : '[name=descricao]').focus();
+  };
+  // escolher o cliente cadastrado preenche nome, e-mail e WhatsApp; apagar a busca solta o vínculo
+  const campoCli = $('#orc-cli');
+  campoCli.oninput = () => {
+    const t = tomadores.find((x) => tomOpc(x) === campoCli.value);
+    if (t) { f.tomadorId.value = t.id; f.clienteNome.value = t.nome; f.clienteEmail.value = t.email ?? ''; f.clienteFone.value = t.fone ?? ''; }
+    else if (!campoCli.value.trim()) f.tomadorId.value = '';
+  };
   f.desconto.oninput = totais; totais();
 
   f.onsubmit = async (ev) => {
@@ -4230,6 +4281,7 @@ async function telaOrcamento(param) {
       servicoId: tr.querySelector('[name=servicoId]').value ? Number(tr.querySelector('[name=servicoId]').value) : null,
       descricao: tr.querySelector('[name=descricao]').value.trim(), quantidade: numero(tr.querySelector('[name=quantidade]').value), valorUnitario: numero(tr.querySelector('[name=valorUnitario]').value) ?? 0,
     }));
+    if (!itens.length) { $('#erro-orc').textContent = 'Adicione ao menos um serviço.'; return; }
     const corpo = { tomadorId: d.tomadorId ? Number(d.tomadorId) : null, clienteNome: d.clienteNome, clienteEmail: d.clienteEmail ?? '', clienteFone: d.clienteFone, validade: d.validade ?? '', condicoes: d.condicoes, observacoes: d.observacoes, desconto: d.desconto ?? 0, itens };
     try {
       const r = novo ? await api('POST', base, corpo) : await api('PUT', `${base}/${o.id}`, corpo);
