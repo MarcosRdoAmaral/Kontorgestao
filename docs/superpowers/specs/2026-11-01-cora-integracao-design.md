@@ -1,10 +1,10 @@
 # Integração com o banco Cora (Gestão Empresas e Gestão Contabilidade)
 
 ## Objetivo
-Cada empresa pode usar uma conta Cora. O sistema emite boleto com Pix pela API, dá baixa sozinho quando pagam, traz extrato e saldo, e cancela ou reemite pela API. O Ailos (CNAB) continua como está. O Gestão Empresas é feito primeiro; o Gestão Contabilidade recebe a mesma implementação em versão seguinte.
+Cada empresa pode usar uma conta Cora. O sistema emite boleto com Pix pela API, dá baixa sozinho quando pagam, traz extrato e saldo, e cancela ou reemite pela API. O convênio CNAB continua como está. O Gestão Empresas é feito primeiro; o Gestão Contabilidade recebe a mesma implementação em versão seguinte.
 
 ## Decisões aprovadas
-- Abordagem: Cora como segunda carteira da conta bancária da empresa (banco `Ailos` ou `Cora`). Sem mudar cadastro de cliente nem faturamento.
+- Abordagem: Cora como segunda carteira da conta bancária da empresa (banco do convênio ou `Cora`). Sem mudar cadastro de cliente nem faturamento.
 - Baixa por consulta periódica (10 min), sem webhook: o sistema roda no computador do cliente, sem endereço público.
 - Ainda não existe conta Cora com API habilitada para teste. Desenvolvimento contra API simulada; validação real fica pendente (ver Riscos).
 

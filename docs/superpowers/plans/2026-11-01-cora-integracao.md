@@ -3,11 +3,11 @@
 > Execução nativa, tarefa a tarefa. Spec: `docs/superpowers/specs/2026-11-01-cora-integracao-design.md`.
 
 **Objetivo:** emitir, baixar, cancelar e conciliar boletos (com Pix) e ler extrato da Cora pela API.
-**Arquitetura:** tabela própria `contas_cora` (em vez de colunas em `contas_bancarias`, que exigem agência/convênio do Ailos); cliente HTTP em `src/cobranca/cora.ts`; regras em `src/servicos/cora.ts`; a emissão é assíncrona (cobrança nasce `AGUARDANDO_BANCO` e é registrada logo em seguida), sem mexer nos pontos que chamam `criarCobranca`.
+**Arquitetura:** tabela própria `contas_cora` (em vez de colunas em `contas_bancarias`, que exigem agência/convênio do banco); cliente HTTP em `src/cobranca/cora.ts`; regras em `src/servicos/cora.ts`; a emissão é assíncrona (cobrança nasce `AGUARDANDO_BANCO` e é registrada logo em seguida), sem mexer nos pontos que chamam `criarCobranca`.
 **Restrições:** valores em centavos, mínimo R$ 5; `Idempotency-Key` guardada na cobrança; chave privada cifrada com `cifrarTexto` e nunca devolvida; URL da API trocável por `CORA_URL_TESTE` nos testes.
 
 ## Revisão do spec
-- Troca: `contas_cora` separada (justificativa acima). Cora ativa tem precedência para novas cobranças; as do Ailos já emitidas seguem por remessa/retorno.
+- Troca: `contas_cora` separada (justificativa acima). Cora ativa tem precedência para novas cobranças; as do convênio já emitidas seguem por remessa/retorno.
 - Erros 4xx não são repetidos sozinhos (aparece o motivo na cobrança); rede/5xx são repetidos pelo temporizador.
 - Desconto por pontualidade só vai à Cora quando vale até o vencimento (a API não tem data de desconto).
 
