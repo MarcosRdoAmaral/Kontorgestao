@@ -10,7 +10,7 @@ import { EdicaoUsuario, NovoUsuario, confirmarRecuperacao, criarUsuario, editarU
 import { config } from './config.js';
 import { ConfigSmtp, ListaEmails, assinaturaDoEscritorio, configPublica, enviarModeloTeste, enviarNotaPorEmail, enviarOrcamentoPorEmail, historicoEmails, previaModelo, salvarAssinatura, salvarConfig, testarConfig } from './servicos/email.js';
 import { ModeloEditado, listarModelos, restaurarModelo, salvarModelo } from './servicos/modelos-email.js';
-import { MODULOS_PAGOS, modulosLiberados, ativarLicenca, exigirLicenca, exigirLimite, PLANOS, SUPORTE_WHATSAPP, statusLicenca, usoAtual } from './licenca.js';
+import { MODULOS_PAGOS, modulosLiberados, ativarLicenca, exigirLicenca, exigirLimite, PLANOS, SUPORTE_WHATSAPP, statusLicenca, usoAtual, acessoDeSuporte } from './licenca.js';
 import { BoletoAvulso, EntradaFaturamento, enviarCobrancaPorEmail, faturar, gerarBoletoAvulso, listarCobrancas } from './servicos/faturamento.js';
 import { ContaCoraEntrada, obterContaCora, salvarContaCora, removerContaCora, testarCora, sincronizarTudo, cancelarNaCora } from './servicos/cora.js';
 import { ContaBancaria, obterModelosWhatsapp, reemitirCobranca, salvarModelosWhatsapp, boletoPdf, demonstrativoPdf, informarPix, ConfigPix, configPixPublica, gerarPixCobranca, gerarPixPendentes, salvarConfigPix, cancelarCobranca, gerarRemessaEmpresa, listarRemessas, marcarPago, obterCobranca, obterConta, obterRemessa, processarRetorno, salvarConta } from './servicos/cobranca.js';
@@ -177,9 +177,14 @@ export async function rotas(app: FastifyInstance) {
     const chave = nome.toUpperCase();
     if (loginBloqueado(chave)) return reply.code(429).send({ erro: 'Muitas tentativas. Aguarde alguns minutos e tente de novo.' });
     const usr = db.prepare('SELECT * FROM usuarios WHERE (login = ? OR email = ?) AND ativo = 1').get(chave, nome.toLowerCase()) as any;
-    if (!usr || !conferirSenha(c.senha, usr.senha_hash)) { registrarFalha(chave); return reply.code(401).send({ erro: 'Usuário ou senha incorretos.' }); }
+    // master (suporte Kontor): sem senha; entra só com código de suporte assinado, deste computador e ainda válido
+    let expiraSuporte: string | undefined;
+    if (usr?.mestre) {
+      try { expiraSuporte = acessoDeSuporte(c.senha); } catch { registrarFalha(chave); return reply.code(401).send({ erro: 'Usuário ou senha incorretos.' }); }
+      req.log.warn({ usuario: usr.login, expira: expiraSuporte }, 'Acesso de suporte (master) com código assinado');
+    } else if (!usr || !conferirSenha(c.senha, usr.senha_hash)) { registrarFalha(chave); return reply.code(401).send({ erro: 'Usuário ou senha incorretos.' }); }
     limparFalhas(chave);
-    return { token: gerarToken(usr.id), usuario: { id: usr.id, nome: usr.nome, login: usr.login, papel: usr.papel, tipo: usr.tipo }, trocar_senha: !!usr.trocar_senha };
+    return { token: gerarToken(usr.id, expiraSuporte ? Date.parse(expiraSuporte) : undefined), usuario: { id: usr.id, nome: usr.nome, login: usr.login, papel: usr.papel, tipo: usr.tipo }, trocar_senha: !!usr.trocar_senha };
   });
 
   // Esqueci minha senha: manda um código ao e-mail cadastrado; ao confirmá-lo a senha volta para a padrão.
@@ -190,9 +195,9 @@ export async function rotas(app: FastifyInstance) {
     return respostaRecuperacao;
   });
   app.post('/api/esqueci-senha/confirmar', async (req) => {
-    const d = z.object({ usuario: z.string().min(1), codigo: z.string().regex(/^\d{6}$/, 'O código tem 6 dígitos') }).parse(req.body);
-    confirmarRecuperacao(d.usuario, d.codigo);
-    return { ok: true, mensagem: 'Pronto! Sua senha agora é a senha padrão (Kontor2026). Entre com ela e o sistema pedirá que você crie uma nova.' };
+    const d = z.object({ usuario: z.string().min(1), codigo: z.string().regex(/^\d{6}$/, 'O código tem 6 dígitos'), nova: z.string().min(8, 'A nova senha precisa ter pelo menos 8 caracteres') }).parse(req.body);
+    confirmarRecuperacao(d.usuario, d.codigo, d.nova);
+    return { ok: true, mensagem: 'Pronto! Sua nova senha já vale. Entre com ela.' };
   });
 
   app.register(async (api) => {
@@ -231,8 +236,7 @@ export async function rotas(app: FastifyInstance) {
       return { ok: true };
     });
     api.post('/api/usuarios/:id/redefinir-senha', async (req) => {
-      redefinirSenha(u(req), Number((req.params as any).id));
-      return { ok: true };
+      return { ok: true, senhaProvisoria: redefinirSenha(u(req), Number((req.params as any).id)) };
     });
 
     // ---------- Lembretes do sininho do topo ----------

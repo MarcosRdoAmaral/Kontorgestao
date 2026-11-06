@@ -4,7 +4,7 @@
  * aqui (e a data/versão em MANUAL_VERSAO) antes de publicar a versão.
  * `corpo` é HTML escrito à mão (não recebe dados de usuário).
  */
-export const MANUAL_VERSAO = '3.36.2';
+export const MANUAL_VERSAO = '3.37.0';
 
 export const MANUAL = [
   {
@@ -276,7 +276,9 @@ export const MANUAL = [
     corpo: `
       <ul>
         <li><strong>Minha conta:</strong> altere sua senha.</li>
-        <li><strong>Usuários e acessos</strong> (administrador): crie usuários e libere por usuário as funcionalidades (emissão, notas, cobranças, relatórios etc.) e as empresas que cada um enxerga. A permissão <strong>Excluir registros</strong> é separada das demais: sem ela o usuário não vê nem consegue usar nenhuma exclusão (nota não autorizada, serviço, despesa, importação de extrato), mesmo tendo acesso à tela. O administrador sempre pode.</li>
+        <li><strong>Usuários e acessos</strong> (administrador): crie usuários e libere por usuário as funcionalidades (emissão, notas, cobranças, relatórios etc.) e as empresas que cada um enxerga. A permissão <strong>Excluir registros</strong> é separada das demais: sem ela o usuário não vê nem consegue usar nenhuma exclusão (nota não autorizada, serviço, despesa, importação de extrato), mesmo tendo acesso à tela. O administrador sempre pode. Ao criar um usuário sem senha ou ao <strong>redefinir a senha</strong>, o sistema gera uma <strong>senha provisória</strong> aleatória, mostrada uma única vez para você entregar à pessoa; no primeiro acesso ela cria a própria senha.</li>
+        <li><strong>Esqueci minha senha</strong> (tela de login): o sistema envia um código de 6 dígitos ao e-mail do usuário, e com ele a pessoa cria a senha nova na mesma hora.</li>
+        <li><strong>Usuário KONTOR</strong> (suporte): não tem senha. O suporte do Kontor só entra com um código gerado para este computador, que expira em poucas horas.</li>
         <li><strong>E-mail:</strong> servidor SMTP usado para enviar notas e boletos aos clientes e para a recuperação de senha.</li>
         <li><strong>Assinatura:</strong> na mesma aba, uma imagem (PNG ou JPG) que vai no fim de todos os e-mails aos clientes.</li>
         <li><strong>Modelos de e-mail:</strong> o texto de cada e-mail (nota, cancelamento, boleto, Pix e fechamento para a contabilidade). Clique nos campos automáticos (como <code>{{cliente}}</code> e <code>{{valor}}</code>) para inserir, veja a prévia ao vivo, envie um teste para você e, se quiser, restaure o texto sugerido. Se um campo estiver vazio em um envio, a linha dele não vai no e-mail.</li>
